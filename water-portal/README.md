@@ -3,8 +3,17 @@
 A map of the world (MapLibre globe + deck.gl) under a top bar for choosing the view
 (Country / Basin / Local) and a date range. The map has no basemap: it shows FAO's
 M49 countries (or, in the Basin view, the SDG 6 major basins), with lakes and rivers
-on top. In the Local view, the map shows WaPOR's actual evapotranspiration for the
-selected dekad, month or year. Clicking a country or basin drops a marker; clicking the ocean removes it.
+on top. In the Local view, the map shows WaPOR's actual evapotranspiration for any
+selected range, added up from WaPOR's dekadal, monthly and annual rasters; for a single
+dekad, a slider in its legend hides pixels whose
+NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, selecting a sub-basin runs FAO's water balance
+model for it and everything upstream of it: the map colours those sub-basins by precipitation,
+evapotranspiration, discharge or storage change over the selected range, and a panel shows its
+time series and a Sankey diagram of the network's water balance. In the Country view, a panel
+shows FAO AQUASTAT statistics for the selected country (or the World) in four topics (SDG 6.4,
+water resources, water use, irrigation): number tiles and charts, each with a map that goes with
+it. Hovering a tile or chart previews its map, clicking pins it (Escape unpins), and hovering a
+row in a regional chart picks out that region's countries. Clicking a country or basin drops a marker; clicking the ocean removes it.
 A debug window (drag it by its title, resize it from the corner) shows what's under
 the last click and the pointer, and the selected time range.
 
@@ -25,6 +34,7 @@ Other commands:
 | `npm run preview` | Serve the built `dist/` locally, to check a build |
 | `npm run typecheck` | Only check the TypeScript for errors |
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
+| `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
 | `npm run tiles` | Rebuild the country and border tiles (needs `tippecanoe` and `python3`; downloads ~160 MB the first time) |
 
 ## Project layout
@@ -37,15 +47,17 @@ water-portal/
 ├── vite.config.ts          Dev server / build settings (Vite)
 ├── public/                 Copied as-is into the site
 │   ├── data/               Country, major basin and sub-basin lists (name, ID, bounding
-│   │                       box; for sub-basins also their major basin and where they drain)
+│   │                       box; for sub-basins also their major basin, where they drain and area)
 │   └── tiles/              Vector tiles ({z}/{x}/{y}.pbf)
 │       ├── m49/            Country areas
 │       └── m49-borders/    Country borders
 ├── scripts/                Data preparation, not part of the website
 │   ├── build-tiles.sh      Download M49 polygons → tippecanoe → public/tiles/
 │   ├── build-lists.mjs     Country / basin / sub-basin lists for the top bar → public/data/
+│   ├── build-country-info.mjs  Each country's region (UNSD M49) and centre → public/data/
 │   └── rings-to-lines.py   Polygon outlines → lines
-├── data/                   Downloaded source data (not committed)
+├── data/                   Source data: downloaded boundaries (not committed) and
+│                           fao_sb_ids.json (sub-basin routes and areas, from fao-wapor-discharge)
 └── src/                    The application code
     ├── main.ts             Entry point: starts the map and the top bar, connects them
     ├── selection.ts        The current selection (point, country, basin)
@@ -54,16 +66,30 @@ water-portal/
     │   ├── theme.ts        Map colours (light and dark)
     │   ├── places.ts       What's at a point: country, major basin, sub-basin
     │   ├── sub-basin-network.ts  Sub-basins upstream of a sub-basin
-    │   ├── wapor-legend.ts Legend for the WaPOR raster
+    │   ├── wapor-legend.ts Legend for the WaPOR raster, with the NDVI quality slider
     │   └── layers/         One file per kind of layer
     │       ├── tile-urls.ts  Where each tile set lives (local or FAO's bucket)
-    │       ├── countries.ts  M49 country areas (land; what clicks hit)
+    │       ├── countries.ts  M49 country areas (land; what clicks hit), the selected one's outline,
+    │       │                 circles on countries (Country view)
     │       ├── borders.ts    M49 country borders
     │       ├── basins.ts     SDG 6 major basins and sub-basins: areas + outlines (sub-basins only shade the hovered one and those upstream)
     │       ├── water.ts      Lakes (HydroLAKES) and rivers
-    │       ├── wapor.ts      WaPOR v3 ETIa COG for a period (Local view)
+    │       ├── wapor.ts      WaPOR v3 ETIa for a range (Local view): one COG or a sum
+    │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
     │       └── marker.ts     The click marker
+    ├── basin/              Basin view: the water balance of the selected sub-basin
+    │   ├── calc_runoff.sql The model (copy of fao-wapor-discharge's sql/calc_runoff.sql)
+    │   ├── model.ts        Runs it in BigQuery for a network; period means
+    │   ├── variables.ts    PCP / AETI / Q / ΔS: labels, units, colour scales
+    │   ├── timeseries.ts   Time series charts (drag to choose the period)
+    │   ├── sankey.ts       Sankey diagram of the network's water balance
+    │   └── water-balance.ts  Connects selection, date range, model, map and panel
+    ├── country/            Country view: AQUASTAT statistics and the maps that go with them
+    │   ├── data.ts         Loads a topic's AQUASTAT variables in BigQuery; values per country and region
+    │   ├── charts.ts       Bar, 100 % stacked bar and line charts (SVG)
+    │   ├── cards.ts        Per topic: the number tiles and charts, and each one's map
+    │   └── country-panel.ts  The panel, preview / pin, the map colours, legend and tooltips
     ├── panels/
     │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
     │   ├── debug-panel.ts  Draggable window: click, time and hover state as a JSON tree
@@ -83,11 +109,22 @@ water-portal/
         ├── toolbar.css     Top bar
         ├── map.css         Map container
         ├── panels.css      Layers menu and debug window
+        ├── basin.css       Water balance panel, its legend and tooltips
+        ├── country.css     Country panel, chart cards, chart colours, its legend
         └── legend.css      WaPOR legend
 ```
 
 ## Notes
 
+- **Country statistics** come from FAO's AQUASTAT dissemination table
+  (`fao-maps.fao_aquastat_dissemination.mvw_aquastat`) through the same BigQuery proxy as the
+  Basin view's model, one query per topic (~300 KB, a few seconds), from 2010. AQUASTAT's latest
+  year is 2023: for a later year in the top bar the panel shows 2023 and says so. Regional rows
+  use AQUASTAT's own aggregates; where it has none (wastewater reuse, irrigation by source) they
+  are summed or area-weighted from the region's countries. Regions follow FAO's Water Portal (SDG
+  regions with some split into sub-regions), from UNSD's M49 table.
+- **Country circles** (proportional symbols) are drawn without a depth test like every layer,
+  so only those on the near side of the globe are kept.
 - **Date rules** are documented at the top of
   [src/toolbar/range-rules.ts](src/toolbar/range-rules.ts). When the system changes a
   date the user didn't touch (for example on switching view), that end of the slider
@@ -108,6 +145,25 @@ water-portal/
   newest periods are published with a delay; the legend then says so. The files are
   written with `INTERLEAVE=BAND`, which `MultiCOGLayer` 0.9 rejects even for one band;
   [patches/](patches/) fixes that and is applied by `npm install` (patch-package).
+- **Any range in the Local view** is a sum of published rasters with signs, e.g.
+  Feb–Nov 2025 = `A[2025] − M[2025-01] − M[2025-12]`
+  ([src/map/layers/wapor-plan.ts](src/map/layers/wapor-plan.ts)). Of the possible
+  sums it picks the cheapest to load, weighing each raster by its size (in 2024 a
+  month was 2.0× a dekad, a year 5.8×: Int32 and larger values) plus a fixed cost per
+  raster (existence check, header, a request per tile); so 7 months load as 7 M, 8 as
+  A − 4 M. Rasters not published yet are left out and the sum planned again. All
+  rasters share one grid, so each tile is summed on the CPU from the same tile of
+  each, as the total in mm. At full resolution this is exact (a month is the sum of
+  days × its dekads, a year the sum of its months, to WaPOR's rounding); the
+  overviews are averaged separately, so zoomed out it's close but not exact. A single
+  published dekad, month or year shows as is, in its own unit. The debug window's
+  `wapor` entry shows the equation, the number of rasters and the cost.
+- **The NDVI quality filter** (single dekads) loads `L1-QUAL-NDVI-D` as a second
+  source of the same layer, on the same grid: dekads since the last valid observation (0–255,
+  255 nodata). The shader drops pixels above the slider's value, so moving it fetches
+  nothing. The quality layer is published some dekads after AETI (in Oct 2026, up to
+  2026-08-D1); without it AETI shows unfiltered and the slider is disabled. Its
+  overviews are averages, so when zoomed out the filter acts on averaged gaps.
 - **Which WaPOR tiles load** is decided in [src/map/layers/wapor.ts](src/map/layers/wapor.ts),
   not by deck.gl-raster: one overview for the whole view (the coarsest whose pixels are
   at most 2 CSS pixels on screen; full resolution from about zoom 8), and only tiles on
@@ -115,6 +171,17 @@ water-portal/
   Mercator scale, which on a globe asks for ever finer tiles towards the poles and keeps
   the far side: over 16,000 tiles at zoom 9. The debug window's `wapor` entry shows the
   zoom, overview, pixel size and tile count.
+- **The water balance model** (Basin view) is
+  [fao-wapor-discharge](../../fao-wapor-discharge)'s `sql/calc_runoff.sql`, copied to
+  [src/basin/calc_runoff.sql](src/basin/calc_runoff.sql) (copy it again when it changes). It
+  runs on FAO's read-only BigQuery proxy (`data.apps.fao.org/api/v2/bigquery`, which sends
+  CORS headers), so [src/basin/model.ts](src/basin/model.ts) inlines the network's routes
+  instead of reading a routes table, and returns one row per sub-basin with arrays (the proxy
+  returns at most 50,000 rows). A run takes about 5 s for a small network and 20 s for the
+  biggest (Lower Mississippi, 766 sub-basins, ~7 MB); results are kept for the session. The
+  network is the selected sub-basin and everything upstream of it, as in FAO's
+  [WaPOR Discharge](https://storage.googleapis.com/fao-wapor-accounter/wapor-discharge/main.html)
+  app, which this view replicates.
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
 - The URL keeps the map position (`#zoom/lat/lon`), so a view can be shared as a link.

@@ -1,0 +1,322 @@
+/* Basin view: the water balance panel (right), the map legend with the variable
+   switch (bottom left, after .legend in legend.css) and the map tooltip. */
+
+/* --- Legend: variable switch ------------------------------------------------------- */
+.wb-legend {
+  width: 260px;
+}
+.wb-vars {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--ground);
+}
+.wb-vars button {
+  flex: 1;
+  font: 500 12px/1 var(--sans);
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 0;
+  cursor: pointer;
+}
+.wb-vars button:hover {
+  color: var(--ink);
+}
+.wb-vars button[aria-checked="true"] {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+/* --- Map tooltip --------------------------------------------------------------------- */
+.wb-tooltip,
+.sk-tip {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  max-width: 300px;
+  padding: 6px 8px;
+  font: 400 12px/1.45 var(--sans);
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.14);
+}
+
+/* --- Panel --------------------------------------------------------------------------- */
+.wb-panel {
+  position: fixed;
+  top: calc(var(--toolbar-h, 64px) + 12px);
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  width: min(460px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+}
+.wb-panel.collapsed {
+  bottom: auto;
+}
+.wb-panel.collapsed .wb-body {
+  display: none;
+}
+.wb-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 8px 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.wb-heading small {
+  font: 500 11px/1 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.wb-heading h2 {
+  margin: 4px 0 0;
+  font: 600 17px/1.25 var(--sans);
+}
+.wb-heading p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.wb-heading p:empty {
+  display: none;
+}
+.wb-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 14px 16px;
+}
+.wb-message {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.wb-message.error {
+  color: var(--snap);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Number tiles: the selected sub-basin's period means; they also switch the variable. */
+.wb-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.wb-stats button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px 6px;
+  text-align: left;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--var-color);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wb-stats button:hover {
+  border-color: var(--accent);
+  border-top-color: var(--var-color);
+}
+.wb-stats button[aria-checked="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  border-top-color: var(--var-color);
+}
+.wb-stat-label {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--muted);
+}
+.wb-stat-value {
+  font: 500 16px/1.2 var(--mono);
+}
+.wb-stat-unit {
+  font: 400 10px/1 var(--mono);
+  color: var(--muted);
+}
+
+.wb-section {
+  margin-top: 16px;
+}
+.wb-section h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 4px;
+  font: 600 13px/1.3 var(--sans);
+}
+.wb-section p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.wb-csv {
+  font: 500 10px/1 var(--sans);
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.wb-csv:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.wb-about {
+  margin: 18px 0 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.wb-stats button:focus-visible,
+.wb-vars button:focus-visible,
+.wb-csv:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Time series ------------------------------------------------------------------- */
+.wb-overview {
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+}
+.wb-overview svg,
+.wb-zoom svg,
+.wb-sankey svg {
+  display: block;
+}
+.ts-frame {
+  fill: none;
+  stroke: var(--line);
+}
+.ts-band {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+  stroke: var(--accent);
+  stroke-width: 1;
+  cursor: grab;
+}
+.ts-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+.ts-tick {
+  stroke: var(--muted);
+}
+.ts-label {
+  font: 400 10px var(--mono);
+  fill: var(--muted);
+}
+.ts-mean {
+  stroke: #d62728;
+  stroke-width: 1.2;
+  stroke-dasharray: 5 3;
+}
+.ts-zero {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.ts-cursor {
+  stroke: var(--muted);
+  stroke-dasharray: 2 2;
+}
+.ts-dot {
+  stroke: var(--surface);
+  stroke-width: 1.5;
+}
+.ts-readout {
+  font: 500 11px var(--mono);
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+}
+
+/* --- Sankey ------------------------------------------------------------------------- */
+.wb-sankey {
+  position: relative;
+}
+.sk-tip {
+  position: absolute;
+}
+.sk-band {
+  opacity: 0;
+  pointer-events: none;
+}
+.sk-band.shown {
+  opacity: 0.7;
+  pointer-events: auto;
+}
+.sankey.sk-hovering .sk-band {
+  opacity: 0;
+  pointer-events: none;
+}
+.sankey.sk-hovering .sk-band.on {
+  opacity: 0.8;
+  pointer-events: auto;
+}
+.sk-node {
+  fill: var(--muted);
+}
+.sk-basin.outlet .sk-node,
+.sk-basin.on .sk-node {
+  fill: var(--ink);
+}
+.sankey.sk-hovering .sk-basin:not(.on) .sk-node {
+  opacity: 0.45;
+}
+.sk-hit {
+  fill: transparent;
+}
+.sk-res.up {
+  fill: #4caf50;
+}
+.sk-res.down {
+  fill: #f44336;
+}
+.sk-label {
+  font: 500 11px var(--sans);
+  fill: var(--ink);
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+}
+.sk-axis {
+  font: 400 10px var(--mono);
+  fill: var(--muted);
+}
+.sk-id {
+  font: 400 10px var(--mono);
+  color: var(--muted);
+}
+
+/* On narrow screens the panel would cover the map: keep it to the lower half. */
+@media (max-width: 640px) {
+  .wb-panel {
+    top: 50vh;
+  }
+}

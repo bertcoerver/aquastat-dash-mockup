@@ -11,6 +11,8 @@ export interface SubBasin {
   majorBasin: number;
   /** The sub-basin it drains into; -999 for the sea, -888 for an inland sink. */
   downstream: number;
+  /** Area in km² (from fao_sb_ids.json; the water balance model needs it). */
+  area: number | null;
   bbox: [number, number, number, number];
 }
 

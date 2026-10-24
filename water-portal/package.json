@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "tiles": "./scripts/build-tiles.sh",
     "postinstall": "patch-package",
-    "lists": "node scripts/build-lists.mjs"
+    "lists": "node scripts/build-lists.mjs",
+    "country-info": "node scripts/build-country-info.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "~9.4.0",
@@ -20,6 +21,7 @@
     "@deck.gl/mesh-layers": "~9.4.0",
     "@developmentseed/deck.gl-geotiff": "0.9.0",
     "@developmentseed/deck.gl-raster": "0.9.0",
+    "@developmentseed/geotiff": "0.9.0",
     "@loaders.gl/core": "~4.5.4",
     "@loaders.gl/mvt": "~4.5.4",
     "@luma.gl/core": "~9.4.2",

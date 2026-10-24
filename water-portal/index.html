@@ -74,7 +74,6 @@
           <div class="slider-track" id="slider-track">
             <div class="slider-unavailable" id="slider-unavailable" hidden></div>
             <div class="slider-band" id="slider-band"></div>
-            <div class="slider-snaps" id="slider-snaps"></div>
           </div>
           <div class="slider-handle" id="start-handle" role="slider" tabindex="0" aria-label="Start date"></div>
           <div class="slider-handle" id="end-handle" role="slider" tabindex="0" aria-label="End date"></div>
@@ -115,6 +114,100 @@
       <div class="legend-ramp" id="wapor-ramp"></div>
       <div class="legend-ticks" id="wapor-ticks" aria-hidden="true"></div>
       <div class="legend-status" id="wapor-status" role="status"></div>
+      <!-- Dekads only: hide pixels with a long NDVI gap (src/map/wapor-legend.ts). -->
+      <div class="legend-quality" id="wapor-quality" hidden>
+        <label class="legend-quality-head" for="wapor-quality-input"
+          title="WaPOR L1-QUAL-NDVI-D: dekads since the last valid satellite observation of a pixel. AETI is modelled from it, so a longer gap means a less reliable value.">
+          NDVI quality filter
+        </label>
+        <input class="legend-quality-input" id="wapor-quality-input" type="range" min="0" step="1" value="0" />
+        <div class="legend-quality-ends" aria-hidden="true"><span>All</span><span>Observed</span></div>
+        <div class="legend-quality-value" id="wapor-quality-value"></div>
+        <div class="legend-status" id="wapor-quality-status" role="status"></div>
+      </div>
+    </aside>
+
+    <!-- Basin view: the water balance of the selected sub-basin (src/basin/water-balance.ts). -->
+    <aside class="legend wb-legend" id="wb-legend" hidden>
+      <div class="wb-vars" id="wb-legend-vars" role="radiogroup" aria-label="Map variable"></div>
+      <div class="legend-title" id="wb-legend-title"></div>
+      <div class="legend-period"><span id="wb-legend-period"></span><span id="wb-legend-unit"></span></div>
+      <div class="legend-ramp" id="wb-legend-ramp"></div>
+      <div class="legend-ticks" id="wb-legend-ticks" aria-hidden="true"></div>
+      <div class="legend-status" id="wb-legend-status" role="status"></div>
+    </aside>
+
+    <div class="wb-tooltip" id="wb-tooltip" hidden></div>
+
+    <!-- Country view: AQUASTAT statistics and the map that goes with each chart (src/country/country-panel.ts). -->
+    <aside class="legend cp-legend" id="cp-legend" hidden>
+      <div class="cp-legend-source" id="cp-legend-source"></div>
+      <div class="legend-title" id="cp-legend-title"></div>
+      <div class="legend-period"><span id="cp-legend-year"></span><span id="cp-legend-unit"></span></div>
+      <div id="cp-legend-scale"></div>
+      <div class="legend-status" id="cp-legend-status" role="status"></div>
+    </aside>
+
+    <div class="wb-tooltip" id="cp-tooltip" hidden></div>
+
+    <aside class="wb-panel cp-panel" id="cp-panel" aria-label="Country statistics" hidden>
+      <header class="wb-head">
+        <div class="wb-heading">
+          <small>AQUASTAT</small>
+          <h2 id="cp-title"></h2>
+          <p id="cp-subtitle"></p>
+        </div>
+        <button class="debug-button debug-collapse" id="cp-collapse" aria-expanded="true" aria-controls="cp-body" title="Collapse">–</button>
+      </header>
+      <div class="wb-body" id="cp-body">
+        <div class="wb-vars cp-topics" id="cp-topics" role="tablist" aria-label="Topic"></div>
+        <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
+        <p class="wb-message" id="cp-message"></p>
+        <div class="wb-stats cp-stats" id="cp-stats"></div>
+        <div id="cp-cards"></div>
+      </div>
+    </aside>
+
+    <aside class="wb-panel" id="wb-panel" aria-label="Water balance" hidden>
+      <header class="wb-head">
+        <div class="wb-heading">
+          <small>Water balance</small>
+          <h2 id="wb-title"></h2>
+          <p id="wb-subtitle"></p>
+        </div>
+        <button class="debug-button debug-collapse" id="wb-collapse" aria-expanded="true" aria-controls="wb-body" title="Collapse">–</button>
+      </header>
+      <div class="wb-body" id="wb-body">
+        <p class="wb-message" id="wb-message"></p>
+        <div id="wb-results" hidden>
+          <div class="wb-stats" id="wb-stats" role="radiogroup" aria-label="Variable"></div>
+
+          <section class="wb-section">
+            <h3>Map <button class="wb-csv" data-csv="map">CSV</button></h3>
+            <p id="wb-map-caption"></p>
+          </section>
+
+          <section class="wb-section">
+            <h3>Time series <button class="wb-csv" data-csv="timeseries">CSV</button></h3>
+            <p id="wb-ts-caption"></p>
+            <div class="wb-overview" id="wb-overview"></div>
+            <div class="wb-zoom" id="wb-zoom"></div>
+          </section>
+
+          <section class="wb-section">
+            <h3>Water balance <button class="wb-csv" data-csv="flows">CSV</button></h3>
+            <p id="wb-sankey-caption"></p>
+            <div class="wb-sankey" id="wb-sankey"></div>
+          </section>
+
+          <p class="wb-about">
+            Precipitation (PCP) and actual evapotranspiration (AETI): WaPOR v3 L1, dekadal means per
+            sub-basin. Runoff is routed downstream through the sub-basins as linear reservoirs (retention
+            factor 0.1 per month) to estimate discharge (Q) and storage change (ΔS); see Hoogeveen et al.
+            (2015). The model runs in BigQuery when a sub-basin is selected.
+          </p>
+        </div>
+      </div>
     </aside>
 
     <script type="module" src="/src/main.ts"></script>

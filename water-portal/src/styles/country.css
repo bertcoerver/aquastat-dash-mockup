@@ -1,0 +1,252 @@
+/* Country view: the statistics panel (built on the Basin view's .wb-panel, basin.css),
+   its chart cards and charts, and the map legend. */
+
+/* Chart colours: categorical slots 1–3, the World in grey, and two steps of one blue
+   for "base year" and "selected year". Dark mode has its own steps. */
+:root {
+  --c-1: #2a78d6;
+  --c-2: #eb6834;
+  --c-3: #1baf7a;
+  --c-world: #898781;
+  --c-base: #9ec5f4;
+  --c-now: #256abf;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --c-1: #3987e5;
+    --c-2: #d95926;
+    --c-3: #199e70;
+    --c-base: #256abf;
+    --c-now: #86b6ef;
+  }
+}
+:root[data-theme="dark"] {
+  --c-1: #3987e5;
+  --c-2: #d95926;
+  --c-3: #199e70;
+  --c-base: #256abf;
+  --c-now: #86b6ef;
+}
+
+/* --- Panel ----------------------------------------------------------------------------- */
+.cp-topics {
+  margin-bottom: 4px;
+}
+.cp-topics button[aria-selected="true"] {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+.cp-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.cp-stats {
+  margin-bottom: 4px;
+}
+.cp-stats button.mapped {
+  border-color: var(--accent);
+  border-top-color: var(--var-color);
+}
+.cp-stats button.pinned {
+  background: var(--accent-soft);
+}
+
+/* Cards: each one is a hover area that previews its map; a click pins it. */
+.cp-card {
+  margin-top: 10px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.cp-card.mapped {
+  border-color: var(--accent);
+}
+.cp-card.pinned {
+  box-shadow: inset 3px 0 0 var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
+}
+.cp-card:focus-visible,
+.cp-stats button:focus-visible,
+.cp-topics button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.cp-card h3 {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 3px;
+  font: 600 13px/1.3 var(--sans);
+}
+.cp-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.cp-pin {
+  display: none;
+  font: 500 10px/1 var(--sans);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.cp-card.pinned .cp-pin {
+  display: inline;
+}
+.cp-card > p {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* --- Charts ------------------------------------------------------------------------------ */
+.ch {
+  display: block;
+  overflow: visible;
+}
+.ch-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.ch-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ch-key i {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.ch-key[data-sub] {
+  padding: 1px 4px;
+  margin: 0 -4px;
+  border-radius: 4px;
+}
+.ch-key[data-sub]:hover {
+  color: var(--ink);
+  background: var(--ground);
+}
+.ch-row-label {
+  font: 400 11px var(--sans);
+  fill: var(--ink);
+}
+.ch-row-label.em {
+  font-weight: 600;
+}
+.ch-value {
+  font: 400 10px var(--mono);
+  fill: var(--muted);
+}
+.ch-value.muted {
+  font-style: italic;
+}
+.ch-in {
+  font: 500 10px var(--mono);
+  pointer-events: none;
+}
+.ch-in.light {
+  fill: #fff;
+}
+.ch-in.dark {
+  fill: #0b0b0b;
+}
+.ch-hit {
+  fill: transparent;
+}
+.ch-hit.em {
+  fill: var(--ground);
+}
+.ch-row:hover .ch-hit {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.ch-line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.ch-line:not(.em) {
+  stroke-width: 1.5;
+}
+.ch-dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.ch-selected {
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+.ch-cursor {
+  opacity: 0;
+  pointer-events: none;
+}
+.ch-cursor line {
+  stroke: var(--muted);
+  stroke-dasharray: 2 2;
+}
+.ch-col:hover .ch-cursor {
+  opacity: 1;
+}
+.ch-col.clickable {
+  cursor: pointer;
+}
+.ch-empty {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.tip-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* --- Map legend ------------------------------------------------------------------------------ */
+.cp-legend {
+  width: 270px;
+}
+.cp-legend-source {
+  margin: -2px 0 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+.cp-legend-source b {
+  font-weight: 600;
+  color: var(--accent);
+}
+.cp-unpin {
+  white-space: nowrap;
+}
+.cp-classes {
+  margin: 6px 0 4px;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+}
+.cp-classes li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.6;
+}
+.cp-classes li.dimmed {
+  opacity: 0.45;
+}
+.cp-classes i {
+  width: 22px;
+  height: 10px;
+  border-radius: 2px;
+}

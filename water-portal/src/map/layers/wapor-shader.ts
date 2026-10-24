@@ -17,6 +17,8 @@ export type AetiRampProps = {
   c2: Vec3;
   c3: Vec3;
   c4: Vec3;
+  /** Hide pixels whose NDVI quality (in color.g) is a longer gap than this; -1: none. */
+  maxGap: number;
 };
 
 const rgb = (hex: string): Vec3 => {
@@ -24,7 +26,7 @@ const rgb = (hex: string): Vec3 => {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 };
 
-export const rampProps = ({ quantities: q, colors: c }: WaporRamp): AetiRampProps => ({
+export const rampProps = ({ quantities: q, colors: c }: WaporRamp, maxGap: number | null = null): AetiRampProps => ({
   q0123: [q[0], q[1], q[2], q[3]],
   q4: q[4],
   c0: rgb(c[0]),
@@ -32,6 +34,7 @@ export const rampProps = ({ quantities: q, colors: c }: WaporRamp): AetiRampProp
   c2: rgb(c[2]),
   c3: rgb(c[3]),
   c4: rgb(c[4]),
+  maxGap: maxGap ?? -1,
 });
 
 const MODULE_NAME = "aetiRamp";
@@ -40,6 +43,10 @@ const MODULE_NAME = "aetiRamp";
  * Colours a single-band WaPOR raster, which MultiCOGLayer puts in color.r as raw
  * values: linear between the stops, clamped outside them. Nodata (-9999), any other
  * negative value and NaN are dropped.
+ *
+ * With a quality mask, color.g holds L1-QUAL-NDVI-D: dekads since the last valid
+ * observation, as a byte read normalised to 0-1. Pixels with a longer gap are dropped,
+ * and so are those without a quality value (255). Without the quality band g is 0.
  */
 export const AetiRamp = {
   name: MODULE_NAME,
@@ -52,6 +59,7 @@ uniform ${MODULE_NAME}Uniforms {
   vec3 c2;
   vec3 c3;
   vec3 c4;
+  float maxGap;
 } ${MODULE_NAME};
 `,
   inject: {
@@ -70,6 +78,7 @@ vec3 aetiRamp_color(float v) {
   float value = color.r;
   // Also catches NaN, which fails every comparison.
   if (!(value >= 0.0)) discard;
+  if (${MODULE_NAME}.maxGap >= 0.0 && floor(color.g * 255.0 + 0.5) > ${MODULE_NAME}.maxGap) discard;
   color = vec4(aetiRamp_color(value), 1.0);
 `,
   },
@@ -81,6 +90,7 @@ vec3 aetiRamp_color(float v) {
     c2: "vec3<f32>",
     c3: "vec3<f32>",
     c4: "vec3<f32>",
+    maxGap: "f32",
   },
   getUniforms: (props: Partial<AetiRampProps>) => props,
 } as const satisfies ShaderModule<AetiRampProps>;

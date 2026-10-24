@@ -9,11 +9,11 @@
  * Pointer: drag a handle, drag the band between them to move the whole range, or
  * press elsewhere on the track to bring the nearest handle there. Where the handles
  * overlap, the first movement decides: left moves the start, right the end.
- * Keyboard (handles): arrows step one dekad (one year in Country, one allowed end in
- * Local), Page Up/Down one year, Home/End to the limits.
+ * Keyboard (handles): arrows step one dekad (one year in Country), Page Up/Down one
+ * year, Home/End to the limits.
  */
 import { COUNTRY_MAX_YEAR, MAX_DK, MIN_YEAR, dkY, fmtEnd, fmtStart, mk } from "./dekads";
-import { changeEnd, changeStart, localEnds, moveRange, type DekadRange } from "./range-rules";
+import { changeEnd, changeStart, moveRange, type DekadRange } from "./range-rules";
 import type { ToolbarState } from "./toolbar";
 
 /** What the user moved. */
@@ -136,12 +136,7 @@ export function initRangeSlider(
       if (!(e.key in delta)) return;
       e.preventDefault();
 
-      let wanted = clamp(current + delta[e.key], 0, MAX_DK);
-      if (grip === "end" && view === "local" && Math.abs(delta[e.key]) === 1) {
-        // Step through the allowed ends rather than dekad by dekad.
-        const ends = localEnds(range.start);
-        wanted = ends[clamp(ends.indexOf(range.end) + delta[e.key], 0, ends.length - 1)];
-      }
+      const wanted = clamp(current + delta[e.key], 0, MAX_DK);
       const next = grip === "start" ? changeStart(view, range, wanted) : changeEnd(view, range, wanted);
       if (next.start !== range.start || next.end !== range.end) onInput(next, grip);
     });
@@ -171,10 +166,6 @@ export function initRangeSlider(
     const firstMissing = mk(COUNTRY_MAX_YEAR + 1, 0, 0);
     unavailable.hidden = view !== "country" || firstMissing >= BOUNDARIES;
     Object.assign(unavailable.style, { left: pct(firstMissing), right: "0" });
-
-    // Local: mark the ends that have a pre-computed layer.
-    $("slider-snaps").innerHTML =
-      view === "local" ? localEnds(start).map((dk) => `<span style="left:${pct(dk + 1)}"></span>`).join("") : "";
 
     $("start-label").textContent = fmtStart(start);
     $("end-label").textContent = fmtEnd(end);

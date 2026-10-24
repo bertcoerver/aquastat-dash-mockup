@@ -1,4 +1,13 @@
-import { onWaporTiles, waporAvailable, waporPeriod, type WaporPeriod } from "./map/layers/wapor";
+import { initWaterBalance } from "./basin/water-balance";
+import { initCountryPanel, type CountryInfo } from "./country/country-panel";
+import {
+  onWaporTiles,
+  publishedWaporPeriod,
+  waporAvailable,
+  waporPeriod,
+  type WaporPeriod,
+  type WaporTiles,
+} from "./map/layers/wapor";
 import { createMap } from "./map/map";
 import { placeAt, type LngLat } from "./map/places";
 import { upstreamFinder, type SubBasin } from "./map/sub-basin-network";
@@ -7,16 +16,18 @@ import { initWaporLegend } from "./map/wapor-legend";
 import { initDebugPanel } from "./panels/debug-panel";
 import { initLayersMenu } from "./panels/layers-menu";
 import { initLoadingIndicator } from "./panels/loading-indicator";
-import { fmtEnd, fmtStart } from "./toolbar/dekads";
+import { COUNTRY_MAX_YEAR, MIN_YEAR, fmtEnd, fmtStart, mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
-import { initToolbar, type ToolbarState } from "./toolbar/toolbar";
-import type { View } from "./toolbar/range-rules";
+import { initToolbar, type Toolbar, type ToolbarState } from "./toolbar/toolbar";
+import type { DekadRange, View } from "./toolbar/range-rules";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/toolbar.css";
 import "./styles/map.css";
 import "./styles/panels.css";
 import "./styles/legend.css";
+import "./styles/basin.css";
+import "./styles/country.css";
 
 // First, so it counts every request from here on.
 initLoadingIndicator();
@@ -35,11 +46,15 @@ async function showHover(lngLat: LngLat | null) {
   hovered = lngLat;
   if (!lngLat) {
     setHoveredSubBasin(null);
+    waterBalance.hover(null);
+    countryPanel.hover(null);
     return debug("hover", null);
   }
   const place = await placeAt(lngLat);
   if (hovered !== lngLat) return;
   const upstream = place.subBasin && upstreamOf(place.subBasin.id);
+  waterBalance.hover(view === "basin" ? (place.subBasin?.id ?? null) : null);
+  countryPanel.hover(view === "country" ? (place.country?.m49 ?? null) : null);
   setHoveredSubBasin(view === "basin" && place.subBasin ? { id: place.subBasin.id, upstream: upstream! } : null);
   debug("hover", {
     lon: round(lngLat[0]),
@@ -59,7 +74,7 @@ async function selectPoint(lngLat: LngLat | null, source: SelectionSource) {
   selection.set({ source, lngLat, ...place });
 }
 
-const { map, setView, setLayerVisible, setWapor, setSelection, showBox, setHoveredSubBasin } = createMap(
+const waterMap = createMap(
   document.getElementById("map")!,
   {
     dark,
@@ -68,13 +83,31 @@ const { map, setView, setLayerVisible, setWapor, setSelection, showBox, setHover
     onHover: showHover,
   },
 );
+const { map, setView, setLayerVisible, setWapor, setWaporMaxGap, setSelection, showBox, setHoveredSubBasin } = waterMap;
 
-const [countries, basins, subBasins] = await Promise.all([
+const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<Country>("countries"),
   loadList<MajorBasin>("major-basins"),
   loadList<SubBasin>("sub-basins"),
+  loadData<CountryInfo>("country-info"),
 ]);
 const upstreamOf = upstreamFinder(subBasins);
+// Basin view: the water balance model for the selected sub-basin (map colours, panel).
+let toolbarApi: Toolbar | null = null;
+const waterBalance = initWaterBalance({
+  map: waterMap,
+  subBasins,
+  upstreamOf,
+  setRange: (range) => toolbarApi?.setRange(range),
+});
+// Country view: AQUASTAT statistics for the selected country (panel, map colours).
+const countryPanel = initCountryPanel({
+  map: waterMap,
+  info: countryInfo,
+  names: new Map(countries.map((c) => [c.m49, c.name])),
+  canSelect: (year) => year >= MIN_YEAR && year <= COUNTRY_MAX_YEAR,
+  setYear: (year) => toolbarApi?.setRange({ start: mk(year, 0, 0), end: mk(year, 0, 0) + 35 }),
+});
 const picker = initPlacePicker({
   countries,
   basins,
@@ -112,6 +145,8 @@ selection.subscribe((s) => {
     subBasin: s.subBasin?.id ?? null,
   });
   picker.show(s);
+  waterBalance.setSelection(s);
+  countryPanel.setSelection(s);
   debug("click", {
     source: s.source,
     lon: s.lngLat && round(s.lngLat[0]),
@@ -122,7 +157,11 @@ selection.subscribe((s) => {
   });
 });
 
-async function loadList<T>(name: string): Promise<T[]> {
+function loadList<T>(name: string): Promise<T[]> {
+  return loadData<T[]>(name);
+}
+
+async function loadData<T>(name: string): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}data/${name}.json`);
   return response.json();
 }
@@ -137,46 +176,93 @@ new ResizeObserver(() => {
 initLayersMenu(setLayerVisible);
 
 /**
- * Local view: the WaPOR raster for the selected period. Waits until the range stops
- * changing (dragging the slider passes many periods), then checks the raster has been
- * published before opening it.
+ * Local view: WaPOR for the selected range, one raster or a sum of them. Waits until
+ * the range stops changing (dragging the slider passes many), then checks the rasters
+ * have been published before opening them. A dekad comes with its NDVI quality raster
+ * when that has been published too, for the quality slider in the legend.
  */
-const showWaporLegend = initWaporLegend();
-let waporWanted: string | null = null;
+let waporMaxGap: number | null = null;
+const waporLegend = initWaporLegend({
+  onMaxGap(maxGap) {
+    waporMaxGap = maxGap;
+    setWaporMaxGap(maxGap);
+    showWaporDebug();
+  },
+});
+let waporWanted: string | null = null; // the range, as "start-end"
+let waporShown: WaporPeriod | null = null;
 let waporTimer = 0;
-function showWapor(period: WaporPeriod | null) {
-  waporWanted = period?.url ?? null;
+function showWapor(range: DekadRange | null) {
+  const wanted = range && `${range.start}-${range.end}`;
+  waporWanted = wanted;
   clearTimeout(waporTimer);
-  showWaporLegend(period, "checking");
-  if (!period) return hideWapor();
+  // Before the checks, as if everything were published (always possible: the range
+  // doesn't go past the current dekad).
+  const draft = range && waporPeriod(range);
+  waporLegend.show(draft, "checking");
+  waporLegend.quality(draft?.qualityUrl ? "checking" : null);
+  if (!range || !draft) return hideWapor();
   waporTimer = window.setTimeout(async () => {
-    const available = await waporAvailable(period);
-    if (waporWanted !== period.url) return;
-    if (!available) {
-      hideWapor();
-      return showWaporLegend(period, "missing");
+    let period: WaporPeriod | null = null;
+    let failed = false; // couldn't reach the bucket
+    let qualityAvailable = false;
+    try {
+      period = await publishedWaporPeriod(range);
+      if (period?.qualityUrl) qualityAvailable = await waporAvailable(period.qualityUrl).catch(() => false);
+    } catch {
+      failed = true;
     }
-    showWaporLegend(period, "loading");
-    setWapor(period, () => waporWanted === period.url && showWaporLegend(period, "ready"));
+    if (waporWanted !== wanted) return;
+    if (!period) {
+      hideWapor();
+      waporLegend.quality(null);
+      return waporLegend.show(draft, failed ? "error" : "missing");
+    }
+    waporLegend.show(period, "loading");
+    if (period.qualityUrl) waporLegend.quality(qualityAvailable ? "ready" : "missing");
+    else waporLegend.quality(null);
+    waporShown = { ...period, qualityUrl: qualityAvailable ? period.qualityUrl : null };
+    setWapor(waporShown, () => waporWanted === wanted && waporLegend.show(period, "ready"));
+    showWaporDebug();
   }, 250);
 }
 
-// Debug: the map zoom and which overview the raster covers the view with. Tiles are
-// picked on every frame while the map moves, so this redraws at most once a frame.
+// Debug: how the value is made, the map zoom and which overview the rasters cover the
+// view with. Tiles are picked on every frame while the map moves, so this redraws at
+// most once a frame.
 let waporDebugFrame = 0;
 let waporDebugShown = "";
+let waporTiles: WaporTiles | null = null;
 onWaporTiles((tiles) => {
+  waporTiles = tiles;
+  showWaporDebug();
+});
+function showWaporDebug() {
+  const period = waporShown;
+  if (!period) return;
+  const tiles = waporTiles;
   cancelAnimationFrame(waporDebugFrame);
   waporDebugFrame = requestAnimationFrame(() => {
-    const value = { file: waporWanted?.split("/").pop(), ...tiles, zoom: Math.round(tiles.zoom * 100) / 100 };
+    const value = {
+      equation: period.equation,
+      rasters: period.terms.length,
+      cost: Math.round(period.cost * 10) / 10,
+      unpublished: period.unpublished.length ? period.unpublished : null,
+      quality: period.qualityUrl?.split("/").pop() ?? null,
+      maxGap: period.qualityUrl ? waporMaxGap : null,
+      ...tiles,
+      zoom: tiles && Math.round(tiles.zoom * 100) / 100,
+    };
     const json = JSON.stringify(value);
     if (json !== waporDebugShown) debug("wapor", value);
     waporDebugShown = json;
   });
-});
+}
 
 function hideWapor() {
   setWapor(null);
+  waporShown = null;
+  waporTiles = null;
   cancelAnimationFrame(waporDebugFrame);
   waporDebugShown = "";
   debug("wapor", null);
@@ -188,7 +274,11 @@ function onToolbarChange({ view: newView, range }: ToolbarState) {
   view = newView;
   setView(view);
   picker.setView(view);
-  showWapor(view === "local" ? waporPeriod(range) : null);
+  waterBalance.setView(view);
+  waterBalance.setRange(range);
+  countryPanel.setView(view);
+  countryPanel.setRange(range);
+  showWapor(view === "local" ? range : null);
   debug("time", {
     view,
     start: fmtStart(range.start),
@@ -198,4 +288,5 @@ function onToolbarChange({ view: newView, range }: ToolbarState) {
 }
 selection.set(NOTHING);
 debug("hover", null);
-onToolbarChange(initToolbar(onToolbarChange));
+toolbarApi = initToolbar(onToolbarChange);
+onToolbarChange(toolbarApi.state);

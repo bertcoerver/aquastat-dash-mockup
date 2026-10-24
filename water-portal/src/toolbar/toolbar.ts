@@ -19,8 +19,14 @@ function flash(id: string) {
   el.classList.add("flash");
 }
 
+export interface Toolbar {
+  state: ToolbarState;
+  /** Set the range from elsewhere (the Basin view's time series); it must fit the view. */
+  setRange(range: DekadRange): void;
+}
+
 /** Wire up the top bar. `onChange` runs after every change of view or range. */
-export function initToolbar(onChange: (state: ToolbarState) => void): ToolbarState {
+export function initToolbar(onChange: (state: ToolbarState) => void): Toolbar {
   const state: ToolbarState = { view: "country", range: initialRange() };
 
   /** Apply a new range; `adjusted` names the ends the system changed. */
@@ -67,5 +73,11 @@ export function initToolbar(onChange: (state: ToolbarState) => void): ToolbarSta
   }
 
   render();
-  return { ...state };
+  return {
+    state: { ...state },
+    setRange(range) {
+      if (range.start === state.range.start && range.end === state.range.end) return;
+      update(range, {}); // the user chose it (elsewhere), so no highlight
+    },
+  };
 }

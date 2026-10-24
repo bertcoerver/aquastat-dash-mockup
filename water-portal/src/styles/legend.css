@@ -29,12 +29,17 @@
 }
 .legend-period {
   display: flex;
+  flex-wrap: wrap; /* a long range puts the unit on its own line */
   justify-content: space-between;
-  gap: 8px;
+  gap: 0 8px;
   margin-top: 6px;
   font: 400 12px/1.4 var(--mono);
 }
+.legend-period > * {
+  white-space: nowrap;
+}
 .legend-period > :last-child {
+  margin-left: auto;
   color: var(--muted);
 }
 .legend-ramp {
@@ -42,8 +47,8 @@
   margin-top: 4px;
   border-radius: 2px;
 }
-.legend[data-status="missing"] .legend-ramp,
-.legend[data-status="missing"] .legend-ticks {
+.legend:is([data-status="missing"], [data-status="error"]) .legend-ramp,
+.legend:is([data-status="missing"], [data-status="error"]) .legend-ticks {
   opacity: 0.35;
 }
 .legend-ticks {
@@ -65,6 +70,58 @@
 .legend-status:empty {
   display: none;
 }
-.legend[data-status="missing"] .legend-status {
+.legend:is([data-status="missing"], [data-status="error"]) .legend-status {
+  color: var(--snap);
+}
+
+/* Dekads: the NDVI quality filter. */
+.legend-quality {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.legend-quality[hidden] {
+  display: none;
+}
+.legend-quality-head {
+  display: block;
+  font: 500 10px/1.4 var(--sans);
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: help;
+}
+.legend-quality-input {
+  display: block;
+  width: 100%;
+  margin: 4px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.legend-quality-input:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.legend-quality-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.legend-quality-ends {
+  display: flex;
+  justify-content: space-between;
+  font: 400 10px/1 var(--mono);
+  color: var(--muted);
+}
+.legend-quality-value {
+  margin-top: 4px;
+  font: 400 12px/1.4 var(--mono);
+}
+.legend-quality.filtering .legend-quality-value {
+  color: var(--accent);
+}
+.legend-quality:not([data-status="ready"]) .legend-quality-value {
+  color: var(--muted);
+}
+.legend-quality[data-status="missing"] .legend-status {
   color: var(--snap);
 }

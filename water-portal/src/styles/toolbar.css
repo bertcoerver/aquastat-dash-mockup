@@ -182,17 +182,6 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
-/* Local: the ends that have a pre-computed layer. */
-.slider-snaps > span {
-  position: absolute;
-  top: -4px;
-  width: 2px;
-  height: 14px;
-  margin-left: -1px;
-  border-radius: 1px;
-  background: var(--snap);
-  pointer-events: none;
-}
 .slider-handle {
   position: absolute;
   top: 1px;

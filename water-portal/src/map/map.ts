@@ -8,14 +8,14 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { View } from "../toolbar/range-rules";
-import { majorBasinsLayers, subBasinsLayers } from "./layers/basins";
+import { majorBasinsLayers, subBasinOutlinesLayer, subBasinsLayers } from "./layers/basins";
 import { bordersLayer } from "./layers/borders";
-import { countriesLayer } from "./layers/countries";
+import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
 import { waporLayer, type WaporPeriod } from "./layers/wapor";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat } from "./places";
-import { THEMES, type Color } from "./theme";
+import { THEMES, type Color, type MapTheme } from "./theme";
 
 /** Layers the user can switch on and off (see the layers menu). */
 export type ToggleableLayer = "rivers" | "lakes";
@@ -27,12 +27,31 @@ export interface WaterMap {
   setLayerVisible(layer: ToggleableLayer, visible: boolean): void;
   /** Show the WaPOR raster for a period (null: none). `onLoad` runs once it's opened. */
   setWapor(period: WaporPeriod | null, onLoad?: () => void): void;
+  /** Hide WaPOR pixels with a longer NDVI gap than this, in dekads (null: none). */
+  setWaporMaxGap(maxGap: number | null): void;
   /** Show the selection: a marker at the point, and the country and basins filled. */
   setSelection(selection: MapSelection): void;
   /** Move the camera to show a box: [west, south, east, north], west > east across 180°. */
   showBox(bbox: [number, number, number, number]): void;
   /** Basin view: shade a sub-basin and those upstream of it (null: none). */
   setHoveredSubBasin(subBasin: { id: number; upstream: Set<number> } | null): void;
+  /**
+   * Basin view: fill sub-basins with their own colours (the water balance model's
+   * values), instead of the hover shading and the selected fill (null: none). `key`
+   * names the set of colours: the map only repaints when it changes.
+   */
+  setSubBasinFills(fills: { key: string; colors: Map<number, Color> } | null): void;
+  /** Basin view: draw a thick outline around these sub-basins. */
+  setOutlinedSubBasins(ids: number[]): void;
+  /**
+   * Country view: fill countries with their own colours (a statistic's values), and
+   * outline the selected country instead of filling it (null: none). `key` names the
+   * set of colours: the map only repaints when it changes.
+   */
+  setCountryFills(fills: { key: string; colors: Map<number, Color> } | null): void;
+  /** Country view: circles on countries (proportional symbols, rings), by `key` as above. */
+  setCountrySymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
+  theme: MapTheme;
 }
 
 interface MapSelection {
@@ -60,7 +79,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
     selection: { lngLat: null, country: null, majorBasin: null, subBasin: null } as MapSelection,
     visible: { rivers: true, lakes: true } as Record<ToggleableLayer, boolean>,
     wapor: null as { period: WaporPeriod; onLoad?: () => void } | null,
+    waporMaxGap: null as number | null,
     hoverFills: undefined as { key: number; colors: Map<number, Color> } | undefined,
+    valueFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
+    outlined: [] as number[],
+    countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
+    countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
   };
 
   const map = new maplibregl.Map({
@@ -91,15 +115,16 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
       selected: state.selection.subBasin ? null : state.selection.majorBasin, // the most precise one only
       selectedColor: theme.selected,
     });
-    // Sub-basins are only drawn to fill the selected one, and to shade the hovered one
-    // and those upstream of it.
+    // Sub-basins are only drawn to fill the selected one, to shade the hovered one
+    // and those upstream of it, or to show the water balance model's values.
+    const values = state.valueFills;
     const sub = subBasinsLayers({
       fill: [0, 0, 0, 0],
       border: theme.basinBorder,
-      visible: basins && Boolean(state.hoverFills || state.selection.subBasin),
-      selected: state.selection.subBasin,
+      visible: basins && Boolean(values || state.hoverFills || state.selection.subBasin),
+      selected: values ? null : state.selection.subBasin,
       selectedColor: theme.selectedSubBasin,
-      fills: state.hoverFills,
+      fills: values ?? state.hoverFills,
     });
     return [
       countriesLayer({
@@ -107,17 +132,46 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
         selected: state.selection.country,
         selectedColor: theme.selected,
         visible: !basins,
+        fills: state.view === "country" ? state.countryFills : undefined,
       }),
-      waporLayer({ period: state.wapor?.period ?? null, onLoad: state.wapor?.onLoad }),
+      waporLayer({ period: state.wapor?.period ?? null, maxGap: state.waporMaxGap, onLoad: state.wapor?.onLoad }),
       major.areas,
       sub.areas,
       bordersLayer({ color: theme.border, visible: !basins }),
       major.outlines, // (sub.outlines: not drawn for now)
       riversLayer({ color: theme.river, visible: state.visible.rivers }),
       lakesLayer({ color: theme.water, visible: state.visible.lakes }),
+      subBasinOutlinesLayer({ ids: state.outlined, color: theme.outline, visible: basins }),
+      countryOutlineLayer({
+        m49: state.selection.country,
+        color: theme.outline,
+        visible: state.view === "country" && Boolean(state.countryFills),
+      }),
+      countrySymbolsLayer({ symbols: state.view === "country" ? visibleSymbols() : null }),
       markerLayer({ position: state.selection.lngLat, fill: theme.marker, ring: theme.markerRing }),
     ];
   }
+
+  // Only the circles on the near side of the globe: they are drawn without a depth
+  // test (like everything here), so the far side's would show through.
+  let symbolsKey = "";
+  function visibleSymbols() {
+    const symbols = state.countrySymbols;
+    if (!symbols) return null;
+    const { lng, lat } = map.getCenter();
+    const zoom = map.getZoom();
+    const near = symbols.items.filter((s) => facing(s.position, [lng, lat]) > 0.15 - Math.min(0.15, zoom * 0.03));
+    // Re-key by the circles kept, so deck.gl redraws only when that changes.
+    const key = `${symbols.key}:${near.length}:${near[0]?.position ?? ""}`;
+    symbolsKey = key;
+    return { key, items: near };
+  }
+  map.on("move", () => {
+    if (!state.countrySymbols || state.view !== "country") return;
+    const before = symbolsKey;
+    visibleSymbols();
+    if (symbolsKey !== before) render();
+  });
 
   function handleClick(info: PickingInfo) {
     onClick?.(toLngLat(info.coordinate), Boolean(info.object));
@@ -137,6 +191,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
 
   return {
     map,
+    theme,
     setView(view) {
       if (view === state.view) return;
       state.view = view;
@@ -168,12 +223,44 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
         : undefined;
       render();
     },
+    setSubBasinFills(fills) {
+      if (fills?.key === state.valueFills?.key) return;
+      state.valueFills = fills ?? undefined;
+      render();
+    },
+    setOutlinedSubBasins(ids) {
+      if (ids.join() === state.outlined.join()) return;
+      state.outlined = ids;
+      render();
+    },
+    setCountryFills(fills) {
+      if (fills?.key === state.countryFills?.key) return;
+      state.countryFills = fills ?? undefined;
+      render();
+    },
+    setCountrySymbols(symbols) {
+      if (symbols?.key === state.countrySymbols?.key) return;
+      state.countrySymbols = symbols;
+      render();
+    },
     setWapor(period, onLoad) {
-      if (period?.url === state.wapor?.period.url) return;
+      const old = state.wapor?.period;
+      if (period?.key === old?.key && period?.qualityUrl === old?.qualityUrl) return;
       state.wapor = period && { period, onLoad };
       render();
     },
+    setWaporMaxGap(maxGap) {
+      if (maxGap === state.waporMaxGap) return;
+      state.waporMaxGap = maxGap;
+      render();
+    },
   };
+}
+
+/** Cosine of the angle between two points on the globe (1: same point, < 0: opposite sides). */
+function facing([lng1, lat1]: [number, number], [lng2, lat2]: [number, number]) {
+  const r = Math.PI / 180;
+  return Math.sin(lat1 * r) * Math.sin(lat2 * r) + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lng1 - lng2) * r);
 }
 
 // deck.gl gives no coordinate (or NaN) for a point off the globe.

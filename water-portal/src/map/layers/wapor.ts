@@ -1,53 +1,64 @@
 /*
- * WaPOR v3 actual evapotranspiration and interception (L1-AETI, global, 300 m), as
- * the COG for the selected period, read straight from FAO's bucket (it sends CORS
- * headers). There's one COG per dekad, calendar month and calendar year, which is
- * exactly what the Local view lets you select.
+ * WaPOR v3 actual evapotranspiration and interception (L1-AETI, global, 300 m), read
+ * straight from FAO's bucket (it sends CORS headers). WaPOR publishes one COG per
+ * dekad, calendar month and calendar year; a range that is exactly one of those shows
+ * that COG, in its own unit. Any other range is added up from several of them, as the
+ * total in mm (see wapor-plan.ts for which), tile by tile as they load.
  *
  * Catalogue: https://data.apps.fao.org/gismgr/api/v2/catalog/workspaces/WAPOR-3/mapsets/L1-AETI-D
  * (-M, -A). Colour maps are WaPOR's own styles AETI-D-INT16, AETI-M and AETI-A.
+ *
+ * A dekad also comes with L1-QUAL-NDVI-D, on the same grid: for each pixel, how many
+ * dekads it has been since the last valid satellite observation behind the NDVI (0:
+ * observed this dekad). AETI is modelled from it, so a long gap means a less reliable
+ * value; the quality slider hides those pixels. It's published some dekads after AETI.
  */
 import type { Viewport } from "@deck.gl/core";
 import type { TileLayer } from "@deck.gl/geo-layers";
 import { MultiCOGLayer } from "@developmentseed/deck.gl-geotiff";
-import { MONTHS, dkD, dkM, dkY } from "../../toolbar/dekads";
+import { defaultDecoderPool, type RasterArray, type RasterTypedArray } from "@developmentseed/geotiff";
+import type { Texture } from "@luma.gl/core";
+import { MONTHS, dkD, dkM, dkY, fmtEnd, fmtStart, startDay } from "../../toolbar/dekads";
 import type { DekadRange } from "../../toolbar/range-rules";
+import { blockName, dekadDays, formatPlan, planRange, type Block, type BlockKind } from "./wapor-plan";
 import { AetiRamp, rampProps, type WaporRamp } from "./wapor-shader";
 
 const BUCKET = "https://storage.googleapis.com/fao-gismgr-wapor-3-data/DATA/WAPOR-3/MAPSET";
+const QUALITY = "L1-QUAL-NDVI-D";
+const SCALE = 0.1; // all three: physical value = raw * 0.1
 
-export type WaporResolution = "dekadal" | "monthly" | "annual";
+export type WaporResolution = "dekadal" | "monthly" | "annual" | "custom";
 
 interface Mapset {
   code: string;
+  resolution: WaporResolution;
   unit: string;
-  scale: number; // physical value = raw * scale
-  ramp: WaporRamp;
+  ramp: WaporRamp; // in raw values
 }
 
-const MAPSETS: Record<WaporResolution, Mapset> = {
-  dekadal: {
+const MAPSETS: Record<BlockKind, Mapset> = {
+  D: {
     code: "L1-AETI-D",
+    resolution: "dekadal",
     unit: "mm/day", // the average day of the dekad
-    scale: 0.1,
     ramp: {
       quantities: [1, 25, 50, 75, 100],
       colors: ["#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"],
     },
   },
-  monthly: {
+  M: {
     code: "L1-AETI-M",
+    resolution: "monthly",
     unit: "mm/month",
-    scale: 0.1,
     ramp: {
       quantities: [100, 400, 800, 1200, 1600],
       colors: ["#f0f9e8", "#bae4bc", "#7bccc4", "#43a2ca", "#0868ac"],
     },
   },
-  annual: {
+  A: {
     code: "L1-AETI-A",
+    resolution: "annual",
     unit: "mm/year",
-    scale: 0.1,
     ramp: {
       quantities: [1000, 4000, 8000, 12000, 16000],
       colors: ["#f0f9e8", "#bae4bc", "#7bccc4", "#43a2ca", "#0868ac"],
@@ -55,59 +66,134 @@ const MAPSETS: Record<WaporResolution, Mapset> = {
   },
 };
 
-/** The WaPOR raster for one period. */
-export interface WaporPeriod {
-  resolution: WaporResolution;
-  /** As in WaPOR's raster names: 2025, 2025-03 or 2025-03-D2. */
-  code: string;
-  label: string;
+const rasterUrl = (mapset: string, code: string) => `${BUCKET}/${mapset}/WAPOR-3.${mapset}.${code}.tif`;
+
+/** One raster in a period's sum: shown value += factor * raw value. */
+export interface WaporTerm {
   url: string;
-  unit: string;
-  scale: number;
-  ramp: WaporRamp;
+  name: string; // "M[2025-01]"
+  factor: number;
 }
 
-const pad = (n: number) => String(n).padStart(2, "0");
+/** What the map shows for a date range: one WaPOR raster, or a sum of them. */
+export interface WaporPeriod {
+  resolution: WaporResolution;
+  label: string;
+  terms: WaporTerm[];
+  /** How the value is made, e.g. "ETIa (mm) = A[2025] − M[2025-01] − M[2025-12]". */
+  equation: string;
+  /** Of loading the rasters, in dekadal rasters (see wapor-plan.ts). */
+  cost: number;
+  /** Rasters a cheaper sum would have used, but which aren't published yet. */
+  unpublished: string[];
+  /** A single dekad: its NDVI quality raster (null: none). */
+  qualityUrl: string | null;
+  unit: string;
+  scale: number; // legend value = shown value * scale
+  ramp: WaporRamp;
+  /** Identifies the AETI rasters and how they're added up (not the quality raster). */
+  key: string;
+}
 
-/** The raster for a Local view range (one dekad, month or year), or null for others. */
-export function waporPeriod({ start, end }: DekadRange): WaporPeriod | null {
-  const len = end - start + 1;
-  const y = dkY(start);
-  const m = dkM(start);
-  const [resolution, code, label]: [WaporResolution, string, string] | [null] =
-    len === 1
-      ? ["dekadal", `${y}-${pad(m + 1)}-D${dkD(start) + 1}`, `${["1st", "2nd", "3rd"][dkD(start)]} dekad of ${MONTHS[m]} ${y}`]
-      : len === 3 && dkD(start) === 0
-        ? ["monthly", `${y}-${pad(m + 1)}`, `${MONTHS[m]} ${y}`]
-        : len === 36 && start % 36 === 0
-          ? ["annual", String(y), String(y)]
-          : [null];
-  if (!resolution) return null;
-  const mapset = MAPSETS[resolution];
+/** Round to two significant digits, for legend stops. */
+const nice = (v: number) => {
+  const step = 10 ** (Math.floor(Math.log10(v)) - 1);
+  return Math.round(Math.round(v / step) * step * 1e6) / 1e6;
+};
+
+/**
+ * What to show for a Local view range, assuming every raster is published except
+ * those in `unpublished` (by name, e.g. "A[2025]"). Null if no sum can make the range.
+ */
+export function waporPeriod(range: DekadRange, unpublished: ReadonlySet<string> = new Set()): WaporPeriod | null {
+  const plan = planRange(range, (b) => unpublished.has(blockName(b)));
+  if (!plan) return null;
+  const { start, end } = range;
+  const skipped = [...unpublished];
+  const [only] = plan.terms;
+
+  // Exactly one raster: as published, in its own unit.
+  if (plan.terms.length === 1 && only.coef === 1 && only.block.start === start && only.block.len === end - start + 1) {
+    const b = only.block;
+    const mapset = MAPSETS[b.kind];
+    const y = dkY(start);
+    const m = dkM(start);
+    const label =
+      b.kind === "D" ? `${["1st", "2nd", "3rd"][dkD(start)]} dekad of ${MONTHS[m]} ${y}` : b.kind === "M" ? `${MONTHS[m]} ${y}` : String(y);
+    const url = rasterUrl(mapset.code, b.code);
+    const qualityUrl = b.kind === "D" ? rasterUrl(QUALITY, b.code) : null;
+    return {
+      resolution: mapset.resolution,
+      label,
+      terms: [{ url, name: blockName(b), factor: 1 }],
+      equation: `ETIa (${mapset.unit}) = ${blockName(b)}`,
+      cost: plan.cost,
+      unpublished: skipped,
+      qualityUrl,
+      unit: mapset.unit,
+      scale: SCALE,
+      ramp: mapset.ramp,
+      key: url,
+    };
+  }
+
+  // A sum, as the total in mm: a dekadal raster is mm/day, so times its days.
+  const terms = plan.terms.map(({ block: b, coef }: { block: Block; coef: number }) => ({
+    url: rasterUrl(MAPSETS[b.kind].code, b.code),
+    name: blockName(b),
+    factor: coef * SCALE * (b.kind === "D" ? dekadDays(b.start) : 1),
+  }));
+  // The annual colour map, scaled to the length of the range.
+  let days = 0;
+  for (let dk = start; dk <= end; dk++) days += dekadDays(dk);
+  const annual = MAPSETS.A.ramp;
   return {
-    resolution,
-    code,
-    label,
-    url: `${BUCKET}/${mapset.code}/WAPOR-3.${mapset.code}.${code}.tif`,
-    unit: mapset.unit,
-    scale: mapset.scale,
-    ramp: mapset.ramp,
+    resolution: "custom",
+    label: `${dkY(start) === dkY(end) ? `${startDay(start)} ${MONTHS[dkM(start)]}` : fmtStart(start)} – ${fmtEnd(end)}`,
+    terms,
+    equation: `ETIa (mm) = ${formatPlan(plan)}`,
+    cost: plan.cost,
+    unpublished: skipped,
+    qualityUrl: null,
+    unit: "mm total",
+    scale: 1,
+    ramp: {
+      quantities: annual.quantities.map((q) => nice((q * SCALE * days) / 365)) as WaporRamp["quantities"],
+      colors: annual.colors,
+    },
+    key: terms.map((t) => `${t.factor}*${t.url}`).join(" + "),
   };
 }
 
-// Recent periods are published with a delay, so check a raster exists before opening it.
+/**
+ * What to show for a range, using only published rasters: a cheaper sum may need one
+ * that isn't out yet (the latest year or month), so plan again without it. Null if the
+ * range can't be made from published rasters. Rejects if the bucket can't be reached.
+ */
+export async function publishedWaporPeriod(range: DekadRange): Promise<WaporPeriod | null> {
+  const unpublished = new Set<string>();
+  for (;;) {
+    const period = waporPeriod(range, unpublished);
+    if (!period) return null;
+    const published = await Promise.all(period.terms.map((t) => waporAvailable(t.url)));
+    if (published.every(Boolean)) return period;
+    period.terms.forEach((t, i) => published[i] || unpublished.add(t.name));
+  }
+}
+
+/**
+ * Recent periods are published with a delay, so check a raster exists before opening
+ * it. Rejects on a network error (not cached: tried again next time), so that isn't
+ * taken for a raster that doesn't exist.
+ */
 const exists = new Map<string, Promise<boolean>>();
 
-export function waporAvailable(period: WaporPeriod): Promise<boolean> {
-  let check = exists.get(period.url);
+export function waporAvailable(url: string): Promise<boolean> {
+  let check = exists.get(url);
   if (!check) {
-    check = fetch(period.url, { method: "HEAD" }).then(
-      (res) => res.ok,
-      () => false,
-    );
-    exists.set(period.url, check);
-    // A network error shouldn't stick: try again next time.
-    check.then((ok) => ok || exists.delete(period.url));
+    check = fetch(url, { method: "HEAD" }).then((res) => res.ok);
+    exists.set(url, check);
+    check.catch(() => exists.delete(url));
   }
   return check;
 }
@@ -230,6 +316,47 @@ type Level = { metersPerPixel: number; matrixWidth: number; matrixHeight: number
 class GlobeMultiCOGLayer extends MultiCOGLayer {
   static layerName = "GlobeMultiCOGLayer";
 
+  /**
+   * One tile: the period's rasters added up into one band, "aeti" (as float32), next
+   * to the quality band if there is one. All WaPOR rasters share one grid, so tile
+   * (x, y, z) covers the same pixels in each. A pixel without data in any of them has
+   * none in the sum. Rounding can take a difference just below zero; that's 0.
+   */
+  async _getTileData(...[tile, options]: Parameters<MultiCOGLayer["_getTileData"]>) {
+    const { x, y, z } = tile.index;
+    const { multiDescriptor, sources } = this.state;
+    const { device, signal } = options;
+    const pool = this.props.pool ?? defaultDecoderPool();
+    const config = this.props.sources as Record<string, WaporSource>;
+    const read = async (name: string) => {
+      const { geotiff } = sources!.get(name)!;
+      const images = [geotiff, ...geotiff.overviews]; // full resolution first; z = 0 is the coarsest
+      const { array } = await images[images.length - 1 - z].fetchTile(x, y, { boundless: false, pool, signal });
+      return { values: samples(array), width: array.width, height: array.height, nodata: array.nodata };
+    };
+
+    const names = Object.keys(config).filter((name) => name !== "quality");
+    const [quality, ...rasters] = await Promise.all([config.quality ? read("quality") : null, ...names.map(read)]);
+    const { width, height } = rasters[0];
+    const sum = new Float32Array(width * height);
+    rasters.forEach(({ values, nodata }, i) => {
+      const factor = config[names[i]].factor;
+      for (let p = 0; p < sum.length; p++) {
+        const v = values[p];
+        sum[p] = v === nodata ? Number.NaN : sum[p] + factor * v; // NaN stays NaN
+      }
+    });
+    if (names.some((name) => config[name].factor < 0)) {
+      for (let p = 0; p < sum.length; p++) if (sum[p] < 0) sum[p] = 0;
+    }
+
+    const bands = new Map([["aeti", band(device, sum, "r32float", width, height)]]);
+    if (quality) bands.set("quality", band(device, quality.values, "r8unorm", quality.width, quality.height));
+    const { forwardTransform, inverseTransform } = multiDescriptor!.primary.levels[z].tileTransform(x, y);
+    const byteLength = sum.byteLength + (quality?.values.byteLength ?? 0);
+    return { bands, forwardTransform, inverseTransform, width, height, byteLength };
+  }
+
   renderLayers() {
     // The inner TileLayer's tileset picks the tiles. deck.gl builds it once, from the
     // first class it's given, so the subclass holds no per-render state.
@@ -280,17 +407,49 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
   }
 }
 
+/** A MultiCOGLayer source: a raster in the sum (t0, t1, …), or the quality raster. */
+type WaporSource = { url: string; factor: number };
+
+/** The samples of a one-band tile, in either layout. */
+const samples = (array: RasterArray) => (array.layout === "band-separate" ? array.bands[0] : array.data);
+
+function band(device: Texture["device"], data: RasterTypedArray, format: "r32float" | "r8unorm", width: number, height: number) {
+  const texture = device.createTexture({ data, format, width, height, sampler: { minFilter: "nearest", magFilter: "nearest" } });
+  return { texture, uvTransform: [0, 0, 1, 1] as [number, number, number, number], width, height, byteLength: data.byteLength };
+}
+
+// MultiCOGLayer opens its rasters again whenever it gets a new `sources` object.
+let sources: { key: string; value: Record<string, WaporSource> } | null = null;
+
 /**
- * The raster, coloured with WaPOR's colour map; nothing where it has no data. No
- * layer without a period: a hidden MultiCOGLayer would still open its source.
+ * The period's raster (or sum of rasters), coloured with its colour map; nothing where
+ * it has no data. With the period's quality raster, pixels with a gap longer than
+ * `maxGap` dekads are left out too (null: none). No layer without a period: a hidden
+ * MultiCOGLayer would still open its sources.
  */
-export function waporLayer({ period, onLoad }: { period: WaporPeriod | null; onLoad?: () => void }) {
+export function waporLayer({
+  period,
+  maxGap = null,
+  onLoad,
+}: {
+  period: WaporPeriod | null;
+  maxGap?: number | null;
+  onLoad?: () => void;
+}) {
   if (!period) return null;
+  const key = `${period.key} ${period.qualityUrl}`;
+  if (sources?.key !== key) {
+    const value: Record<string, WaporSource> = {};
+    period.terms.forEach(({ url, factor }, i) => (value[`t${i}`] = { url, factor }));
+    if (period.qualityUrl) value.quality = { url: period.qualityUrl, factor: 1 };
+    sources = { key, value };
+  }
   return new GlobeMultiCOGLayer({
     id: "wapor-aeti",
-    sources: { aeti: { url: period.url } },
-    composite: { r: "aeti" },
-    renderPipeline: [{ module: AetiRamp, props: rampProps(period.ramp) }],
+    sources: sources.value,
+    composite: period.qualityUrl ? { r: "aeti", g: "quality" } : { r: "aeti" },
+    // A new maxGap only re-renders the loaded tiles.
+    renderPipeline: [{ module: AetiRamp, props: rampProps(period.ramp, maxGap) }],
     // Linear filtering would blend values with the -9999 nodata at coasts.
     resampling: "nearest",
     parameters: { depthCompare: "always" },

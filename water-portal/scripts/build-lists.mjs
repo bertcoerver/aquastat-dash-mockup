@@ -2,7 +2,7 @@
  * Build the name lists for the country and basin pickers in the top bar:
  *   public/data/countries.json     [{ m49, name, bbox }]
  *   public/data/major-basins.json  [{ id, name, bbox }]
- *   public/data/sub-basins.json    [{ id, name, majorBasin, downstream, bbox }]
+ *   public/data/sub-basins.json    [{ id, name, majorBasin, downstream, area, bbox }]
  * bbox is [west, south, east, north] in degrees (west > east when it crosses 180°).
  *
  * Read from the same vector tiles the map shows, so the lists match the map:
@@ -18,6 +18,8 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const OUT = path.join(ROOT, "public/data");
 // Zoom 5: detailed enough that tippecanoe keeps even small basins, few enough tiles.
 const ZOOM = Number(process.env.ZOOM ?? 5);
+// Sub-basin routes from the wapor_discharge project: { id: [downstream, area_km2, name] }.
+const ROUTES = JSON.parse(await fs.readFile(path.join(ROOT, "data/fao_sb_ids.json"), "utf8"));
 
 const SETS = [
   {
@@ -43,7 +45,14 @@ const SETS = [
     },
     key: (p) => p.SDG6_SB_ID,
     // downstream: the sub-basin it drains into; -999 the sea, -888 an inland sink.
-    entry: (p) => ({ id: p.SDG6_SB_ID, name: p.S6_SB_NAME, majorBasin: p.SDG6_MB_ID, downstream: p.TO_SB_ID }),
+    // area (km²) isn't in the tiles: it comes from the discharge model's routes file.
+    entry: (p) => ({
+      id: p.SDG6_SB_ID,
+      name: p.S6_SB_NAME,
+      majorBasin: p.SDG6_MB_ID,
+      downstream: p.TO_SB_ID,
+      area: ROUTES[p.SDG6_SB_ID]?.[1] ?? null,
+    }),
   },
 ];
 

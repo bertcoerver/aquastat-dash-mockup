@@ -26,7 +26,7 @@ interface BasinOptions {
    * Basins (by ID) filled with their own colour instead of `fill`. `key` names the set
    * (deck.gl only redraws the colours when it changes).
    */
-  fills?: { key: number; colors: Map<number, Color> };
+  fills?: { key: number | string; colors: Map<number, Color> };
 }
 
 /**
@@ -97,7 +97,37 @@ function basinsLayers<P>(
   return { areas, outlines };
 }
 
-interface Bounds {
+/** Thick outlines around a few sub-basins (by ID), drawn the same way as the others. */
+export function subBasinOutlinesLayer({ ids, color, visible }: { ids: number[]; color: Color; visible: boolean }) {
+  const wanted = new Set(ids);
+  return new MVTLayer<SubBasinProperties>({
+    id: "sub-basins-outlined",
+    data: FAO_TILES.subBasins,
+    visible: visible && ids.length > 0,
+    minZoom: 0,
+    maxZoom: 8,
+    onTileError: ignoreMissingTile,
+    parameters: { depthCompare: "always" as const },
+    updateTriggers: { renderSubLayers: ids.join() },
+    renderSubLayers: (props) => {
+      const features = ((props.data as Feature[] | null) ?? []).filter((f) => wanted.has(f.properties?.SDG6_SB_ID));
+      const local = props.coordinateSystem === COORDINATE_SYSTEM.CARTESIAN;
+      return new PathLayer<Position[]>({
+        ...props,
+        id: `${props.id}-path`,
+        data: tileOutlines(features, local ? LOCAL_BOUNDS : geoBounds(props.tile.bbox as GeoBoundingBox)),
+        pickable: false,
+        getPath: (path) => path as [number, number][],
+        getColor: color,
+        getWidth: 2.5,
+        widthUnits: "pixels",
+        jointRounded: true,
+      });
+    },
+  });
+}
+
+export interface Bounds {
   minX: number;
   minY: number;
   maxX: number;
@@ -106,9 +136,9 @@ interface Bounds {
 
 // Tile-local coordinates (used once MapLibre leaves globe mode at high zoom) run
 // from 0 to 1 across the tile.
-const LOCAL_BOUNDS: Bounds = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+export const LOCAL_BOUNDS: Bounds = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
 
-function geoBounds({ west, south, east, north }: GeoBoundingBox): Bounds {
+export function geoBounds({ west, south, east, north }: GeoBoundingBox): Bounds {
   return { minX: west, minY: south, maxX: east, maxY: north };
 }
 
@@ -119,15 +149,24 @@ function geoBounds({ west, south, east, north }: GeoBoundingBox): Bounds {
  * edge and is closed off there by an artificial edge. A polygon stroke would draw
  * those edges as lines along every tile seam. Keeping only segments that reach into
  * the tile drops them; the real borders in the buffer are drawn by the neighbouring
- * tile anyway.
+ * tile anyway. Tiles cut without a buffer (the countries) are closed off along the
+ * tile edge itself, so segments that run along an edge are dropped too.
  */
-function tileOutlines(features: Feature[], b: Bounds): Position[][] {
+export function tileOutlines(features: Feature[], b: Bounds): Position[][] {
   const paths: Position[][] = [];
+  const eps = (b.maxX - b.minX) * 1e-4;
+  const near = (v: number, edge: number) => Math.abs(v - edge) < eps;
+  const alongEdge = (p: Position, q: Position) =>
+    (near(p[0], b.minX) && near(q[0], b.minX)) ||
+    (near(p[0], b.maxX) && near(q[0], b.maxX)) ||
+    (near(p[1], b.minY) && near(q[1], b.minY)) ||
+    (near(p[1], b.maxY) && near(q[1], b.maxY));
   const outside = (p: Position, q: Position) =>
     (p[0] < b.minX && q[0] < b.minX) ||
     (p[0] > b.maxX && q[0] > b.maxX) ||
     (p[1] < b.minY && q[1] < b.minY) ||
-    (p[1] > b.maxY && q[1] > b.maxY);
+    (p[1] > b.maxY && q[1] > b.maxY) ||
+    alongEdge(p, q);
 
   for (const { geometry } of features) {
     const polygons =
