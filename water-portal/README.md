@@ -4,8 +4,9 @@ A map of the world (MapLibre globe + deck.gl) under a top bar for choosing the v
 (Country / Basin / Local) and a date range. The map has no basemap: it shows FAO's
 M49 countries (or, in the Basin view, the SDG 6 major basins), with lakes and rivers
 on top. In the Local view, the map shows WaPOR's actual evapotranspiration for any
-selected range, added up from WaPOR's dekadal, monthly and annual rasters; for a single
-dekad, a slider in its legend hides pixels whose
+selected range, added up from WaPOR's dekadal, monthly and annual rasters, and a play
+button moves the range forward as an animation; for a single dekad, a slider in its
+legend hides pixels whose
 NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, selecting a sub-basin runs FAO's water balance
 model for it and everything upstream of it: the map colours those sub-basins by precipitation,
 evapotranspiration, discharge or storage change over the selected range, and a panel shows its
@@ -67,6 +68,7 @@ water-portal/
     │   ├── places.ts       What's at a point: country, major basin, sub-basin
     │   ├── sub-basin-network.ts  Sub-basins upstream of a sub-basin
     │   ├── wapor-legend.ts Legend for the WaPOR raster, with the NDVI quality slider
+    │   ├── wapor-player.ts Playback (Local view): frames, loading ahead, timing
     │   └── layers/         One file per kind of layer
     │       ├── tile-urls.ts  Where each tile set lives (local or FAO's bucket)
     │       ├── countries.ts  M49 country areas (land; what clicks hit), the selected one's outline,
@@ -171,6 +173,18 @@ water-portal/
   Mercator scale, which on a globe asks for ever finer tiles towards the poles and keeps
   the far side: over 16,000 tiles at zoom 9. The debug window's `wapor` entry shows the
   zoom, overview, pixel size and tile count.
+- **Playback** (Local view, [src/map/wapor-player.ts](src/map/wapor-player.ts)) moves
+  the range forward by its own unit (a year for whole years, a month for whole months,
+  else a dekad), 0.7 s a frame, and stops at the last published one (play again there
+  starts from 2018). Frames are loaded ahead into a cache of decoded tiles in
+  [wapor.ts](src/map/layers/wapor.ts) (384 MB, shared with the map, so sums that share
+  a raster share its tiles): 12 frames ahead, 3 at a time, only the tiles in view. It
+  starts once 3 are in, and waits again if it catches up (the button's ring turns
+  meanwhile); the slider shows how far ahead it has loaded. The map keeps the shown
+  frame until the next has every tile in view, then switches: two layers, the next one
+  hidden. Moving the map loads the frames ahead again for the new view; any change of
+  range or view stops playback. Up to 16 requests to the bucket at once (it speaks
+  HTTP/2), instead of deck.gl-raster's default of 6.
 - **The water balance model** (Basin view) is
   [fao-wapor-discharge](../../fao-wapor-discharge)'s `sql/calc_runoff.sql`, copied to
   [src/basin/calc_runoff.sql](src/basin/calc_runoff.sql) (copy it again when it changes). It

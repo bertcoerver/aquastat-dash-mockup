@@ -25,8 +25,12 @@ export interface WaterMap {
   /** Show the areas for a toolbar view: basins in the Basin view, else countries. */
   setView(view: View): void;
   setLayerVisible(layer: ToggleableLayer, visible: boolean): void;
-  /** Show the WaPOR raster for a period (null: none). `onLoad` runs once it's opened. */
-  setWapor(period: WaporPeriod | null, onLoad?: () => void): void;
+  /**
+   * Show the WaPOR raster for a period (null: none). `onLoad` runs once it's opened.
+   * `seamless` (playback): keep showing the current one until the new one has loaded
+   * every tile in view, then switch at once.
+   */
+  setWapor(period: WaporPeriod | null, onLoad?: () => void, seamless?: boolean): void;
   /** Hide WaPOR pixels with a longer NDVI gap than this, in dekads (null: none). */
   setWaporMaxGap(maxGap: number | null): void;
   /** Show the selection: a marker at the point, and the country and basins filled. */
@@ -54,6 +58,12 @@ export interface WaterMap {
   theme: MapTheme;
 }
 
+interface WaporEntry {
+  period: WaporPeriod;
+  onLoad?: () => void;
+  id: number; // a layer of its own, so a new period doesn't take over the shown one's tiles
+}
+
 interface MapSelection {
   lngLat: LngLat | null;
   country: number | null;
@@ -78,7 +88,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
     view: "country" as View,
     selection: { lngLat: null, country: null, majorBasin: null, subBasin: null } as MapSelection,
     visible: { rivers: true, lakes: true } as Record<ToggleableLayer, boolean>,
-    wapor: null as { period: WaporPeriod; onLoad?: () => void } | null,
+    wapor: null as WaporEntry | null,
+    waporNext: null as WaporEntry | null, // seamless: loading, not drawn yet
     waporMaxGap: null as number | null,
     hoverFills: undefined as { key: number; colors: Map<number, Color> } | undefined,
     valueFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
@@ -134,7 +145,18 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
         visible: !basins,
         fills: state.view === "country" ? state.countryFills : undefined,
       }),
-      waporLayer({ period: state.wapor?.period ?? null, maxGap: state.waporMaxGap, onLoad: state.wapor?.onLoad }),
+      ...[state.wapor, state.waporNext].map(
+        (entry) =>
+          entry &&
+          waporLayer({
+            id: `wapor-aeti-${entry.id}`,
+            period: entry.period,
+            maxGap: state.waporMaxGap,
+            onLoad: entry.onLoad,
+            hidden: entry === state.waporNext,
+            onViewportLoad: entry === state.waporNext ? () => showNextWapor(entry) : undefined,
+          }),
+      ),
       major.areas,
       sub.areas,
       bordersLayer({ color: theme.border, visible: !basins }),
@@ -187,6 +209,15 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
   map.getCanvasContainer().addEventListener("pointerleave", () => onHover?.(null));
   function render() {
     overlay.setProps({ layers: layers() });
+  }
+
+  let waporId = 0;
+  function showNextWapor(entry: WaporEntry) {
+    if (entry !== state.waporNext) return;
+    state.wapor = entry;
+    state.waporNext = null;
+    // (Called while deck.gl updates its layers.)
+    queueMicrotask(render);
   }
 
   return {
@@ -243,10 +274,18 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
       state.countrySymbols = symbols;
       render();
     },
-    setWapor(period, onLoad) {
-      const old = state.wapor?.period;
-      if (period?.key === old?.key && period?.qualityUrl === old?.qualityUrl) return;
-      state.wapor = period && { period, onLoad };
+    setWapor(period, onLoad, seamless = false) {
+      const same = (entry: WaporEntry | null) =>
+        period?.key === entry?.period.key && period?.qualityUrl === entry?.period.qualityUrl;
+      if (same(state.waporNext)) return;
+      if (same(state.wapor)) {
+        if (!state.waporNext) return;
+        state.waporNext = null;
+      } else {
+        const entry = period && { period, onLoad, id: ++waporId };
+        if (seamless && entry && state.wapor) state.waporNext = entry;
+        else [state.wapor, state.waporNext] = [entry, null];
+      }
       render();
     },
     setWaporMaxGap(maxGap) {

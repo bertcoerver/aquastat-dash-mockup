@@ -11,6 +11,9 @@
  * overlap, the first movement decides: left moves the start, right the end.
  * Keyboard (handles): arrows step one dekad (one year in Country), Page Up/Down one
  * year, Home/End to the limits.
+ *
+ * While playing, a lighter part of the track after the range shows how far ahead the
+ * map has loaded.
  */
 import { COUNTRY_MAX_YEAR, MAX_DK, MIN_YEAR, dkY, fmtEnd, fmtStart, mk } from "./dekads";
 import { changeEnd, changeStart, moveRange, type DekadRange } from "./range-rules";
@@ -32,14 +35,18 @@ function lengthLabel({ start, end }: DekadRange) {
   return `${count} ${unit}${count === 1 ? "" : "s"}`;
 }
 
-/**
- * Wire up the slider. `onInput` runs whenever the user's action changes the range.
- * Returns a function that redraws the slider for a state.
- */
+export interface RangeSlider {
+  /** Redraw the slider for a state. */
+  render(state: ToolbarState): void;
+  /** Show the track loaded up to a dekad boundary, after the range (null: none). */
+  setBuffered(boundary: number | null): void;
+}
+
+/** Wire up the slider. `onInput` runs whenever the user's action changes the range. */
 export function initRangeSlider(
   getState: () => ToolbarState,
   onInput: (next: DekadRange, grip: Grip) => void,
-): (state: ToolbarState) => void {
+): RangeSlider {
   const slider = $("slider");
   const track = $("slider-track");
   const handles = { start: $("start-handle"), end: $("end-handle") };
@@ -144,7 +151,15 @@ export function initRangeSlider(
 
   // --- render -------------------------------------------------------------------
 
-  return ({ view, range }) => {
+  let buffered: number | null = null;
+  function renderBuffered() {
+    const el = $("slider-buffered");
+    const from = getState().range.end + 1;
+    el.hidden = buffered === null || buffered <= from;
+    if (!el.hidden) Object.assign(el.style, { left: pct(from), width: pct(buffered! - from) });
+  }
+
+  function render({ view, range }: ToolbarState) {
     const { start, end } = range;
     slider.dataset.view = view;
     handles.start.style.left = pct(start);
@@ -170,5 +185,14 @@ export function initRangeSlider(
     $("start-label").textContent = fmtStart(start);
     $("end-label").textContent = fmtEnd(end);
     $("range-len").textContent = lengthLabel(range);
+    renderBuffered();
+  }
+
+  return {
+    render,
+    setBuffered(boundary) {
+      buffered = boundary;
+      renderBuffered();
+    },
   };
 }

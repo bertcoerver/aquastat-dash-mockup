@@ -64,6 +64,11 @@
       </div>
 
       <div class="range" role="group" aria-label="Date range">
+        <!-- Local view: play the range forward (see src/map/wapor-player.ts). -->
+        <button class="play" id="play-button" type="button" aria-label="Play" data-status="stopped" hidden>
+          <svg class="play-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor" /></svg>
+          <svg class="pause-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" fill="currentColor" /></svg>
+        </button>
         <div class="range-readout" aria-hidden="true">
           <span id="start-label"></span>
           <span class="arrow">→</span>
@@ -73,6 +78,7 @@
         <div class="slider" id="slider">
           <div class="slider-track" id="slider-track">
             <div class="slider-unavailable" id="slider-unavailable" hidden></div>
+            <div class="slider-buffered" id="slider-buffered" hidden></div>
             <div class="slider-band" id="slider-band"></div>
           </div>
           <div class="slider-handle" id="start-handle" role="slider" tabindex="0" aria-label="Start date"></div>

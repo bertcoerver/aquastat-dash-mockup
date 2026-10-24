@@ -1,10 +1,10 @@
 import { initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
 import {
+  checkedWaporPeriod,
   onWaporTiles,
-  publishedWaporPeriod,
-  waporAvailable,
   waporPeriod,
+  type CheckedWaporPeriod,
   type WaporPeriod,
   type WaporTiles,
 } from "./map/layers/wapor";
@@ -13,6 +13,7 @@ import { placeAt, type LngLat } from "./map/places";
 import { upstreamFinder, type SubBasin } from "./map/sub-basin-network";
 import { NOTHING, selection, type SelectionSource } from "./selection";
 import { initWaporLegend } from "./map/wapor-legend";
+import { initWaporPlayer } from "./map/wapor-player";
 import { initDebugPanel } from "./panels/debug-panel";
 import { initLayersMenu } from "./panels/layers-menu";
 import { initLoadingIndicator } from "./panels/loading-indicator";
@@ -203,29 +204,49 @@ function showWapor(range: DekadRange | null) {
   waporLegend.quality(draft?.qualityUrl ? "checking" : null);
   if (!range || !draft) return hideWapor();
   waporTimer = window.setTimeout(async () => {
-    let period: WaporPeriod | null = null;
+    let checked: CheckedWaporPeriod | null = null;
     let failed = false; // couldn't reach the bucket
-    let qualityAvailable = false;
     try {
-      period = await publishedWaporPeriod(range);
-      if (period?.qualityUrl) qualityAvailable = await waporAvailable(period.qualityUrl).catch(() => false);
+      checked = await checkedWaporPeriod(range);
     } catch {
       failed = true;
     }
     if (waporWanted !== wanted) return;
-    if (!period) {
+    if (!checked) {
       hideWapor();
       waporLegend.quality(null);
       return waporLegend.show(draft, failed ? "error" : "missing");
     }
-    waporLegend.show(period, "loading");
-    if (period.qualityUrl) waporLegend.quality(qualityAvailable ? "ready" : "missing");
-    else waporLegend.quality(null);
-    waporShown = { ...period, qualityUrl: qualityAvailable ? period.qualityUrl : null };
-    setWapor(waporShown, () => waporWanted === wanted && waporLegend.show(period, "ready"));
-    showWaporDebug();
+    showCheckedWapor(checked, false);
   }, 250);
 }
+
+/** Show a checked period; `seamless` (a playback frame): it's loaded already. */
+function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boolean) {
+  const wanted = waporWanted;
+  waporLegend.show(period, seamless ? "ready" : "loading");
+  waporLegend.quality(quality);
+  waporShown = period;
+  setWapor(period, () => waporWanted === wanted && waporLegend.show(period, "ready"), seamless);
+  showWaporDebug();
+}
+
+// Playback: each frame sets the range on the toolbar, and its period, loaded ahead, on
+// the map. Any other change of range or view stops it.
+let waporRange: DekadRange | null = null;
+let playing = false; // a frame is being shown
+const player = initWaporPlayer({
+  getRange: () => waporRange!,
+  show(range, checked) {
+    playing = true;
+    toolbarApi!.setRange(range);
+    playing = false;
+    clearTimeout(waporTimer);
+    waporWanted = `${range.start}-${range.end}`;
+    showCheckedWapor(checked, true);
+  },
+  onState: (state) => toolbarApi?.setPlayback(state),
+});
 
 // Debug: how the value is made, the map zoom and which overview the rasters cover the
 // view with. Tiles are picked on every frame while the map moves, so this redraws at
@@ -278,7 +299,11 @@ function onToolbarChange({ view: newView, range }: ToolbarState) {
   waterBalance.setRange(range);
   countryPanel.setView(view);
   countryPanel.setRange(range);
-  showWapor(view === "local" ? range : null);
+  waporRange = range;
+  if (!playing) {
+    player.stop();
+    showWapor(view === "local" ? range : null);
+  }
   debug("time", {
     view,
     start: fmtStart(range.start),
@@ -288,5 +313,5 @@ function onToolbarChange({ view: newView, range }: ToolbarState) {
 }
 selection.set(NOTHING);
 debug("hover", null);
-toolbarApi = initToolbar(onToolbarChange);
+toolbarApi = initToolbar(onToolbarChange, () => player.toggle());
 onToolbarChange(toolbarApi.state);

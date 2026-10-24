@@ -1,8 +1,10 @@
 /*
- * The top bar: view tabs (Country / Basin / Local) and the date range slider.
- * The markup lives in index.html; this module keeps the range valid for the active
- * view (see range-rules.ts) and shows when the system, not the user, moved an end.
+ * The top bar: view tabs (Country / Basin / Local), the date range slider and, in the
+ * Local view, the play button. The markup lives in index.html; this module keeps the
+ * range valid for the active view (see range-rules.ts) and shows when the system, not
+ * the user, moved an end.
  */
+import type { PlaybackState } from "../map/wapor-player";
 import { enterView, initialRange, type DekadRange, type View } from "./range-rules";
 import { initRangeSlider } from "./range-slider";
 
@@ -21,12 +23,17 @@ function flash(id: string) {
 
 export interface Toolbar {
   state: ToolbarState;
-  /** Set the range from elsewhere (the Basin view's time series); it must fit the view. */
+  /** Set the range from elsewhere (the Basin view's time series, playback); it must fit the view. */
   setRange(range: DekadRange): void;
+  /** Show the playback state: the play button and how far ahead the map has loaded. */
+  setPlayback(playback: PlaybackState): void;
 }
 
-/** Wire up the top bar. `onChange` runs after every change of view or range. */
-export function initToolbar(onChange: (state: ToolbarState) => void): Toolbar {
+/**
+ * Wire up the top bar. `onChange` runs after every change of view or range; `onPlay`
+ * when the play button is pressed.
+ */
+export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: () => void): Toolbar {
   const state: ToolbarState = { view: "country", range: initialRange() };
 
   /** Apply a new range; `adjusted` names the ends the system changed. */
@@ -41,7 +48,7 @@ export function initToolbar(onChange: (state: ToolbarState) => void): Toolbar {
     onChange({ ...state });
   }
 
-  const renderSlider = initRangeSlider(
+  const slider = initRangeSlider(
     () => state,
     (next, grip) => {
       const prev = state.range;
@@ -54,8 +61,12 @@ export function initToolbar(onChange: (state: ToolbarState) => void): Toolbar {
     },
   );
 
+  const play = document.getElementById("play-button")!;
+  play.addEventListener("click", () => onPlay?.());
+
   function render() {
-    renderSlider(state);
+    slider.render(state);
+    play.hidden = state.view !== "local";
     for (const tab of document.querySelectorAll<HTMLButtonElement>(".tab")) {
       tab.setAttribute("aria-selected", String(tab.dataset.view === state.view));
     }
@@ -78,6 +89,12 @@ export function initToolbar(onChange: (state: ToolbarState) => void): Toolbar {
     setRange(range) {
       if (range.start === state.range.start && range.end === state.range.end) return;
       update(range, {}); // the user chose it (elsewhere), so no highlight
+    },
+    setPlayback({ status, bufferedTo }) {
+      play.dataset.status = status;
+      play.setAttribute("aria-label", status === "stopped" ? "Play" : "Pause");
+      play.title = status === "buffering" ? "Loading the next frames…" : "";
+      slider.setBuffered(bufferedTo);
     },
   };
 }

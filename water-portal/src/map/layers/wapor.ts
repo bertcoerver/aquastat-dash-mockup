@@ -16,7 +16,7 @@
 import type { Viewport } from "@deck.gl/core";
 import type { TileLayer } from "@deck.gl/geo-layers";
 import { MultiCOGLayer } from "@developmentseed/deck.gl-geotiff";
-import { defaultDecoderPool, type RasterArray, type RasterTypedArray } from "@developmentseed/geotiff";
+import { GeoTIFF, PerOriginSemaphore, defaultDecoderPool, type RasterArray, type RasterTypedArray } from "@developmentseed/geotiff";
 import type { Texture } from "@luma.gl/core";
 import { MONTHS, dkD, dkM, dkY, fmtEnd, fmtStart, startDay } from "../../toolbar/dekads";
 import type { DekadRange } from "../../toolbar/range-rules";
@@ -181,6 +181,27 @@ export async function publishedWaporPeriod(range: DekadRange): Promise<WaporPeri
   }
 }
 
+/** A period that has been checked, ready to show, and its quality raster's state. */
+export interface CheckedWaporPeriod {
+  /** Without its quality raster if that isn't published. */
+  period: WaporPeriod;
+  /** A dekad: whether its quality raster is published (null: not a dekad). */
+  quality: "ready" | "missing" | null;
+}
+
+/**
+ * What to show for a range, checked: the rasters published and opened, so the map can
+ * show it straight away. Null if it can't be made; rejects if the bucket can't be reached.
+ */
+export async function checkedWaporPeriod(range: DekadRange): Promise<CheckedWaporPeriod | null> {
+  const period = await publishedWaporPeriod(range);
+  if (!period) return null;
+  const quality = period.qualityUrl && (await waporAvailable(period.qualityUrl).catch(() => false));
+  const qualityUrl = quality ? period.qualityUrl : null;
+  await Promise.all([...period.terms.map((t) => t.url), ...(qualityUrl ? [qualityUrl] : [])].map(openRaster));
+  return { period: { ...period, qualityUrl }, quality: period.qualityUrl ? (quality ? "ready" : "missing") : null };
+}
+
 /**
  * Recent periods are published with a delay, so check a raster exists before opening
  * it. Rejects on a network error (not cached: tried again next time), so that isn't
@@ -196,6 +217,127 @@ export function waporAvailable(url: string): Promise<boolean> {
     check.catch(() => exists.delete(url));
   }
   return check;
+}
+
+/**
+ * Opened rasters, by URL: their headers are read once, by whichever needs them first
+ * (the map layer or the playback buffer). The least recently used are dropped first.
+ */
+const MAX_OPEN_RASTERS = 64;
+// The bucket speaks HTTP/2, so more than the browser's 6 per host for HTTP/1.1 (the
+// library's default): playback loads several frames' tiles at once.
+const LIMITER = new PerOriginSemaphore({ maxRequests: 16 });
+const rasters = new Map<string, Promise<GeoTIFF>>();
+const opened = new Map<string, GeoTIFF>();
+
+function openRaster(url: string): Promise<GeoTIFF> {
+  let raster = rasters.get(url);
+  if (raster) {
+    rasters.delete(url);
+  } else {
+    raster = GeoTIFF.fromUrl(url, { concurrencyLimiter: LIMITER });
+    raster.then((geotiff) => rasters.get(url) === raster && opened.set(url, geotiff), () => rasters.delete(url));
+  }
+  rasters.set(url, raster);
+  for (const old of rasters.keys()) {
+    if (rasters.size <= MAX_OPEN_RASTERS) break;
+    rasters.delete(old);
+    opened.delete(old);
+  }
+  return raster;
+}
+
+/** One tile of one raster, decoded. */
+interface RasterTile {
+  values: RasterTypedArray;
+  width: number;
+  height: number;
+  nodata: number | null;
+}
+
+/**
+ * Decoded tiles, by raster and tile (x, y, z), so playback can load them ahead and
+ * periods that share a raster share its tiles. The least recently used go first.
+ */
+const TILE_CACHE_BYTES = 384 * 2 ** 20;
+const tiles = new Map<string, { tile: Promise<RasterTile>; bytes: number; done: boolean }>();
+let tileBytes = 0;
+
+function rasterTile(url: string, { x, y, z }: TileIndex, signal?: AbortSignal): Promise<RasterTile> {
+  const key = `${z}/${x}/${y} ${url}`;
+  const hit = tiles.get(key);
+  if (hit) {
+    tiles.delete(key);
+    tiles.set(key, hit);
+    // Another reader may have given up on it (its tile left the view): then fetch it again.
+    return hit.tile.catch((err) => {
+      if (signal?.aborted) throw err;
+      return rasterTile(url, { x, y, z }, signal);
+    });
+  }
+  const tile = openRaster(url).then(async (geotiff) => {
+    const images = [geotiff, ...geotiff.overviews]; // full resolution first; z = 0 is the coarsest
+    const pool = defaultDecoderPool();
+    const { array } = await images[images.length - 1 - z].fetchTile(x, y, { boundless: false, pool, signal });
+    return { values: samples(array), width: array.width, height: array.height, nodata: array.nodata };
+  });
+  const entry = { tile, bytes: 0, done: false };
+  tiles.set(key, entry);
+  tile.then(
+    ({ values }) => {
+      if (tiles.get(key) !== entry) return;
+      Object.assign(entry, { bytes: values.byteLength, done: true });
+      tileBytes += entry.bytes;
+      for (const [old, { bytes, done }] of tiles) {
+        if (tileBytes <= TILE_CACHE_BYTES) break;
+        if (!done) continue;
+        tiles.delete(old);
+        tileBytes -= bytes;
+      }
+    },
+    () => tiles.get(key) === entry && tiles.delete(key),
+  );
+  return tile;
+}
+
+type TileIndex = { x: number; y: number; z: number };
+
+/** The tiles the map shows (the same for every period: they share one grid). */
+let viewTiles: TileIndex[] = [];
+let viewKey = "";
+const viewListeners = new Set<() => void>();
+
+/** Run `callback` whenever the map shows other tiles (the view moved). Returns a function that stops it. */
+export function onWaporView(callback: () => void) {
+  viewListeners.add(callback);
+  return () => viewListeners.delete(callback);
+}
+
+const periodRasters = (period: WaporPeriod) => [...period.terms.map((t) => t.url), ...(period.qualityUrl ? [period.qualityUrl] : [])];
+
+/** Whether every tile the map shows has been loaded for this period. */
+export function waporBuffered(period: WaporPeriod) {
+  return periodRasters(period).every((url) =>
+    viewTiles.every(({ x, y, z }) => tiles.get(`${z}/${x}/${y} ${url}`)?.done),
+  );
+}
+
+/**
+ * Load the tiles the map shows for a period, ahead of showing it. A tile that fails
+ * is left out (the map would fail on it too); rejects only when `signal` aborts.
+ */
+export async function bufferWapor(period: WaporPeriod, signal: AbortSignal) {
+  const view = viewTiles;
+  await Promise.all(
+    periodRasters(period).flatMap((url) =>
+      view.map((index) =>
+        rasterTile(url, index, signal).catch((err) => {
+          if (signal.aborted) throw err;
+        }),
+      ),
+    ),
+  );
+  signal.throwIfAborted();
 }
 
 /**
@@ -324,16 +466,10 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
    */
   async _getTileData(...[tile, options]: Parameters<MultiCOGLayer["_getTileData"]>) {
     const { x, y, z } = tile.index;
-    const { multiDescriptor, sources } = this.state;
+    const { multiDescriptor } = this.state;
     const { device, signal } = options;
-    const pool = this.props.pool ?? defaultDecoderPool();
     const config = this.props.sources as Record<string, WaporSource>;
-    const read = async (name: string) => {
-      const { geotiff } = sources!.get(name)!;
-      const images = [geotiff, ...geotiff.overviews]; // full resolution first; z = 0 is the coarsest
-      const { array } = await images[images.length - 1 - z].fetchTile(x, y, { boundless: false, pool, signal });
-      return { values: samples(array), width: array.width, height: array.height, nodata: array.nodata };
-    };
+    const read = (name: string) => rasterTile(config[name].href, { x, y, z }, signal);
 
     const names = Object.keys(config).filter((name) => name !== "quality");
     const [quality, ...rasters] = await Promise.all([config.quality ? read("quality") : null, ...names.map(read)]);
@@ -390,6 +526,12 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
         for (let x = x0; x <= x1; x++) {
           for (let y = y0; y <= y1; y++) indices.push({ x: ((x % matrixWidth) + matrixWidth) % matrixWidth, y, z });
         }
+        const key = indices.map(({ x, y, z }) => `${z}/${x}/${y}`).join();
+        if (key !== viewKey) {
+          viewTiles = indices;
+          viewKey = key;
+          viewListeners.forEach((listener) => listener());
+        }
 
         const round = (v: number) => Math.round(v);
         reportTiles?.({
@@ -407,8 +549,11 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
   }
 }
 
-/** A MultiCOGLayer source: a raster in the sum (t0, t1, …), or the quality raster. */
-type WaporSource = { url: string; factor: number };
+/**
+ * A MultiCOGLayer source: a raster in the sum (t0, t1, …), or the quality raster. Once
+ * opened, the layer gets the raster itself as `url`, so it doesn't read the header again.
+ */
+type WaporSource = { url: string | GeoTIFF; href: string; factor: number };
 
 /** The samples of a one-band tile, in either layout. */
 const samples = (array: RasterArray) => (array.layout === "band-separate" ? array.bands[0] : array.data);
@@ -418,8 +563,9 @@ function band(device: Texture["device"], data: RasterTypedArray, format: "r32flo
   return { texture, uvTransform: [0, 0, 1, 1] as [number, number, number, number], width, height, byteLength: data.byteLength };
 }
 
-// MultiCOGLayer opens its rasters again whenever it gets a new `sources` object.
-let sources: { key: string; value: Record<string, WaporSource> } | null = null;
+// MultiCOGLayer opens its rasters again whenever it gets a new `sources` object. While
+// playing, the map has two periods' layers: the one shown and the next.
+const sourcesByKey = new Map<string, Record<string, WaporSource>>();
 
 /**
  * The period's raster (or sum of rasters), coloured with its colour map; nothing where
@@ -431,22 +577,35 @@ export function waporLayer({
   period,
   maxGap = null,
   onLoad,
+  id = "wapor-aeti",
+  hidden = false,
+  onViewportLoad,
 }: {
   period: WaporPeriod | null;
   maxGap?: number | null;
   onLoad?: () => void;
+  id?: string;
+  /** Loads its tiles, but doesn't draw them (the next period while playing). */
+  hidden?: boolean;
+  /** Runs when every tile in view has loaded. */
+  onViewportLoad?: () => void;
 }) {
   if (!period) return null;
   const key = `${period.key} ${period.qualityUrl}`;
-  if (sources?.key !== key) {
-    const value: Record<string, WaporSource> = {};
-    period.terms.forEach(({ url, factor }, i) => (value[`t${i}`] = { url, factor }));
-    if (period.qualityUrl) value.quality = { url: period.qualityUrl, factor: 1 };
-    sources = { key, value };
+  let sources = sourcesByKey.get(key);
+  if (!sources) {
+    const source = (href: string, factor: number) => ({ url: opened.get(href) ?? href, href, factor });
+    sources = {};
+    period.terms.forEach(({ url, factor }, i) => (sources![`t${i}`] = source(url, factor)));
+    if (period.qualityUrl) sources.quality = source(period.qualityUrl, 1);
+    sourcesByKey.set(key, sources);
+    for (const old of sourcesByKey.keys()) if (sourcesByKey.size > 4) sourcesByKey.delete(old);
   }
   return new GlobeMultiCOGLayer({
-    id: "wapor-aeti",
-    sources: sources.value,
+    id,
+    visible: !hidden,
+    sources: sources as Record<string, { url: string }>,
+    concurrencyLimiter: LIMITER,
     composite: period.qualityUrl ? { r: "aeti", g: "quality" } : { r: "aeti" },
     // A new maxGap only re-renders the loaded tiles.
     renderPipeline: [{ module: AetiRamp, props: rampProps(period.ramp, maxGap) }],
@@ -454,5 +613,7 @@ export function waporLayer({
     resampling: "nearest",
     parameters: { depthCompare: "always" },
     onGeoTIFFLoad: onLoad,
+    // (Passed on to the TileLayer, though MultiCOGLayer's typings leave it out.)
+    ...({ onViewportLoad } as object),
   });
 }
