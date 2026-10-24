@@ -1,8 +1,10 @@
 /*
- * The "Layers" button and its small menu of on/off switches. The markup lives in
- * index.html; each checkbox names its layer in data-layer.
+ * The Layers button and its small menu of on/off switches, the theme and the layout.
+ * The markup lives in index.html; each layer checkbox names its layer in data-layer.
+ * main.ts puts it among the map's controls.
  */
 import type { ToggleableLayer } from "../map/map";
+import { resetLayout } from "./floating";
 
 export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boolean) => void) {
   const menu = document.getElementById("layers-menu")!;
@@ -29,4 +31,5 @@ export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boole
   for (const input of panel.querySelectorAll<HTMLInputElement>("input[data-layer]")) {
     input.addEventListener("change", () => onToggle(input.dataset.layer as ToggleableLayer, input.checked));
   }
+  document.getElementById("reset-layout")!.addEventListener("click", resetLayout);
 }

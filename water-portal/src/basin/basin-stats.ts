@@ -279,9 +279,6 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride }: 
 
     // Legend
     legend.hidden = false;
-    const pinned = state.pinned.get(scope());
-    const mode = drivers.preview() ? "Preview" : pinned ? "Pinned" : "Default";
-    $("bs-legend-source").innerHTML = `<b>${mode}</b> · ${esc(card.title(ctx))}` + (pinned && !drivers.preview() ? ` <span class="cp-unpin">(Esc to unpin)</span>` : "");
     $("bs-legend-title").innerHTML = `${esc(spec.title)}<small>${esc(spec.note)}${spec.scale === "log" ? " · Log scale" : ""}</small>`;
     $("bs-legend-period").textContent = ctx.period;
     $("bs-legend-unit").textContent = spec.unit;

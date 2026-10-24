@@ -1,6 +1,8 @@
 /*
- * The date range slider: a track from 1 Jan 2018 to the end of the current dekad,
- * with a handle for each end of the range. The markup lives in index.html.
+ * The date range slider: a track from 1 Jan 2016 to the end of the current dekad,
+ * with a handle for each end of the range. The markup lives in index.html. The part
+ * the view can't select is hatched: before WaPOR's data in Basin and Local, after the
+ * latest AQUASTAT year in Country.
  *
  * Positions on the track are day BOUNDARIES: boundary b is the start of day b, so a
  * range { start, end } (in days) runs from boundary `start` to boundary `end + 1`, and
@@ -16,14 +18,14 @@
  * While playing, a lighter part of the track after the range shows how far ahead the
  * map has loaded.
  */
-import { COUNTRY_MAX_YEAR, MAX_DAY, MIN_YEAR, dayOf, fmtDay } from "./dekads";
+import { MAX_DAY, MIN_YEAR, dayDk, dayOf, dkY, fmtDay } from "./dekads";
 import {
   changeEnd,
   changeStart,
-  coveringDekads,
-  isDekads,
+  firstDay,
   moveRange,
   stepBoundary,
+  unavailable,
   type DayRange,
   type View,
 } from "./range-rules";
@@ -44,15 +46,10 @@ const pct = (b: number) => `${(b / BOUNDARIES) * 100}%`;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const $ = (id: string) => document.getElementById(id)!;
 
-function lengthLabel(days: DayRange) {
-  if (!isDekads(days)) {
-    const n = days.end - days.start + 1;
-    return `${n} day${n === 1 ? "" : "s"}`;
-  }
-  const { start, end } = coveringDekads(days);
-  const n = end - start + 1;
-  const [count, unit] = n % 36 === 0 ? [n / 36, "year"] : n % 3 === 0 ? [n / 3, "month"] : [n, "dekad"];
-  return `${count} ${unit}${count === 1 ? "" : "s"}`;
+/** The range's length: in years in Country (whole years), else in days. */
+function lengthLabel(view: View, { start, end }: DayRange) {
+  const n = view === "country" ? dkY(dayDk(end)) - dkY(dayDk(start)) + 1 : end - start + 1;
+  return `${n} ${view === "country" ? "year" : "day"}${n === 1 ? "" : "s"}`;
 }
 
 export interface RangeSlider {
@@ -100,11 +97,10 @@ export function initRangeSlider(
     return { p: clamp((clientX - r.left) / r.width, 0, 1) * BOUNDARIES, pxPerDay: r.width / BOUNDARIES };
   };
 
-  slider.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault(); // no text selection; focus is set below
+  /** What a press at `clientX` would grab (null: the start or end, by the first movement). */
+  function gripAt(clientX: number) {
     const { range } = getState();
-    const { p, pxPerDay } = posAt(e.clientX);
+    const { p, pxPerDay } = posAt(clientX);
     const inBand = p > range.start && p < range.end + 1;
     const reach = inBand ? Math.min(CORE_PX, ((range.end + 1 - range.start) * pxPerDay) / 4) : HIT_PX;
     const toStart = Math.abs(p - range.start) * pxPerDay;
@@ -115,19 +111,37 @@ export function initRangeSlider(
     else if (toStart <= reach || toEnd <= reach) grip = toStart <= toEnd ? "start" : "end";
     else if (inBand) grip = "band";
     else grip = p < range.start ? "start" : "end";
+    return { grip, p, range, onTrack: Math.min(toStart, toEnd) > HIT_PX && grip !== "band" };
+  }
+
+  // The cursor shows what a press would grab: "resize" for a handle, "move" for the band.
+  const setHover = (hover: "resize" | "move" | null) => {
+    if (hover) slider.dataset.hover = hover;
+    else delete slider.dataset.hover;
+  };
+
+  slider.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // no text selection; focus is set below
+    const { grip, p, range, onTrack } = gripAt(e.clientX);
 
     drag = { grip, p, range };
     slider.setPointerCapture(e.pointerId);
     slider.classList.add("dragging");
+    setHover(grip === "band" ? "move" : "resize");
     if (grip === "start" || grip === "end") {
       handles[grip].focus({ preventScroll: true });
       // A press on the bare track brings the handle there straight away.
-      if (Math.min(toStart, toEnd) > HIT_PX) moveTo(grip, p, drag);
+      if (onTrack) moveTo(grip, p, drag);
     }
   });
 
   slider.addEventListener("pointermove", (e) => {
-    if (!drag) return;
+    if (!drag) {
+      const { grip, onTrack } = gripAt(e.clientX);
+      setHover(grip === "band" ? "move" : onTrack ? null : "resize");
+      return;
+    }
     const { p, pxPerDay } = posAt(e.clientX);
     if (!drag.grip) {
       if (Math.abs(p - drag.p) * pxPerDay < 3) return;
@@ -143,6 +157,7 @@ export function initRangeSlider(
   };
   slider.addEventListener("pointerup", endDrag);
   slider.addEventListener("pointercancel", endDrag);
+  slider.addEventListener("pointerleave", () => drag || setHover(null));
 
   // --- keyboard -----------------------------------------------------------------
 
@@ -191,21 +206,20 @@ export function initRangeSlider(
       [handles.start, start, fmtDay(start)],
       [handles.end, end, fmtDay(end)],
     ] as const) {
-      el.setAttribute("aria-valuemin", "0");
+      el.setAttribute("aria-valuemin", String(firstDay(view)));
       el.setAttribute("aria-valuemax", String(MAX_DAY));
       el.setAttribute("aria-valuenow", String(value));
       el.setAttribute("aria-valuetext", text);
     }
 
-    // Country: the current, incomplete year can't be selected.
-    const unavailable = $("slider-unavailable");
-    const firstMissing = dayOf(COUNTRY_MAX_YEAR + 1, 0, 1);
-    unavailable.hidden = view !== "country" || firstMissing >= BOUNDARIES;
-    Object.assign(unavailable.style, { left: pct(firstMissing), right: "0" });
+    const hatched = $("slider-unavailable");
+    const gap = unavailable(view);
+    hatched.hidden = !gap;
+    if (gap) Object.assign(hatched.style, { left: pct(gap.from), width: pct(gap.to - gap.from) });
 
     $("start-label").textContent = fmtDay(start);
     $("end-label").textContent = fmtDay(end);
-    $("range-len").textContent = lengthLabel(range);
+    $("range-len").textContent = lengthLabel(view, range);
     renderBuffered();
   }
 

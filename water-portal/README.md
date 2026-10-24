@@ -111,6 +111,7 @@ water-portal/
     │   ├── basin-tree.ts   Major basins → sub-basins, nested the way the rivers run
     │   ├── range-rules.ts  Which ranges each view allows, and how they're adjusted
     │   ├── range-slider.ts The two-handle date range slider
+    │   ├── date-picker.ts  Calendar for picking either end exactly (click a date above the slider)
     │   └── toolbar.ts      View tabs, the current range, highlights
     └── styles/
         ├── tokens.css      Colours and fonts (light and dark)
@@ -127,8 +128,11 @@ water-portal/
 
 - **Country statistics** come from FAO's AQUASTAT dissemination table
   (`fao-maps.fao_aquastat_dissemination.mvw_aquastat`) through the same BigQuery proxy as the
-  Basin view's model, one query per topic (~300 KB, a few seconds), from 2010. AQUASTAT's latest
-  year is 2023: for a later year in the top bar the panel shows 2023 and says so. Regional rows
+  Basin view's model, one query per topic (~300 KB, a few seconds), from 2010. Years after
+  AQUASTAT's latest (2023 at present) can't be selected; the limit is read from the loaded data,
+  so a new AQUASTAT year becomes selectable without a code change. A range of several years
+  shows each value's yearly mean (regions: the mean of their yearly aggregates); line charts
+  shade the range. Regional rows
   use AQUASTAT's own aggregates; where it has none (wastewater reuse, irrigation by source) they
   are summed or area-weighted from the region's countries. Regions follow FAO's Water Portal (SDG
   regions with some split into sub-regions), from UNSD's M49 table.
@@ -142,10 +146,13 @@ water-portal/
   so only those on the near side of the globe are kept.
 - **Date rules** are documented at the top of
   [src/toolbar/range-rules.ts](src/toolbar/range-rules.ts). The slider works in days:
-  any day in Local, dekad boundaries in Basin, calendar years in Country. Basin and
+  any day in Local, dekad boundaries in Basin, whole calendar years (one or more) in Country. The track runs
+  from 1 Jan 2016 to the current dekad; the part a view can't select is hatched (before
+  1 Jan 2018 in Basin and Local, after AQUASTAT's latest year in Country). Basin and
   Country get the range as dekads; entering Basin from a day range takes the dekads it
-  lies in. The track has about 4–5 days per pixel, so to pick a day exactly use the
-  arrow keys on a handle (a day in Local). When the system changes a
+  lies in. The track has about 4–5 days per pixel, so to pick a day exactly click the
+  date above the slider (a calendar, following the same rules: a day in Local, a dekad in
+  Basin, a year in Country) or use the arrow keys on a handle (a day in Local). When the system changes a
   date the user didn't touch (for example on switching view), that end of the slider
   briefly lights up.
 - **Borders are lines, not polygon outlines.** Tiles cut polygons at their edges, and
@@ -172,14 +179,21 @@ water-portal/
   raster (existence check, header, a request per tile); so 7 months load as 7 M, 8 as
   A − 4 M. Rasters not published yet are left out and the sum planned again. All
   rasters share one grid, so each tile is summed on the CPU from the same tile of
-  each, as the total in mm. At full resolution this is exact (a month is the sum of
+  each, as the total in mm, divided by the days in the range: the map always shows
+  the average in mm/day. At full resolution this is exact (a month is the sum of
   days × its dekads, a year the sum of its months, to WaPOR's rounding); the
-  overviews are averaged separately, so zoomed out it's close but not exact. A single
-  published dekad, month or year shows as is, in its own unit. A range that starts or
+  overviews are averaged separately, so zoomed out it's close but not exact. A range that starts or
   ends within a dekad takes those days' share of the dekad's raster (mm/day × days,
   e.g. 5 Jan – 31 Dec 2025 = `A[2025] − 4·D[2025-01-D1]`): that assumes ET is even
   within the dekad, as WaPOR v3 has no daily ETIa, and the legend and debug window say
   so. The debug window's `wapor` entry shows the equation, the number of rasters and the cost.
+- **The colour range** stretches WaPOR's dekadal colour map over the values on screen:
+  the legend's button cycles between 0–100%, 1–99% and 5–95% of them. `waporViewRange`
+  in [wapor.ts](src/map/layers/wapor.ts) sums the cached tiles in view again, keeps
+  the pixels inside the visible lon/lat box (and not hidden by the quality filter), and
+  takes the percentiles from a 4096-bin histogram. It runs when the view stops moving,
+  a tile loads, or the period, filter or button changes; during playback the range is
+  kept, so frames can be compared.
 - **The NDVI quality filter** (single dekads) loads `L1-QUAL-NDVI-D` as a second
   source of the same layer, on the same grid: dekads since the last valid observation (0–255,
   255 nodata). The shader drops pixels above the slider's value, so moving it fetches

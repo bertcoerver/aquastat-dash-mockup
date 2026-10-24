@@ -4,8 +4,10 @@
  *
  * - hovering a driver (or focusing it with the keyboard) previews its map, after a
  *   short delay so crossing it on the way elsewhere doesn't repaint the map;
- * - clicking it pins that map, so it stays while the pointer moves on; clicking it
- *   again, or Escape, unpins it;
+ * - clicking it pins that map, so it stays while the pointer moves on: while a map
+ *   is pinned, hovering only previews the rows and series of the pinned driver itself
+ *   (clicking another driver re-pins); clicking the pinned one again, or Escape,
+ *   unpins it;
  * - inside a driver, the element under the pointer with data-sub (a chart row, a
  *   legend series) is passed along, so the map can pick out that area or series;
  * - data-tip on a chart mark is shown as a tooltip, data-x (a year or month on a
@@ -47,6 +49,9 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
 
   function setPreview(next: Driver | null, delay = 0) {
     clearTimeout(timer);
+    // A pinned map stays put, except to show the pinned driver's own rows and series.
+    const pin = pinned();
+    if (pin && !(next?.sub && next.id === pin.id)) next = null;
     const apply = () => {
       if (same(next, preview)) return;
       preview = next;
@@ -58,7 +63,11 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
 
   function pin(driver: Driver) {
     // Clicking the pinned card again unpins it (a click on another row or series re-pins).
-    setPinned(same(pinned(), driver) ? null : driver);
+    const next = same(pinned(), driver) ? null : driver;
+    setPinned(next);
+    // Unpinned, the driver under the pointer is previewed again.
+    clearTimeout(timer);
+    preview = next ? null : driver;
     onChange();
   }
 
@@ -72,8 +81,8 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
   root.addEventListener("pointerover", (e) => {
     const d = driverAt(e.target);
     if (!d) return;
-    // Moving within the previewed card (to another row) follows at once.
-    setPreview(d, preview?.id === d.id ? 0 : HOVER_DELAY);
+    // Moving within the previewed or pinned card (to another row) follows at once.
+    setPreview(d, preview?.id === d.id || pinned()?.id === d.id ? 0 : HOVER_DELAY);
   });
   root.addEventListener("pointerleave", () => {
     setPreview(null, HOVER_DELAY);
@@ -130,7 +139,10 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
   };
 }
 
-/** Mark the drivers under `root`: the one the map shows, the previewed and the pinned one. */
+/**
+ * Mark the drivers under `root`: the one the map shows, the previewed and the pinned
+ * one, and within the pinned one the row or series it was pinned on (if any).
+ */
 export function markDrivers(root: HTMLElement, shown: Driver | null, preview: Driver | null, pinned: Driver | null) {
   for (const el of root.querySelectorAll<HTMLElement>("[data-driver]")) {
     const id = el.dataset.driver;
@@ -138,5 +150,9 @@ export function markDrivers(root: HTMLElement, shown: Driver | null, preview: Dr
     el.classList.toggle("pinned", pinned?.id === id);
     el.classList.toggle("mapped", shown?.id === id);
     el.setAttribute("aria-pressed", String(pinned?.id === id));
+  }
+  for (const el of root.querySelectorAll("[data-sub]")) {
+    const on = !!pinned?.sub && el.getAttribute("data-sub") === pinned.sub && el.closest<HTMLElement>("[data-driver]")?.dataset.driver === pinned.id;
+    el.classList.toggle("pinned-sub", on);
   }
 }

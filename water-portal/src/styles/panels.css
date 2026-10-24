@@ -1,37 +1,63 @@
-/* Small panels floating over the map, below the top bar. --toolbar-h is set from
-   main.ts as the top bar's height. */
+/* Small panels floating over the map. */
 
-/* Layers button and menu (top left) */
+/* --- Resizing panes (floating.ts) ------------------------------------------------------ */
+.pane.resizing,
+.pane.resizing * {
+  user-select: none;
+  cursor: ew-resize !important;
+}
+/* The grip: the right edge, with a short bar on it once the pane is hovered. */
+.pane-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.pane-resize::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  width: 2px;
+  height: 40px;
+  margin-top: -20px;
+  border-radius: 1px;
+  background: var(--muted);
+}
+.pane:hover > .pane-resize,
+.pane.resizing > .pane-resize {
+  opacity: 0.7;
+}
+
+/* Layers button and menu: among the map's controls (main.ts puts it there). */
 .layers-menu {
-  position: fixed;
-  top: calc(var(--toolbar-h, 64px) + 12px);
-  left: 12px;
-  z-index: 5;
+  position: relative;
 }
-.layers-button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font: 500 13px/1 var(--sans);
-  color: var(--ink);
-  background: color-mix(in srgb, var(--surface) var(--glass), transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 7px 10px;
-  cursor: pointer;
+.maplibregl-ctrl-group .layers-button {
+  display: grid;
+  place-items: center;
+  color: #333; /* as MapLibre's own icons, on its white buttons in either theme */
 }
-.layers-button:hover,
-.layers-button[aria-expanded="true"] {
-  border-color: var(--accent);
+.maplibregl-ctrl-group .layers-button[aria-expanded="true"] {
+  color: var(--accent);
 }
+/* Opens to the left of the controls, from the button's bottom up. */
 .layers-panel {
-  margin-top: 6px;
+  position: absolute;
+  right: calc(100% + 8px);
+  bottom: 0;
   min-width: 140px;
   padding: 6px;
   display: flex;
   flex-direction: column;
+  font: 400 13px/1.4 var(--sans); /* not the map's */
+  white-space: nowrap;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -48,22 +74,51 @@
 .layers-panel label:hover {
   background: var(--ground);
 }
+.layers-panel .layers-action {
+  width: auto;
+  height: auto;
+  margin: 2px 0;
+  padding: 5px 6px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.layers-panel .layers-action:hover {
+  background: var(--ground);
+}
+.layers-group {
+  display: flex;
+  flex-direction: column;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.layers-group-label {
+  padding: 4px 6px 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
 .layers-panel input {
   accent-color: var(--accent);
   margin: 0;
 }
 .layers-button:focus-visible,
+.layers-action:focus-visible,
 .layers-panel input:focus-visible,
 .debug-collapse:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* Debug window (top right; draggable and resizable) */
+/* Debug window (top right, beside the legend; draggable and resizable) */
 .debug-panel {
   position: fixed;
-  top: calc(var(--toolbar-h, 64px) + 12px);
-  right: 12px;
+  top: 12px;
+  right: calc(24px + var(--side-w));
   z-index: 6;
   width: 340px;
   height: 380px;
@@ -85,6 +140,7 @@
   min-height: 0;
   resize: none;
 }
+.debug-panel.collapsed .debug-settings,
 .debug-panel.collapsed .debug-body {
   display: none;
 }
@@ -137,6 +193,38 @@
   font: 400 12px/1.6 var(--mono);
   color: var(--ink);
   white-space: nowrap;
+}
+
+/* Numbers to tune, above the tree */
+.debug-settings {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  align-items: center;
+  padding: 8px 10px;
+  font: 400 11px/1.2 var(--sans);
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.debug-settings:empty {
+  display: none;
+}
+.debug-setting {
+  display: contents;
+}
+.debug-setting input {
+  width: 7ch;
+  font: 400 12px/1.4 var(--mono);
+  color: var(--ink);
+  text-align: right;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.debug-setting input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* JSON tree */

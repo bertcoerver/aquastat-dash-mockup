@@ -1,6 +1,9 @@
 /* Design tokens: colours and fonts. Dark values follow the OS setting unless
    <html data-theme="light|dark"> forces one. */
 :root {
+  /* The layout: the graph pane's width (also the legend's), the date range's at most. */
+  --side-w: 460px;
+  --range-w: 560px;
   --ground: #f2f5f6;
   --surface: #ffffff;
   --ink: #13232b;

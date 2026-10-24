@@ -13,6 +13,9 @@
  *              follows it while the pointer is over it
  * - data-x:    a year (or month) of a line chart: clicking it selects it
  *
+ * Rows, points and legend keys carry a pin icon (.ch-pin), shown when the card is
+ * pinned on that one (.pinned-sub, set by map-drivers.ts).
+ *
  * Also used by the Basin view's statistics (rankings that run below zero, scatter).
  */
 import { fmt } from "../basin/variables";
@@ -45,13 +48,26 @@ const BAR_H = 8;
 const BAR_GAP = 2;
 const ROW_PAD = 10;
 const AXIS_H = 18;
+const TITLE_H = 14; // an axis title under the tick labels
+
+/** An axis title: the quantity and its unit, e.g. "Water stress (%)". */
+const axisTitle = (axis: string, unit: string) => esc(unit ? `${axis} (${unit})` : axis);
+/** The title under a horizontal axis whose tick labels end at y `ticksY`, right-aligned at `right`. */
+const xTitle = (axis: string | undefined, unit: string, right: number, ticksY: number) =>
+  axis ? `<text class="ts-label ch-axis" x="${right}" y="${ticksY + TITLE_H}" text-anchor="end">${axisTitle(axis, unit)} →</text>` : "";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/** A thumbtack, 10 × 10. */
+const PIN = "M2.5 0H7.5V1L6.5 2V4.5L8.5 6.5V7.5H5.5V10H4.5V7.5H1.5V6.5L3.5 4.5V2L2.5 1Z";
+/** The pin icon in an SVG chart, its top left at (x, y). */
+const pinAt = (x: number, y: number) => `<path class="ch-pin" transform="translate(${x.toFixed(1)},${y.toFixed(1)})" d="${PIN}"/>`;
 
 function legend(series: Series[]) {
   if (series.length < 2) return "";
   return `<div class="ch-legend">${series
-    .map((s) => `<span class="ch-key"${s.sub ? ` data-sub="${esc(s.sub)}"` : ""}><i style="background:${s.color}"></i>${esc(s.label)}</span>`)
+    .map((s) => `<span class="ch-key"${s.sub ? ` data-sub="${esc(s.sub)}"` : ""}><i style="background:${s.color}"></i>${esc(s.label)}` +
+      (s.sub ? `<svg class="ch-pin" viewBox="0 0 10 10" aria-hidden="true"><path d="${PIN}"/></svg>` : "") + "</span>")
     .join("")}</div>`;
 }
 
@@ -65,13 +81,27 @@ function hbar(x0: number, y: number, len: number, h: number) {
   return `M${x0.toFixed(1)},${y.toFixed(1)}h${(s * (a - r)).toFixed(1)}a${r},${r} 0 0 ${sweep} ${s * r},${r}v${(h - 2 * r).toFixed(1)}a${r},${r} 0 0 ${sweep} ${-s * r},${r}h${(-s * (a - r)).toFixed(1)}z`;
 }
 
-function rowLabel(label: string, y: number, emphasis = false) {
-  const short = label.length > 22 ? `${label.slice(0, 21)}…` : label;
-  return `<text class="ch-row-label${emphasis ? " em" : ""}" x="0" y="${y}">${esc(short)}</text>`;
+let measure: CanvasRenderingContext2D | null = null;
+/** The width of a row label in pixels, set in bold (as when its row is pinned). */
+function labelWidth(text: string) {
+  measure ??= document.createElement("canvas").getContext("2d");
+  if (!measure) return text.length * 6.5;
+  measure.font = `600 11px ${getComputedStyle(document.documentElement).getPropertyValue("--sans")}`;
+  return measure.measureText(text).width;
 }
 
-/** Horizontal bars; `series` in drawing order (the last one gets the value label). */
-export function bars({ series, rows, unit, width }: { series: Series[]; rows: BarRow[]; unit: string; width: number }) {
+/** A row's label at baseline y, and its pin after it. */
+function rowLabel(label: string, y: number, emphasis = false) {
+  const short = label.length > 22 ? `${label.slice(0, 21)}…` : label;
+  return `<text class="ch-row-label${emphasis ? " em" : ""}" x="0" y="${y}">${esc(short)}</text>` +
+    pinAt(Math.min(labelWidth(short) + 4, LABEL_W - 11), y - 9);
+}
+
+/**
+ * Horizontal bars; `series` in drawing order (the last one gets the value label).
+ * `axis` names the quantity, for a title under the axis.
+ */
+export function bars({ series, rows, unit, axis, width }: { series: Series[]; rows: BarRow[]; unit: string; axis?: string; width: number }) {
   if (!rows.length) return "";
   const n = series.length;
   const rowH = n * BAR_H + (n - 1) * BAR_GAP + ROW_PAD;
@@ -82,12 +112,13 @@ export function bars({ series, rows, unit, width }: { series: Series[]; rows: Ba
   const ticks = niceTicks(min, max || (min ? 0 : 1), Math.max(2, Math.floor(plotW / 70)));
   const [lo, top] = [ticks[0], ticks[ticks.length - 1]];
   const x = (v: number) => LABEL_W + ((v - lo) / (top - lo)) * plotW;
-  const h = rows.length * rowH + AXIS_H;
+  const plotH = rows.length * rowH;
+  const h = plotH + AXIS_H + (axis ? TITLE_H : 0);
 
   const grid = ticks
-    .map((t) => `<line class="ts-grid" x1="${x(t)}" x2="${x(t)}" y1="0" y2="${h - AXIS_H}"/>` +
-      `<text class="ts-label" x="${x(t)}" y="${h - 5}" text-anchor="middle">${fmt(t)}</text>`)
-    .join("");
+    .map((t) => `<line class="ts-grid" x1="${x(t)}" x2="${x(t)}" y1="0" y2="${plotH}"/>` +
+      `<text class="ts-label" x="${x(t)}" y="${plotH + AXIS_H - 5}" text-anchor="middle">${fmt(t)}</text>`)
+    .join("") + xTitle(axis, unit, x(top), plotH + AXIS_H - 5);
   const body = rows
     .map((row, i) => {
       const y0 = i * rowH;
@@ -107,21 +138,25 @@ export function bars({ series, rows, unit, width }: { series: Series[]; rows: Ba
         rowLabel(row.label, y0 + rowH / 2 + 4, row.emphasis) + marks + value + "</g>";
     })
     .join("");
-  const zero = lo < 0 ? `<line class="ts-zero" x1="${x(0)}" x2="${x(0)}" y1="0" y2="${h - AXIS_H}"/>` : "";
+  const zero = lo < 0 ? `<line class="ts-zero" x1="${x(0)}" x2="${x(0)}" y1="0" y2="${plotH}"/>` : "";
   return legend(series) + `<svg class="ch" width="${width}" height="${h}">${grid}${zero}${body}</svg>`;
 }
 
-/** 100 % stacked bars: each row's values are split into its parts' shares. */
-export function shares({ parts, rows, unit, width }: { parts: (Series & { ink: "light" | "dark" })[]; rows: BarRow[]; unit: string; width: number }) {
+/**
+ * 100 % stacked bars: each row's values are split into its parts' shares. `axis` names
+ * the whole, for a title under the axis ("Share of <axis> (%)").
+ */
+export function shares({ parts, rows, unit, axis, width }: { parts: (Series & { ink: "light" | "dark" })[]; rows: BarRow[]; unit: string; axis?: string; width: number }) {
   if (!rows.length) return "";
   const rowH = 16 + ROW_PAD;
   const plotW = Math.max(60, width - LABEL_W - 4);
-  const h = rows.length * rowH + AXIS_H;
+  const plotH = rows.length * rowH;
+  const h = plotH + AXIS_H + (axis ? TITLE_H : 0);
   const x = (f: number) => LABEL_W + f * plotW;
   const grid = [0, 0.25, 0.5, 0.75, 1]
-    .map((f) => `<line class="ts-grid" x1="${x(f)}" x2="${x(f)}" y1="0" y2="${h - AXIS_H}"/>` +
-      `<text class="ts-label" x="${x(f)}" y="${h - 5}" text-anchor="${f === 1 ? "end" : f === 0 ? "start" : "middle"}">${f * 100}%</text>`)
-    .join("");
+    .map((f) => `<line class="ts-grid" x1="${x(f)}" x2="${x(f)}" y1="0" y2="${plotH}"/>` +
+      `<text class="ts-label" x="${x(f)}" y="${plotH + AXIS_H - 5}" text-anchor="${f === 1 ? "end" : f === 0 ? "start" : "middle"}">${f * 100}%</text>`)
+    .join("") + xTitle(axis && `Share of ${axis}`, "%", x(1), plotH + AXIS_H - 5);
   const body = rows
     .map((row, i) => {
       const y0 = i * rowH + ROW_PAD / 2;
@@ -157,19 +192,22 @@ export function shares({ parts, rows, unit, width }: { parts: (Series & { ink: "
   return legend(parts) + `<svg class="ch" width="${width}" height="${h}">${grid}${body}</svg>`;
 }
 
-const LM = { left: 40, right: 12, top: 8, bottom: 20 };
+const LINE_M = { left: 40, right: 12, top: 8, bottom: 20 };
 
 /**
  * Lines over the years (or other steps: months) [from, to], named by `label`.
- * `selected` (the top bar's year) is marked; `clickable` steps can be clicked to
- * select them.
+ * `selected` (the top bar's year) is marked, or with `selectedTo` the years from one to
+ * the other are shaded; `clickable` steps can be clicked to select them. `axis` names
+ * the quantity, for a title above the value axis.
  */
 export function lines({
   series,
   from,
   to,
   selected,
+  selectedTo = selected,
   unit,
+  axis,
   width,
   height = 170,
   clickable,
@@ -179,7 +217,9 @@ export function lines({
   from: number;
   to: number;
   selected: number;
+  selectedTo?: number;
   unit: string;
+  axis?: string;
   width: number;
   height?: number;
   clickable: (year: number) => boolean;
@@ -191,7 +231,8 @@ export function lines({
   const ticks = niceTicks(lo, Math.max(...all, lo + 1e-9), 4);
   const [y0, y1] = [ticks[0], ticks[ticks.length - 1]];
   const w = width;
-  const h = height;
+  const LM = { ...LINE_M, top: LINE_M.top + (axis ? TITLE_H : 0) };
+  const h = height + (axis ? TITLE_H : 0);
   const step = (w - LM.left - LM.right) / Math.max(1, to - from);
   const x = (year: number) => LM.left + (year - from) * step;
   const y = (v: number) => LM.top + (1 - (v - y0) / (y1 - y0 || 1)) * (h - LM.top - LM.bottom);
@@ -199,7 +240,8 @@ export function lines({
   const grid = ticks
     .map((t) => `<line class="ts-grid" x1="${LM.left}" x2="${w - LM.right}" y1="${y(t)}" y2="${y(t)}"/>` +
       `<text class="ts-label" x="${LM.left - 5}" y="${y(t) + 3.5}" text-anchor="end">${fmt(t)}</text>`)
-    .join("");
+    .join("") +
+    (axis ? `<text class="ts-label ch-axis" x="0" y="${LM.top - 8}">↑ ${axisTitle(axis, unit)}</text>` : "");
   const every = Math.ceil((to - from + 1) / Math.max(2, Math.floor((w - LM.left - LM.right) / 44)));
   const years: number[] = [];
   for (let yr = from; yr <= to; yr++) years.push(yr);
@@ -207,9 +249,12 @@ export function lines({
     .filter((yr) => (to - yr) % every === 0)
     .map((yr) => `<text class="ts-label" x="${x(yr)}" y="${h - 5}" text-anchor="middle">${label(yr)}</text>`)
     .join("");
-  const mark = selected >= from && selected <= to
-    ? `<line class="ch-selected" x1="${x(selected)}" x2="${x(selected)}" y1="${LM.top}" y2="${h - LM.bottom}"/>`
-    : "";
+  const span = selectedTo > selected;
+  const mark = span
+    ? `<rect class="ch-selected-span" x="${x(Math.max(selected, from))}" y="${LM.top}" width="${Math.max(0, x(Math.min(selectedTo, to)) - x(Math.max(selected, from)))}" height="${h - LM.top - LM.bottom}"/>`
+    : selected >= from && selected <= to
+      ? `<line class="ch-selected" x1="${x(selected)}" x2="${x(selected)}" y1="${LM.top}" y2="${h - LM.bottom}"/>`
+      : "";
   // Emphasised series last, so they are drawn on top.
   const order = [...series].sort((a, b) => Number(a.emphasis ?? false) - Number(b.emphasis ?? false));
   const paths = order
@@ -226,7 +271,7 @@ export function lines({
         pen = true;
       }
       const v = s.values.get(selected);
-      const dot = v !== undefined && Number.isFinite(v)
+      const dot = !span && v !== undefined && Number.isFinite(v)
         ? `<circle class="ch-dot" cx="${x(selected)}" cy="${y(v)}" r="4" style="fill:${s.color}"/>`
         : "";
       return `<path class="ch-line${s.emphasis ? " em" : ""}" d="${d}" style="stroke:${s.color}"/>${dot}`;
@@ -236,7 +281,7 @@ export function lines({
   const cols = years
     .map((yr) => {
       const tip = `<b>${label(yr)}</b>` + series.map((s) => `<br>${esc(s.label)}: ${fmt(s.values.get(yr) ?? NaN)} ${esc(unit)}`).join("") +
-        (clickable(yr) && yr !== selected ? `<br><span class="tip-hint">Click to show ${label(yr)} on the map</span>` : "");
+        (clickable(yr) && (span || yr !== selected) ? `<br><span class="tip-hint">Click to show ${label(yr)} on the map</span>` : "");
       const dots = series
         .map((s) => {
           const v = s.values.get(yr);
@@ -307,7 +352,7 @@ export function scatter({
       const tip = `<b>${esc(p.label)}</b><br>${esc(xName)}: ${fmt(p.x)} ${esc(unit)}<br>${esc(yName)}: ${fmt(p.y)} ${esc(unit)}`;
       return `<g class="ch-point${p.emphasis ? " em" : ""}" data-sub="${esc(p.sub)}" data-tip="${esc(tip)}">` +
         `<circle class="ch-hit" cx="${x(p.x)}" cy="${y(p.y)}" r="8"/>` +
-        `<circle class="ch-dot" cx="${x(p.x)}" cy="${y(p.y)}" r="${p.emphasis ? 5 : 4}" style="fill:${color}"/></g>`;
+        `<circle class="ch-dot" cx="${x(p.x)}" cy="${y(p.y)}" r="${p.emphasis ? 5 : 4}" style="fill:${color}"/>${pinAt(x(p.x) - 5, y(p.y) - 17)}</g>`;
     })
     .join("");
   return `<svg class="ch" width="${w}" height="${h}">${grid}${diagonal}${axes}${dots}</svg>`;

@@ -1,10 +1,12 @@
 /*
  * The legend for the WaPOR raster (Local view): period, colour ramp and whether the
- * raster is loading or not published yet. For a dekad it also has the quality slider,
- * which hides pixels whose NDVI input is gap-filled over more dekads. The markup lives
- * in index.html.
+ * raster is loading or not published yet, and a button for how much of the values in
+ * view the colours span. For a dekad it also has the quality slider, which hides
+ * pixels whose NDVI input is gap-filled over more dekads. The markup lives in
+ * index.html.
  */
-import type { WaporPeriod } from "./layers/wapor";
+import type { WaporPeriod, WaporStretch } from "./layers/wapor";
+import type { WaporRamp } from "./layers/wapor-shader";
 
 export type WaporStatus = "checking" | "loading" | "ready" | "missing" | "error";
 export type QualityStatus = "checking" | "ready" | "missing";
@@ -38,15 +40,36 @@ function describe(maxGap: number | null) {
 
 const $ = (id: string) => document.getElementById(id)!;
 
+/** The stretch button's settings, in the order it goes through them. */
+const STRETCHES: WaporStretch[] = [0, 1, 5];
+const stretchLabel = (cut: WaporStretch) => `${cut}–${100 - cut}%`;
+
+/** A legend stop, with as many decimals as the range needs. */
+function fmtStop(v: number, span: number) {
+  const decimals = span >= 10 ? 0 : span >= 1 ? 1 : span >= 0.1 ? 2 : 3;
+  return v.toFixed(decimals);
+}
+
 export interface WaporLegend {
   /** Show the legend for a period (null hides it). */
   show(period: WaporPeriod | null, status?: WaporStatus): void;
+  /** Show the colour map the raster is drawn with. */
+  ramp(ramp: WaporRamp): void;
   /** The quality slider: shown for a dekad, disabled while there's no quality layer. */
   quality(status: QualityStatus | null): void;
 }
 
-/** `onMaxGap` runs when the quality slider moves: the longest gap to show, or null. */
-export function initWaporLegend({ onMaxGap }: { onMaxGap: (maxGap: number | null) => void }): WaporLegend {
+/**
+ * `onMaxGap` runs when the quality slider moves: the longest gap to show, or null.
+ * `onStretch` runs when the stretch button is pressed, and once at the start.
+ */
+export function initWaporLegend({
+  onMaxGap,
+  onStretch,
+}: {
+  onMaxGap: (maxGap: number | null) => void;
+  onStretch: (cut: WaporStretch) => void;
+}): WaporLegend {
   const legend = $("wapor-legend");
   const section = $("wapor-quality");
   const input = $("wapor-quality-input") as HTMLInputElement;
@@ -64,24 +87,39 @@ export function initWaporLegend({ onMaxGap }: { onMaxGap: (maxGap: number | null
   input.addEventListener("input", () => onMaxGap(update()));
   update(); // starts at "all", as the map does
 
+  const stretchButton = $("wapor-stretch");
+  let stretch: WaporStretch = 1;
+  function showStretch() {
+    const next = STRETCHES[(STRETCHES.indexOf(stretch) + 1) % STRETCHES.length];
+    stretchButton.textContent = stretchLabel(stretch);
+    stretchButton.title =
+      (stretch === 0 ? "Colours span all values in view." : `Colours span the values in view without the lowest and highest ${stretch}%.`) +
+      ` Click for ${stretchLabel(next)}.`;
+  }
+  stretchButton.addEventListener("click", () => {
+    stretch = STRETCHES[(STRETCHES.indexOf(stretch) + 1) % STRETCHES.length];
+    showStretch();
+    onStretch(stretch);
+  });
+  showStretch();
+  onStretch(stretch);
+
   return {
     show(period, status = "ready") {
       legend.hidden = !period;
       if (!period) return;
       legend.dataset.status = status;
       $("wapor-period").textContent = period.label;
-      $("wapor-unit").textContent = period.unit;
       $("wapor-status").textContent = STATUS_TEXT[status];
       $("wapor-note").textContent = period.note ?? "";
-
+    },
+    ramp({ quantities: q, colors }) {
       // Stops sit where their value falls between the first and the last.
-      const { quantities: q, colors } = period.ramp;
-      const at = (v: number) => ((v - q[0]) / (q[4] - q[0])) * 100;
+      const span = q[4] - q[0];
+      const at = (v: number) => ((v - q[0]) / span) * 100;
       $("wapor-ramp").style.background =
         `linear-gradient(to right, ${colors.map((c, i) => `${c} ${at(q[i])}%`).join(", ")})`;
-      $("wapor-ticks").innerHTML = q
-        .map((v) => `<span style="left:${at(v)}%">${+(v * period.scale).toFixed(1)}</span>`)
-        .join("");
+      $("wapor-ticks").innerHTML = q.map((v) => `<span style="left:${at(v)}%">${fmtStop(v, span)}</span>`).join("");
     },
     quality(state) {
       section.hidden = !state;

@@ -1,14 +1,17 @@
 /*
  * Dates as dekad indices
  * ----------------------
- * Every date is stored as a DEKAD INDEX: dekad 0 = 1–10 Jan 2018, 1 = 11–20 Jan 2018,
- * 2 = 21–31 Jan 2018, ... 36 dekads per year, 3 per month.
+ * Every date is stored as a DEKAD INDEX: dekad 0 = 1–10 Jan 2016, 1 = 11–20 Jan 2016,
+ * 2 = 21–31 Jan 2016, ... 36 dekads per year, 3 per month.
  *   start date of a dekad -> day 1, 11 or 21
  *   end date of a dekad   -> day 10, 20 or the last day of the month
  * So 1 dekad = 1 index, 1 month = 3 indices, 1 year = 36 indices.
  */
 
-export const MIN_YEAR = 2018;
+/** The first year of the timeline. */
+export const MIN_YEAR = 2016;
+/** The first year with WaPOR data (Basin and Local views). */
+export const WAPOR_MIN_YEAR = 2018;
 export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** Dekad index from a year, month (0–11) and dekad of the month (0–2). */
@@ -32,11 +35,11 @@ export const MAX_DK = mk(
   now.getDate() <= 10 ? 0 : now.getDate() <= 20 ? 1 : 2,
 );
 
-/** Country view: only complete calendar years whose 31 Dec is not after the current dekad. */
+/** Country view: only complete calendar years whose 31 Dec is not after the current dekad (see also range-rules.ts). */
 export const COUNTRY_MAX_YEAR = dkM(MAX_DK) === 11 && dkD(MAX_DK) === 2 ? dkY(MAX_DK) : dkY(MAX_DK) - 1;
 
 /*
- * Days, for the Local view, which can start and end on any day: DAY INDEX 0 = 1 Jan 2018.
+ * Days, for the Local view, which can start and end on any day: DAY INDEX 0 = 1 Jan 2016.
  */
 const DAY_MS = 86_400_000;
 const EPOCH = Date.UTC(MIN_YEAR, 0, 1);
@@ -63,3 +66,5 @@ export const fmtDay = (day: number) => {
 };
 /** The last day that can be selected: the end of the current dekad. */
 export const MAX_DAY = dkLastDay(MAX_DK);
+/** The first day with WaPOR data. */
+export const WAPOR_FIRST_DAY = dayOf(WAPOR_MIN_YEAR, 0, 1);

@@ -34,6 +34,10 @@
 .cp-topics {
   margin-bottom: 4px;
 }
+.cp-topics button {
+  padding: 6px 8px;
+  white-space: nowrap; /* the panel's min-width (basin.css) keeps them on one line */
+}
 .cp-topics button[aria-selected="true"] {
   color: var(--accent-ink);
   background: var(--accent);
@@ -136,6 +140,10 @@
   margin: 0 -4px;
   border-radius: 4px;
 }
+.ch-key.pinned-sub {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
 .ch-key[data-sub]:hover {
   color: var(--ink);
   background: var(--ground);
@@ -158,6 +166,10 @@
 .ch-value.muted {
   font-style: italic;
 }
+/* An axis title: the quantity and its unit. */
+.ch-axis {
+  font-family: var(--sans);
+}
 .ch-in {
   font: 500 10px var(--mono);
   pointer-events: none;
@@ -177,6 +189,25 @@
 .ch-row:hover .ch-hit {
   fill: color-mix(in srgb, var(--accent) 10%, transparent);
 }
+/* The row, point or series a card is pinned on. */
+.ch-pin {
+  display: none;
+  fill: var(--accent);
+}
+.pinned-sub > .ch-pin {
+  display: inline;
+}
+svg.ch-pin {
+  width: 9px;
+  height: 9px;
+}
+.ch-row.pinned-sub .ch-hit {
+  fill: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.ch-row.pinned-sub .ch-row-label {
+  fill: var(--accent);
+  font-weight: 600;
+}
 .ch-line {
   fill: none;
   stroke-width: 2;
@@ -194,6 +225,10 @@
   stroke: var(--accent);
   stroke-width: 1;
 }
+/* A selected span of years. */
+.ch-selected-span {
+  fill: color-mix(in srgb, var(--accent) 12%, transparent);
+}
 .ch-cursor {
   opacity: 0;
   pointer-events: none;
@@ -208,6 +243,10 @@
 .ch-equal {
   stroke: var(--muted);
   stroke-width: 1;
+}
+.ch-point.pinned-sub .ch-dot {
+  stroke: var(--accent);
+  stroke-width: 2;
 }
 .ch-point:hover .ch-dot,
 .ch-point.em .ch-dot {
@@ -228,23 +267,6 @@
 }
 
 /* --- Map legend ------------------------------------------------------------------------------ */
-.cp-legend {
-  width: 270px;
-}
-.cp-legend-source {
-  margin: -2px 0 6px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
-  font-size: 11px;
-  color: var(--muted);
-}
-.cp-legend-source b {
-  font-weight: 600;
-  color: var(--accent);
-}
-.cp-unpin {
-  white-space: nowrap;
-}
 .cp-classes {
   margin: 6px 0 4px;
   padding: 0;

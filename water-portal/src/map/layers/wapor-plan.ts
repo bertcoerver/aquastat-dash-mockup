@@ -14,7 +14,7 @@
  * year, then each month in it, add the raster, subtract it or leave it out, and at the
  * dekads fix whatever is still off. That's exact, and only a few thousand steps.
  */
-import { MAX_DK, dayDk, dkFirstDay, dkLastDay, endDay, startDay } from "../../toolbar/dekads";
+import { MAX_DK, dayDk, dkFirstDay, dkLastDay, dkY, endDay, startDay } from "../../toolbar/dekads";
 import type { DayRange } from "../../toolbar/range-rules";
 
 export type BlockKind = "D" | "M" | "A";
@@ -55,10 +55,9 @@ const PER_RASTER = 1;
 export const COST: Record<BlockKind, number> = { D: PER_RASTER + 1, M: PER_RASTER + 2, A: PER_RASTER + 5.8 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
-const yearOf = (dk: number) => 2018 + Math.floor(dk / 36);
 
 export function block(kind: BlockKind, start: number): Block {
-  const y = yearOf(start);
+  const y = dkY(start);
   const m = Math.floor((start % 36) / 3);
   const len = { D: 1, M: 3, A: 36 }[kind];
   const code = kind === "A" ? String(y) : kind === "M" ? `${y}-${pad(m + 1)}` : `${y}-${pad(m + 1)}-D${(start % 3) + 1}`;

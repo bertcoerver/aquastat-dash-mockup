@@ -2,9 +2,6 @@
    switch (bottom left, after .legend in legend.css) and the map tooltip. */
 
 /* --- Legend: variable switch ------------------------------------------------------- */
-.wb-legend {
-  width: 260px;
-}
 .wb-vars {
   display: flex;
   gap: 2px;
@@ -48,13 +45,18 @@
 }
 
 /* --- Panel --------------------------------------------------------------------------- */
+/* Left, full height; only its width can be changed (floating.ts). At least wide enough
+   for the country view's topic tabs on one line. */
 .wb-panel {
   position: fixed;
-  top: calc(var(--toolbar-h, 64px) + 12px);
-  right: 12px;
+  top: 12px;
+  left: 12px;
   bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   z-index: 5;
-  width: min(460px, calc(100vw - 24px));
+  width: min(var(--side-w), calc(100vw - 24px));
+  min-width: min(360px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  min-height: 120px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -67,6 +69,9 @@
 }
 .wb-panel.collapsed {
   bottom: auto;
+  overflow: visible; /* the title's dropdown hangs below */
+  height: auto !important;
+  min-height: 0;
 }
 .wb-panel.collapsed .wb-body {
   display: none;
@@ -79,15 +84,142 @@
   padding: 10px 8px 10px 14px;
   border-bottom: 1px solid var(--line);
 }
-.wb-heading small {
-  font: 500 11px/1 var(--sans);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.wb-heading {
+  min-width: 0;
+}
+/* Local panel: only as tall as its placeholder for now. */
+.lp-panel {
+  bottom: auto;
+}
+/* Its title is a button (title-menu, legend.css) at the panel titles' size; the
+   point's fields open below it. */
+.wb-title .title-menu {
+  margin-left: 0;
+  padding: 2px 24px 2px 5px;
+  border: 1px solid transparent;
+}
+.wb-title .title-menu:hover,
+.wb-title .title-menu[aria-expanded="true"] {
+  background: var(--ground);
+}
+.wb-title .title-menu .title-caret {
+  right: 9px;
+  width: 6px;
+  height: 6px;
+  margin-top: -5px;
+}
+.wb-title .title-menu[aria-expanded="true"] .title-caret {
+  margin-top: -1px;
+}
+.point-picker {
+  position: relative;
+}
+.point-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: 320px;
+  padding: 8px 8px 8px 10px;
+  font: 400 13px/1.4 var(--sans);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.15);
+}
+
+/* The title is the place picker (place-picker.ts): it reads as a heading with a small
+   ▾ after the name, and turns into a search field when clicked. */
+.wb-title {
+  margin: 2px 0 0 -6px; /* the field's padding: the text lines up with the rest */
+  font: 600 17px/1.25 var(--sans);
+}
+.title-combobox {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+}
+/* As wide as its text: a hidden copy of the text sizes it, and the input lies over that. */
+.title-field {
+  position: relative;
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+}
+.title-field::after {
+  content: attr(data-value);
+  display: block;
+  visibility: hidden;
+  white-space: pre;
+  overflow: hidden;
+}
+.title-field > input,
+.title-field::after {
+  padding: 2px 24px 2px 5px;
+  font: inherit;
+  border: 1px solid transparent;
+}
+.combobox .title-field > input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  color: var(--ink);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.combobox .title-field > input::placeholder {
+  color: var(--ink);
+  opacity: 1;
+}
+.combobox .title-field > input:hover {
+  background: var(--ground);
+}
+.combobox .title-field > input:focus {
+  cursor: text;
+  background: var(--surface);
+  border-color: transparent;
+}
+.combobox .title-field > input:focus::placeholder {
   color: var(--muted);
 }
-.wb-heading h2 {
-  margin: 4px 0 0;
-  font: 600 17px/1.25 var(--sans);
+/* Searching: room to type. */
+.title-field:focus-within {
+  min-width: 260px;
+}
+.title-caret {
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -5px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg);
+  pointer-events: none;
+  transition: transform 0.12s, margin-top 0.12s;
+}
+.title-field:hover .title-caret {
+  border-color: var(--ink);
+}
+.title-combobox:has([aria-expanded="true"]) .title-caret {
+  margin-top: -1px;
+  transform: rotate(-135deg);
+}
+.title-combobox .combobox-clear {
+  position: static;
+  transform: none;
+  flex: none;
+}
+.title-combobox .combobox-list {
+  right: auto;
+  width: max-content;
+  min-width: 300px;
+  max-width: min(420px, 90vw);
+  font: 400 14px/1.5 var(--sans);
 }
 .wb-heading p {
   margin: 2px 0 0;

@@ -1,6 +1,6 @@
 /*
  * The current selection (the "click state"): what the user picked, by clicking the
- * map, choosing a country or basin in the top bar, or typing coordinates.
+ * map, choosing a country or basin in a panel title, or typing coordinates.
  *
  * Picking a country or basin by name selects only that: no point, and none of the
  * other areas. Picking a point (map click or coordinates) selects the point and

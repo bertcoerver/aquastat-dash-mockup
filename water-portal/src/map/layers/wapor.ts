@@ -1,14 +1,14 @@
 /*
  * WaPOR v3 actual evapotranspiration and interception (L1-AETI, global, 300 m), read
  * straight from FAO's bucket (it sends CORS headers). WaPOR publishes one COG per
- * dekad, calendar month and calendar year; a range that is exactly one of those shows
- * that COG, in its own unit. Any other range is added up from several of them, as the
- * total in mm (see wapor-plan.ts for which), tile by tile as they load. A range can
- * start and end on any day: of a dekad it only partly covers, it takes those days'
- * share of the dekad's raster.
+ * dekad, calendar month and calendar year. A range is added up from one or more of
+ * them (see wapor-plan.ts for which), tile by tile as they load, and always shown as
+ * the average per day over the range, in mm/day. A range can start and end on any day:
+ * of a dekad it only partly covers, it takes those days' share of the dekad's raster.
  *
  * Catalogue: https://data.apps.fao.org/gismgr/api/v2/catalog/workspaces/WAPOR-3/mapsets/L1-AETI-D
- * (-M, -A). Colour maps are WaPOR's own styles AETI-D-INT16, AETI-M and AETI-A.
+ * (-M, -A). The colours are WaPOR's own style AETI-D-INT16; the stops are stretched to
+ * the values in view (see waporViewRange).
  *
  * A dekad also comes with L1-QUAL-NDVI-D, on the same grid: for each pixel, how many
  * dekads it has been since the last valid satellite observation behind the NDVI (0:
@@ -34,43 +34,24 @@ export type WaporResolution = "dekadal" | "monthly" | "annual" | "custom";
 interface Mapset {
   code: string;
   resolution: WaporResolution;
-  unit: string;
-  ramp: WaporRamp; // in raw values
 }
 
+// Dekadal rasters are in mm/day (the average day of the dekad), the others in mm/month and mm/year.
 const MAPSETS: Record<BlockKind, Mapset> = {
-  D: {
-    code: "L1-AETI-D",
-    resolution: "dekadal",
-    unit: "mm/day", // the average day of the dekad
-    ramp: {
-      quantities: [1, 25, 50, 75, 100],
-      colors: ["#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"],
-    },
-  },
-  M: {
-    code: "L1-AETI-M",
-    resolution: "monthly",
-    unit: "mm/month",
-    ramp: {
-      quantities: [100, 400, 800, 1200, 1600],
-      colors: ["#f0f9e8", "#bae4bc", "#7bccc4", "#43a2ca", "#0868ac"],
-    },
-  },
-  A: {
-    code: "L1-AETI-A",
-    resolution: "annual",
-    unit: "mm/year",
-    ramp: {
-      quantities: [1000, 4000, 8000, 12000, 16000],
-      colors: ["#f0f9e8", "#bae4bc", "#7bccc4", "#43a2ca", "#0868ac"],
-    },
-  },
+  D: { code: "L1-AETI-D", resolution: "dekadal" },
+  M: { code: "L1-AETI-M", resolution: "monthly" },
+  A: { code: "L1-AETI-A", resolution: "annual" },
+};
+
+/** WaPOR's dekadal colour map, in mm/day: what the map shows until the view's own range is known. */
+export const DEFAULT_RAMP: WaporRamp = {
+  quantities: [0.1, 2.5, 5, 7.5, 10],
+  colors: ["#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"],
 };
 
 const rasterUrl = (mapset: string, code: string) => `${BUCKET}/${mapset}/WAPOR-3.${mapset}.${code}.tif`;
 
-/** One raster in a period's sum: shown value += factor * raw value. */
+/** One raster in a period's sum: shown value (mm/day) += factor * raw value. */
 export interface WaporTerm {
   url: string;
   name: string; // "M[2025-01]"
@@ -82,7 +63,7 @@ export interface WaporPeriod {
   resolution: WaporResolution;
   label: string;
   terms: WaporTerm[];
-  /** How the value is made, e.g. "ETIa (mm) = A[2025] − M[2025-01] − M[2025-12]". */
+  /** How the value is made, e.g. "ETIa (mm/day) = (A[2025] − M[2025-01] − M[2025-12]) / 304". */
   equation: string;
   /** Of loading the rasters, in dekadal rasters (see wapor-plan.ts). */
   cost: number;
@@ -92,18 +73,9 @@ export interface WaporPeriod {
   qualityUrl: string | null;
   /** About how the value is made, if there's something to know (partial dekads). */
   note: string | null;
-  unit: string;
-  scale: number; // legend value = shown value * scale
-  ramp: WaporRamp;
   /** Identifies the AETI rasters and how they're added up (not the quality raster). */
   key: string;
 }
-
-/** Round to two significant digits, for legend stops. */
-const nice = (v: number) => {
-  const step = 10 ** (Math.floor(Math.log10(v)) - 1);
-  return Math.round(Math.round(v / step) * step * 1e6) / 1e6;
-};
 
 /**
  * What to show for a Local view range, assuming every raster is published except
@@ -114,8 +86,16 @@ export function waporPeriod(range: DayRange, unpublished: ReadonlySet<string> = 
   if (!plan) return null;
   const skipped = [...unpublished];
   const [only] = plan.terms;
+  const days = range.end - range.start + 1;
+  // The total in mm (a dekadal raster is mm/day, so times its days), over the days.
+  const terms = plan.terms.map(({ block: b, coef, days: n }) => ({
+    url: rasterUrl(MAPSETS[b.kind].code, b.code),
+    name: blockName(b),
+    factor: (SCALE * (n ?? coef)) / days,
+  }));
+  const key = terms.map((t) => `${t.factor}*${t.url}`).join(" + ");
 
-  // Exactly one raster: as published, in its own unit.
+  // Exactly one raster: named after its period.
   if (
     plan.terms.length === 1 &&
     only.coef === 1 &&
@@ -124,56 +104,35 @@ export function waporPeriod(range: DayRange, unpublished: ReadonlySet<string> = 
   ) {
     const b = only.block;
     const start = b.start;
-    const mapset = MAPSETS[b.kind];
     const y = dkY(start);
     const m = dkM(start);
     const label =
       b.kind === "D" ? `${["1st", "2nd", "3rd"][dkD(start)]} dekad of ${MONTHS[m]} ${y}` : b.kind === "M" ? `${MONTHS[m]} ${y}` : String(y);
-    const url = rasterUrl(mapset.code, b.code);
-    const qualityUrl = b.kind === "D" ? rasterUrl(QUALITY, b.code) : null;
     return {
-      resolution: mapset.resolution,
+      resolution: MAPSETS[b.kind].resolution,
       label,
-      terms: [{ url, name: blockName(b), factor: 1 }],
-      equation: `ETIa (${mapset.unit}) = ${blockName(b)}`,
+      terms,
+      equation: `ETIa (mm/day) = ${blockName(b)}${b.kind === "D" ? "" : ` / ${days}`}`,
       cost: plan.cost,
       unpublished: skipped,
-      qualityUrl,
+      qualityUrl: b.kind === "D" ? rasterUrl(QUALITY, b.code) : null,
       note: null,
-      unit: mapset.unit,
-      scale: SCALE,
-      ramp: mapset.ramp,
-      key: url,
+      key,
     };
   }
 
-  // A sum, as the total in mm: a dekadal raster is mm/day, so times its days.
-  const terms = plan.terms.map(({ block: b, coef, days }) => ({
-    url: rasterUrl(MAPSETS[b.kind].code, b.code),
-    name: blockName(b),
-    factor: SCALE * (days ?? coef),
-  }));
-  // The annual colour map, scaled to the length of the range.
-  const days = range.end - range.start + 1;
-  const annual = MAPSETS.A.ramp;
   const [first, last] = [fmtDay(range.start), fmtDay(range.end)];
   return {
     resolution: "custom",
     label: `${first.slice(-4) === last.slice(-4) ? first.slice(0, -5) : first} – ${last}`,
     terms,
-    equation: `ETIa (mm) = ${formatPlan(plan)}`,
+    equation: `ETIa (mm/day) = (${formatPlan(plan)}) / ${days}`,
     cost: plan.cost,
     unpublished: skipped,
     qualityUrl: null,
     // A range that starts or ends within a dekad.
-    note: isDekads(range) ? null : "Part of a dekad: its average per day, times the days in the range.",
-    unit: "mm total",
-    scale: 1,
-    ramp: {
-      quantities: annual.quantities.map((q) => nice((q * SCALE * days) / 365)) as WaporRamp["quantities"],
-      colors: annual.colors,
-    },
-    key: terms.map((t) => `${t.factor}*${t.url}`).join(" + "),
+    note: isDekads(range) ? null : "Part of a dekad: counted at its average per day.",
+    key,
   };
 }
 
@@ -265,6 +224,8 @@ interface RasterTile {
   width: number;
   height: number;
   nodata: number | null;
+  /** Pixel (col, row) to lon/lat: [a, b, c, d, e, f], lon = a·col + b·row + c, lat = d·col + e·row + f. */
+  transform: RasterArray["transform"];
 }
 
 /**
@@ -272,8 +233,15 @@ interface RasterTile {
  * periods that share a raster share its tiles. The least recently used go first.
  */
 const TILE_CACHE_BYTES = 384 * 2 ** 20;
-const tiles = new Map<string, { tile: Promise<RasterTile>; bytes: number; done: boolean }>();
+const tiles = new Map<string, { tile: Promise<RasterTile>; bytes: number; done: boolean; value?: RasterTile }>();
 let tileBytes = 0;
+const tileListeners = new Set<() => void>();
+
+/** Run `callback` whenever a tile has loaded. Returns a function that stops it. */
+export function onWaporTile(callback: () => void) {
+  tileListeners.add(callback);
+  return () => tileListeners.delete(callback);
+}
 
 function rasterTile(url: string, { x, y, z }: TileIndex, signal?: AbortSignal): Promise<RasterTile> {
   const key = `${z}/${x}/${y} ${url}`;
@@ -291,14 +259,15 @@ function rasterTile(url: string, { x, y, z }: TileIndex, signal?: AbortSignal): 
     const images = [geotiff, ...geotiff.overviews]; // full resolution first; z = 0 is the coarsest
     const pool = defaultDecoderPool();
     const { array } = await images[images.length - 1 - z].fetchTile(x, y, { boundless: false, pool, signal });
-    return { values: samples(array), width: array.width, height: array.height, nodata: array.nodata };
+    return { values: samples(array), width: array.width, height: array.height, nodata: array.nodata, transform: array.transform };
   });
-  const entry = { tile, bytes: 0, done: false };
+  const entry: { tile: Promise<RasterTile>; bytes: number; done: boolean; value?: RasterTile } = { tile, bytes: 0, done: false };
   tiles.set(key, entry);
   tile.then(
-    ({ values }) => {
+    (value) => {
       if (tiles.get(key) !== entry) return;
-      Object.assign(entry, { bytes: values.byteLength, done: true });
+      Object.assign(entry, { bytes: value.values.byteLength, done: true, value });
+      tileListeners.forEach((listener) => listener());
       tileBytes += entry.bytes;
       for (const [old, { bytes, done }] of tiles) {
         if (tileBytes <= TILE_CACHE_BYTES) break;
@@ -314,8 +283,9 @@ function rasterTile(url: string, { x, y, z }: TileIndex, signal?: AbortSignal): 
 
 type TileIndex = { x: number; y: number; z: number };
 
-/** The tiles the map shows (the same for every period: they share one grid). */
+/** The tiles the map shows (the same for every period: they share one grid), and the part of the globe in view. */
 let viewTiles: TileIndex[] = [];
+let viewBox: Box | null = null;
 let viewKey = "";
 const viewListeners = new Set<() => void>();
 
@@ -473,8 +443,7 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
   /**
    * One tile: the period's rasters added up into one band, "aeti" (as float32), next
    * to the quality band if there is one. All WaPOR rasters share one grid, so tile
-   * (x, y, z) covers the same pixels in each. A pixel without data in any of them has
-   * none in the sum. Rounding can take a difference just below zero; that's 0.
+   * (x, y, z) covers the same pixels in each (see sumTiles).
    */
   async _getTileData(...[tile, options]: Parameters<MultiCOGLayer["_getTileData"]>) {
     const { x, y, z } = tile.index;
@@ -486,17 +455,7 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
     const names = Object.keys(config).filter((name) => name !== "quality");
     const [quality, ...rasters] = await Promise.all([config.quality ? read("quality") : null, ...names.map(read)]);
     const { width, height } = rasters[0];
-    const sum = new Float32Array(width * height);
-    rasters.forEach(({ values, nodata }, i) => {
-      const factor = config[names[i]].factor;
-      for (let p = 0; p < sum.length; p++) {
-        const v = values[p];
-        sum[p] = v === nodata ? Number.NaN : sum[p] + factor * v; // NaN stays NaN
-      }
-    });
-    if (names.some((name) => config[name].factor < 0)) {
-      for (let p = 0; p < sum.length; p++) if (sum[p] < 0) sum[p] = 0;
-    }
+    const sum = sumTiles(rasters, names.map((name) => config[name].factor));
 
     const bands = new Map([["aeti", band(device, sum, "r32float", width, height)]]);
     if (quality) bands.set("quality", band(device, quality.values, "r8unorm", quality.width, quality.height));
@@ -518,6 +477,7 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
         const { levels } = (this as unknown as { descriptor: { levels: Level[] } }).descriptor;
         const last = levels.length - 1;
         const box = visibleBox(viewport);
+        viewBox = box;
         const { width, height } = viewport;
         const a = viewport.unproject([width / 2 - 5, height / 2]);
         const b = viewport.unproject([width / 2 + 5, height / 2]);
@@ -567,6 +527,102 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
  */
 type WaporSource = { url: string | GeoTIFF; href: string; factor: number };
 
+/**
+ * Rasters' tiles added up, each times its factor. A pixel without data in any of them
+ * has none in the sum (NaN). Rounding can take a difference just below zero; that's 0.
+ */
+function sumTiles(rasters: RasterTile[], factors: number[]) {
+  const { width, height } = rasters[0];
+  const sum = new Float32Array(width * height);
+  rasters.forEach(({ values, nodata }, i) => {
+    const factor = factors[i];
+    for (let p = 0; p < sum.length; p++) {
+      const v = values[p];
+      sum[p] = v === nodata ? Number.NaN : sum[p] + factor * v; // NaN stays NaN
+    }
+  });
+  if (factors.some((f) => f < 0)) {
+    for (let p = 0; p < sum.length; p++) if (sum[p] < 0) sum[p] = 0;
+  }
+  return sum;
+}
+
+/** How much of the values in view the colour map spans: all, or without this % at either end. */
+export type WaporStretch = 0 | 1 | 5;
+
+const BINS = 4096;
+
+/**
+ * The range of a period's values on screen, without `cut`% of the pixels at either
+ * end: the pixels with data in the part of the globe in view, of the tiles in view
+ * that have loaded, without those the quality filter hides (`maxGap`, as in
+ * waporLayer). Null if there are none (yet). Percentiles come from a histogram, so are
+ * within 1/4096 of the range of their true value.
+ */
+export function waporViewRange(period: WaporPeriod, maxGap: number | null, cut: WaporStretch): [number, number] | null {
+  const box = viewBox;
+  if (!box) return null;
+  const centre = (box.west + box.east) / 2;
+  const unwrap = (lon: number) => centre + ((((lon - centre) % 360) + 540) % 360) - 180;
+  const loaded = (url: string, { x, y, z }: TileIndex) => tiles.get(`${z}/${x}/${y} ${url}`)?.value;
+
+  // The values in view, tile by tile (NaN: none, or hidden).
+  const chunks: Float32Array[] = [];
+  let min = Infinity;
+  let max = -Infinity;
+  for (const index of viewTiles) {
+    const rasters = period.terms.map((t) => loaded(t.url, index));
+    const quality = maxGap !== null && period.qualityUrl ? loaded(period.qualityUrl, index) : null;
+    if (rasters.some((r) => !r) || (maxGap !== null && period.qualityUrl && !quality)) continue;
+    const sum = sumTiles(rasters as RasterTile[], period.terms.map((t) => t.factor));
+    const { width, height, transform: [a, , c, , e, f] } = rasters[0]!;
+    // Columns and rows inside the box, by their pixel centres (the grid is lon/lat).
+    const cols = Array.from({ length: width }, (_, i) => {
+      const lon = unwrap(a * (i + 0.5) + c);
+      return lon >= box.west && lon <= box.east;
+    });
+    for (let row = 0; row < height; row++) {
+      const lat = e * (row + 0.5) + f;
+      const inRow = lat >= box.south && lat <= box.north;
+      for (let col = 0; col < width; col++) {
+        const p = row * width + col;
+        // As in the shader: no negative values, and no quality value (255) is hidden too.
+        if (!inRow || !cols[col] || !(sum[p] >= 0) || (quality && quality.values[p] > maxGap!)) {
+          sum[p] = Number.NaN;
+          continue;
+        }
+        if (sum[p] < min) min = sum[p];
+        if (sum[p] > max) max = sum[p];
+      }
+    }
+    chunks.push(sum);
+  }
+  if (!(max >= min)) return null;
+  if (cut === 0 || max === min) return [min, max];
+
+  const counts = new Uint32Array(BINS);
+  const width = (max - min) / BINS;
+  let total = 0;
+  for (const sum of chunks) {
+    for (const v of sum) {
+      if (v !== v) continue; // NaN
+      counts[Math.min(BINS - 1, Math.floor((v - min) / width))]++;
+      total++;
+    }
+  }
+  /** The value below which `share` of the pixels lie. */
+  const quantile = (share: number) => {
+    const target = share * total;
+    let seen = 0;
+    for (let bin = 0; bin < BINS; bin++) {
+      if (seen + counts[bin] >= target) return min + (bin + (target - seen) / Math.max(1, counts[bin])) * width;
+      seen += counts[bin];
+    }
+    return max;
+  };
+  return [quantile(cut / 100), quantile(1 - cut / 100)];
+}
+
 /** The samples of a one-band tile, in either layout. */
 const samples = (array: RasterArray) => (array.layout === "band-separate" ? array.bands[0] : array.data);
 
@@ -580,13 +636,14 @@ function band(device: Texture["device"], data: RasterTypedArray, format: "r32flo
 const sourcesByKey = new Map<string, Record<string, WaporSource>>();
 
 /**
- * The period's raster (or sum of rasters), coloured with its colour map; nothing where
+ * The period's raster (or sum of rasters), coloured with `ramp`; nothing where
  * it has no data. With the period's quality raster, pixels with a gap longer than
  * `maxGap` dekads are left out too (null: none). No layer without a period: a hidden
  * MultiCOGLayer would still open its sources.
  */
 export function waporLayer({
   period,
+  ramp,
   maxGap = null,
   onLoad,
   id = "wapor-aeti",
@@ -594,6 +651,7 @@ export function waporLayer({
   onViewportLoad,
 }: {
   period: WaporPeriod | null;
+  ramp: WaporRamp;
   maxGap?: number | null;
   onLoad?: () => void;
   id?: string;
@@ -619,8 +677,8 @@ export function waporLayer({
     sources: sources as Record<string, { url: string }>,
     concurrencyLimiter: LIMITER,
     composite: period.qualityUrl ? { r: "aeti", g: "quality" } : { r: "aeti" },
-    // A new maxGap only re-renders the loaded tiles.
-    renderPipeline: [{ module: AetiRamp, props: rampProps(period.ramp, maxGap) }],
+    // A new ramp or maxGap only re-renders the loaded tiles.
+    renderPipeline: [{ module: AetiRamp, props: rampProps(ramp, maxGap) }],
     // Linear filtering would blend values with the -9999 nodata at coasts.
     resampling: "nearest",
     parameters: { depthCompare: "always" },

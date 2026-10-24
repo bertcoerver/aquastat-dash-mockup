@@ -2,26 +2,33 @@ import { initBasinStats } from "./basin/basin-stats";
 import { initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
 import {
+  DEFAULT_RAMP,
   checkedWaporPeriod,
+  onWaporTile,
   onWaporTiles,
   waporPeriod,
+  waporViewRange,
   type CheckedWaporPeriod,
   type WaporPeriod,
+  type WaporStretch,
   type WaporTiles,
 } from "./map/layers/wapor";
+import type { WaporRamp } from "./map/layers/wapor-shader";
 import { createMap } from "./map/map";
 import { placeAt, type LngLat } from "./map/places";
 import { upstreamFinder, type SubBasin } from "./map/sub-basin-network";
 import { NOTHING, selection, type SelectionSource } from "./selection";
 import { initWaporLegend } from "./map/wapor-legend";
-import { initWaporPlayer } from "./map/wapor-player";
-import { initDebugPanel } from "./panels/debug-panel";
+import { DEFAULT_PLAYBACK, initWaporPlayer, type PlaybackSettings, type PlaybackStatus } from "./map/wapor-player";
+import { debugNumber, initDebugPanel } from "./panels/debug-panel";
+import { makeResizable } from "./panels/floating";
 import { initLayersMenu } from "./panels/layers-menu";
 import { initLoadingIndicator } from "./panels/loading-indicator";
-import { COUNTRY_MAX_YEAR, MIN_YEAR, fmtDay, mk } from "./toolbar/dekads";
+import { initThemeSwitch } from "./panels/theme-switch";
+import { fmtDay, mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
 import { initToolbar, type Toolbar, type ToolbarState } from "./toolbar/toolbar";
-import type { DayRange, View } from "./toolbar/range-rules";
+import { isCountryYear, type DayRange, type View } from "./toolbar/range-rules";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/toolbar.css";
@@ -34,8 +41,7 @@ import "./styles/country.css";
 // First, so it counts every request from here on.
 initLoadingIndicator();
 
-const toolbar = document.getElementById("toolbar")!;
-const dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+const dark = initThemeSwitch();
 const debug = initDebugPanel(["click", "time", "wapor", "hover"]);
 const round = (v: number) => Math.round(v * 1e4) / 1e4;
 
@@ -87,7 +93,8 @@ const waterMap = createMap(
     onHover: showHover,
   },
 );
-const { map, setView, setLayerVisible, setWapor, setWaporMaxGap, setSelection, showBox, setHoveredSubBasin } = waterMap;
+const { map, setView, setLayerVisible, setWapor, setWaporMaxGap, setWaporRamp, setSelection, showBox, showPoint, setHoveredSubBasin } =
+  waterMap;
 
 const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<Country>("countries"),
@@ -116,7 +123,9 @@ const countryPanel = initCountryPanel({
   map: waterMap,
   info: countryInfo,
   names: new Map(countries.map((c) => [c.m49, c.name])),
-  canSelect: (year) => year >= MIN_YEAR && year <= COUNTRY_MAX_YEAR,
+  boxes: new Map(countries.map((c) => [c.m49, c.bbox])),
+  canSelect: isCountryYear,
+  onLatestYear: (year) => toolbarApi?.setCountryLastYear(year),
   setYear: (year) => toolbarApi?.setRange({ start: mk(year, 0, 0), end: mk(year, 0, 0) + 35 }),
 });
 const picker = initPlacePicker({
@@ -144,7 +153,7 @@ const picker = initPlacePicker({
   },
   onPoint(lngLat) {
     selectPoint(lngLat, "coordinates");
-    if (lngLat) map.easeTo({ center: lngLat, zoom: Math.max(map.getZoom(), 5) });
+    if (lngLat) showPoint(lngLat, Math.max(map.getZoom(), 5), "ease");
   },
 });
 
@@ -178,12 +187,37 @@ async function loadData<T>(name: string): Promise<T> {
   return response.json();
 }
 
-// The top bar floats over the map; keep the map's centre in the visible part below it,
-// and the floating panels just below it.
-new ResizeObserver(() => {
-  map.setPadding({ top: toolbar.offsetHeight, bottom: 0, left: 0, right: 0 });
-  document.documentElement.style.setProperty("--toolbar-h", `${toolbar.offsetHeight}px`);
-}).observe(toolbar);
+// The graph panes (one per view, one shows at a time) share a width that can be changed.
+const $ = (id: string) => document.getElementById(id)!;
+for (const id of ["cp-panel", "wb-panel", "lp-panel"]) makeResizable($(id), "side-panel");
+
+// The loading spinner and the Layers button go with the map's controls, above zoom
+// (MapLibre stacks later bottom controls on top).
+for (const id of ["layers-menu", "map-loading"]) {
+  const box = document.createElement("div");
+  box.className = "maplibregl-ctrl maplibregl-ctrl-group";
+  box.append($(id));
+  waterMap.map.addControl({ onAdd: () => box, onRemove: () => box.remove() }, "bottom-right");
+}
+
+// The date range goes in the middle of the strip along the bottom between the graph
+// pane (when it reaches down there) and the map's controls. (Not the credits: the
+// pane would move each time they're opened or closed; it goes over them instead.)
+const controls = document.querySelector<HTMLElement>(".maplibregl-ctrl-bottom-right .maplibregl-ctrl-group")!;
+const graphPanes = ["cp-panel", "wb-panel", "lp-panel"].map($);
+function fitRange() {
+  let left = 0;
+  for (const pane of graphPanes) {
+    const r = pane.getBoundingClientRect();
+    if (r.width > 0 && r.bottom > window.innerHeight - 120) left = Math.max(left, r.right);
+  }
+  const right = window.innerWidth - controls.getBoundingClientRect().left;
+  document.documentElement.style.setProperty("--range-left", `${Math.round(left)}px`);
+  document.documentElement.style.setProperty("--range-right", `${Math.round(right)}px`);
+}
+const rangeObserver = new ResizeObserver(fitRange);
+for (const pane of graphPanes) rangeObserver.observe(pane);
+window.addEventListener("resize", fitRange);
 
 initLayersMenu(setLayerVisible);
 
@@ -194,13 +228,21 @@ initLayersMenu(setLayerVisible);
  * when that has been published too, for the quality slider in the legend.
  */
 let waporMaxGap: number | null = null;
+let waporStretch: WaporStretch = 1;
+let stretchTimer = 0; // (before initWaporLegend, which calls onStretch)
 const waporLegend = initWaporLegend({
   onMaxGap(maxGap) {
     waporMaxGap = maxGap;
     setWaporMaxGap(maxGap);
+    stretchWapor();
     showWaporDebug();
   },
+  onStretch(cut) {
+    waporStretch = cut;
+    stretchWapor();
+  },
 });
+waporLegend.ramp(DEFAULT_RAMP);
 let waporWanted: string | null = null; // the range, as "start-end" (days)
 let waporShown: WaporPeriod | null = null;
 let waporTimer = 0;
@@ -239,13 +281,40 @@ function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boo
   waporLegend.quality(quality);
   waporShown = period;
   setWapor(period, () => waporWanted === wanted && waporLegend.show(period, "ready"), seamless);
+  stretchWapor();
   showWaporDebug();
 }
+
+/**
+ * The colour map spans the values on screen (see the stretch button in the legend):
+ * worked out again when the view moves, a tile loads, or the period, quality filter or
+ * stretch changes, at most every so often. While playing it's kept, so frames compare.
+ * Until there's a value in view, the last colour map stays.
+ */
+function stretchWapor() {
+  clearTimeout(stretchTimer);
+  stretchTimer = window.setTimeout(() => {
+    if (!waporShown || playback !== "stopped") return;
+    const range = waporViewRange(waporShown, waporMaxGap, waporStretch);
+    if (!range) return;
+    const lo = range[0];
+    const hi = Math.max(range[1], lo + 0.01);
+    const ramp: WaporRamp = {
+      quantities: [0, 1, 2, 3, 4].map((i) => lo + ((hi - lo) * i) / 4) as WaporRamp["quantities"],
+      colors: DEFAULT_RAMP.colors,
+    };
+    setWaporRamp(ramp);
+    waporLegend.ramp(ramp);
+  }, 150);
+}
+onWaporTile(stretchWapor);
+map.on("moveend", stretchWapor);
 
 // Playback: each frame sets the range on the toolbar, and its period, loaded ahead, on
 // the map. Any other change of range or view stops it.
 let waporRange: DayRange | null = null;
 let playing = false; // a frame is being shown
+let playback: PlaybackStatus = "stopped";
 const player = initWaporPlayer({
   getRange: () => waporRange!,
   show(range, checked) {
@@ -256,8 +325,22 @@ const player = initWaporPlayer({
     waporWanted = `${range.start}-${range.end}`;
     showCheckedWapor(checked, true);
   },
-  onState: (state) => toolbarApi?.setPlayback(state),
+  onState(state) {
+    playback = state.status;
+    if (playback === "stopped") stretchWapor();
+    toolbarApi?.setPlayback(state);
+  },
 });
+const playbackTuning: { key: keyof PlaybackSettings; label: string; min: number; max: number; step?: number }[] = [
+  { key: "stepDays", label: "Step (days, next play)", min: 1, max: 366 },
+  { key: "frameMs", label: "Frame (ms)", min: 16, max: 5000, step: 10 },
+  { key: "ahead", label: "Frames ahead", min: 1, max: 200 },
+  { key: "loaders", label: "Loaders (next play)", min: 1, max: 12 },
+  { key: "startAhead", label: "Frames to start", min: 1, max: 50 },
+];
+for (const { key, ...input } of playbackTuning) {
+  debugNumber({ key: `playback.${key}`, value: DEFAULT_PLAYBACK[key], ...input }, (value) => player.tune({ [key]: value }));
+}
 
 // Debug: how the value is made, the map zoom and which overview the rasters cover the
 // view with. Tiles are picked on every frame while the map moves, so this redraws at

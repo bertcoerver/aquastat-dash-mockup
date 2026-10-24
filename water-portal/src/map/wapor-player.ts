@@ -1,23 +1,28 @@
 /*
- * Playback in the Local view: the range moves forward one step at a time, keeping its
- * length, and the map shows WaPOR for each. The step is the range's own unit: a year
- * for whole calendar years, a month for whole months, a dekad for whole dekads, else
- * 10 days.
+ * Playback in the Local view: the range moves forward a step at a time (a day, unless
+ * tuned), keeping its length, and the map shows WaPOR for each. Steps shorter than a
+ * dekad mostly weigh the same rasters differently, so their tiles are cached already:
+ * only a frame that reaches a new dekad loads more.
  *
  * Each frame is loaded ahead: its rasters checked and opened, and the tiles the map
- * shows fetched into the tile cache (see bufferWapor), up to AHEAD frames, LOADERS at
- * a time. Playback
- * starts, and after a stall goes on, once a few frames are in. Moving the map changes
+ * shows fetched into the tile cache (see bufferWapor), up to `ahead` frames, `loaders`
+ * at a time. Playback starts, and after a stall goes on, once a few frames are in.
+ * The timings can be tuned in the debug window. Moving the map changes
  * the tiles, so the frames ahead are loaded again for the new view.
  */
 import { MAX_DAY } from "../toolbar/dekads";
-import { coveringDekads, daysOfDekads, isDekads, type DayRange, type DekadRange } from "../toolbar/range-rules";
+import type { DayRange } from "../toolbar/range-rules";
 import { bufferWapor, checkedWaporPeriod, onWaporView, waporBuffered, type CheckedWaporPeriod } from "./layers/wapor";
 
-const FRAME_MS = 700;
-const AHEAD = 12; // frames loaded ahead
-const LOADERS = 3; // frames loading at once
-const START_AHEAD = 3; // frames in before playing (or all that are left)
+export interface PlaybackSettings {
+  stepDays: number; // how far each frame moves the range (from the next play)
+  frameMs: number; // how long each frame shows
+  ahead: number; // frames loaded ahead
+  loaders: number; // frames loading at once (from the next play)
+  startAhead: number; // frames in before playing (or all that are left)
+}
+
+export const DEFAULT_PLAYBACK: PlaybackSettings = { stepDays: 1, frameMs: 200, ahead: 30, loaders: 3, startAhead: 3 };
 
 export type PlaybackStatus = "stopped" | "buffering" | "playing";
 
@@ -34,26 +39,12 @@ interface Frame {
   loading?: boolean;
 }
 
-/** The step to play whole dekads with, in dekads. */
-function dekadStep({ start, end }: DekadRange) {
-  const len = end - start + 1;
-  if (start % 36 === 0 && len % 36 === 0) return 36;
-  if (start % 3 === 0 && len % 3 === 0) return 3;
-  return 1;
-}
-
 /** How to play a range: the frame after one, and the first of all (as far back as it goes). */
-function framesOf(range: DayRange): { next: (r: DayRange) => DayRange; first: DayRange } {
-  const shift = ({ start, end }: { start: number; end: number }, n: number) => ({ start: start + n, end: end + n });
-  if (!isDekads(range)) {
-    const step = 10;
-    return { next: (r) => shift(r, step), first: shift(range, -step * Math.floor(range.start / step)) };
-  }
-  const dekads = coveringDekads(range);
-  const step = dekadStep(dekads);
+function framesOf(range: DayRange, step: number): { next: (r: DayRange) => DayRange; first: DayRange } {
+  const back = range.start - (range.start % step);
   return {
-    next: (r) => daysOfDekads(shift(coveringDekads(r), step)),
-    first: daysOfDekads(shift(dekads, -dekads.start + (dekads.start % step))),
+    next: ({ start, end }) => ({ start: start + step, end: end + step }),
+    first: { start: range.start - back, end: range.end - back },
   };
 }
 
@@ -61,6 +52,8 @@ export interface WaporPlayer {
   /** Play from the current range (from the first one if it's the last), or stop. */
   toggle(): void;
   stop(): void;
+  /** Change the timings; they apply straight away (`stepDays` and `loaders` from the next play). */
+  tune(changes: Partial<PlaybackSettings>): void;
 }
 
 /**
@@ -77,6 +70,7 @@ export function initWaporPlayer({
   show: (range: DayRange, checked: CheckedWaporPeriod) => void;
   onState: (state: PlaybackState) => void;
 }): WaporPlayer {
+  const settings = { ...DEFAULT_PLAYBACK };
   let run: {
     frames: Frame[]; // from the next one to show
     last: DayRange; // of the frames made so far
@@ -122,7 +116,7 @@ export function initWaporPlayer({
     while (run === current) {
       const { signal } = current.abort;
       // The first frame ahead that isn't in yet.
-      const until = Math.min(current.end, AHEAD);
+      const until = Math.min(current.end, settings.ahead);
       let i = 0;
       while (i < until && (current.frames[i]?.buffered || current.frames[i]?.loading)) i++;
       if (i === until) {
@@ -169,7 +163,7 @@ export function initWaporPlayer({
       }
       return stop();
     }
-    const ahead = Math.min(START_AHEAD, end);
+    const ahead = Math.min(settings.startAhead, end);
     const ready = frames.slice(0, ahead).length === ahead && frames.slice(0, ahead).every((f) => f.buffered);
     if (run.status === "buffering" && ready) {
       run.status = "playing";
@@ -191,13 +185,13 @@ export function initWaporPlayer({
     current.shown++;
     show(frame.range, frame.checked!);
     wake(current);
-    current.timer = window.setTimeout(tick, FRAME_MS);
+    current.timer = window.setTimeout(tick, settings.frameMs);
     advance();
   }
 
   function play() {
     const range = getRange();
-    const { next, first } = framesOf(range);
+    const { next, first } = framesOf(range, settings.stepDays);
     // From the start if there's no next frame.
     const rewound = next(range).end > MAX_DAY;
     const from = rewound ? first : next(range);
@@ -216,7 +210,7 @@ export function initWaporPlayer({
     };
     run = current;
     report();
-    for (let i = 0; i < LOADERS; i++) load(current);
+    for (let i = 0; i < settings.loaders; i++) load(current);
   }
 
   function stop() {
@@ -246,5 +240,11 @@ export function initWaporPlayer({
   return {
     toggle: () => (run ? stop() : play()),
     stop,
+    tune(changes) {
+      Object.assign(settings, changes);
+      if (!run) return;
+      wake(run); // more frames ahead, maybe
+      advance(); // fewer needed to start, maybe
+    },
   };
 }

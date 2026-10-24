@@ -171,8 +171,6 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       return;
     }
 
-    const name = state.selection?.subBasin?.name ?? state.selection?.majorBasin?.name ?? null;
-    $("wb-title").textContent = name ?? "All basins";
     renderMessage();
     showOutlines();
 
@@ -278,8 +276,8 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     let text = "";
     if (!state.selection?.subBasin) {
       text = state.selection?.majorBasin
-        ? "Pick one of its sub-basins (in the top bar, or click it on the map) to model the water balance of that sub-basin and everything upstream of it."
-        : "Click a sub-basin on the map, or pick one in the top bar, to model the water balance of that sub-basin and everything upstream of it.";
+        ? "Pick one of its sub-basins (above, or click it on the map) to model the water balance of that sub-basin and everything upstream of it."
+        : "Click a sub-basin on the map, or pick one above, to model the water balance of that sub-basin and everything upstream of it.";
     } else if (status.kind === "loading") {
       const n = upstreamOf(state.selection.subBasin.id).size + 1;
       const s = Math.round((performance.now() - status.since) / 1000);

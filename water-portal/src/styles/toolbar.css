@@ -1,30 +1,34 @@
-/* Top bar: floats over the map, slightly see-through. */
-.toolbar {
+/* The date range: a pane at the bottom, in the middle of the space left between the
+   graph pane and the map's controls (main.ts sets --range-left and --range-right).
+   Squeezed below its min-width, it goes over the graph pane rather than vanish. */
+.range-pane {
   position: fixed;
-  inset: 0 0 auto 0;
+  left: calc((var(--range-left, 0px) + 100vw - var(--range-right, 0px)) / 2);
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   z-index: 10;
-  padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 10px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 24px;
+  transform: translateX(-50%);
+  width: min(var(--range-w), calc(100vw - var(--range-left, 0px) - var(--range-right, 0px) - 24px));
+  min-width: min(300px, calc(100vw - 24px));
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) var(--glass), transparent);
   background: color-mix(in srgb, var(--surface) var(--glass), transparent);
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
   backdrop-filter: blur(12px) saturate(1.2);
-  border-bottom: 1px solid color-mix(in srgb, var(--line) var(--glass), transparent);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.1);
 }
 
-.brand {
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  margin-right: 8px;
+/* The loading spinner, a box among the map's controls (main.ts puts it there). */
+.map-loading {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
 }
-.brand small {
-  display: block;
-  font: 500 11px/1.2 var(--sans);
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+/* At rest a faint ring, so the box isn't empty. */
+.map-loading .loading:not(.active) .loading-spinner {
+  opacity: 0.6;
+  border-top-color: var(--line);
 }
 
 /* Turns while data is loading (see src/panels/loading-indicator.ts). Its space is
@@ -33,8 +37,6 @@
   display: inline-block;
   width: 12px;
   height: 12px;
-  margin-left: 8px;
-  vertical-align: -1px;
 }
 .loading-spinner {
   display: block;
@@ -76,22 +78,25 @@
   white-space: nowrap;
 }
 
-/* View tabs */
+/* View tabs: at the top of the view's pane (toolbar.ts moves them), above its title. */
+.tabs-slot:not(:empty) {
+  margin-bottom: 8px;
+}
 .tabs {
-  display: flex;
-  gap: 4px;
-  padding: 3px;
-  border-radius: 8px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 7px;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--ground) var(--glass), transparent);
 }
 .tab {
-  font: 500 14px/1 var(--sans);
+  font: 500 12px/1 var(--sans);
   color: var(--muted);
   background: transparent;
   border: 0;
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 6px 12px;
+  border-radius: 5px;
   cursor: pointer;
 }
 .tab:hover {
@@ -108,10 +113,6 @@
 
 /* Date range: a readout above a two-handle slider, and the play button beside them. */
 .range {
-  flex: 1 1 360px;
-  max-width: 760px;
-  min-width: 0;
-  margin-left: auto;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
@@ -186,6 +187,167 @@
 .range-readout > span:not(.arrow) {
   border-radius: 4px;
 }
+/* The dates: click to pick one from a calendar. */
+.range-date {
+  margin: -2px -4px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline dotted color-mix(in srgb, var(--muted) 60%, transparent);
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+.range-date:hover,
+.range-date[aria-expanded="true"] {
+  background: var(--accent-soft);
+  text-decoration-color: transparent;
+}
+.range-date:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* The calendar (date-picker.ts): under the date clicked, over everything. */
+.date-picker {
+  position: fixed;
+  z-index: 30;
+  width: 252px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.15);
+  font: 400 13px/1.3 var(--sans);
+}
+.date-picker[hidden],
+.dp-nav[hidden] {
+  display: none;
+}
+.dp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.dp-title {
+  font-weight: 600;
+  white-space: nowrap;
+}
+.dp-hint {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.dp-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.dp-nav select {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--ground);
+  color: var(--ink);
+  font: 500 13px/1.2 var(--sans);
+}
+.dp-step {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 16px/1 var(--sans);
+  cursor: pointer;
+}
+.dp-step:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.dp-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.dp-nav select:focus-visible,
+.dp-step:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.dp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  row-gap: 2px;
+}
+.dp-grid[data-view="country"] {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.dp-wd {
+  font: 500 10px/24px var(--sans);
+  color: var(--muted);
+  text-align: center;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.dp-cell {
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 400 12px/1 var(--mono);
+  cursor: pointer;
+}
+.dp-grid[data-view="country"] .dp-cell {
+  height: 32px;
+  border-radius: 5px;
+}
+.dp-cell.in-range,
+.dp-cell.dk-hover {
+  background: var(--accent-soft);
+}
+.dp-cell:hover:not(:disabled, .in-range, .dk-hover) {
+  border-radius: 5px;
+  background: var(--accent-soft);
+}
+.dp-cell.is-start {
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+.dp-cell.is-end {
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+.dp-cell.is-picked {
+  border-radius: 5px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 500;
+}
+.dp-cell:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.dp-cell:focus-visible {
+  position: relative;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 5px;
+}
+.dp-cell.is-picked:focus-visible {
+  outline-color: var(--ink);
+}
 .arrow {
   color: var(--muted);
   font-family: var(--mono);
@@ -225,11 +387,18 @@
 .slider-band {
   background: var(--accent);
   border-radius: 3px;
+}
+/* Set from range-slider.ts, which knows the grab zones: a handle's reaches past it. */
+.slider[data-hover="resize"],
+.slider[data-hover="resize"] * {
+  cursor: ew-resize;
+}
+.slider[data-hover="move"],
+.slider[data-hover="move"] * {
   cursor: grab;
 }
-.slider.dragging,
-.slider.dragging .slider-band,
-.slider.dragging .slider-handle {
+.slider.dragging[data-hover="move"],
+.slider.dragging[data-hover="move"] * {
   cursor: grabbing;
 }
 /* Playing: the frames ahead that have been loaded. */
@@ -238,9 +407,9 @@
   background: color-mix(in srgb, var(--accent) 35%, transparent);
   pointer-events: none;
 }
-/* Country: years without complete data. */
+/* What the view can't select: before WaPOR's data (Basin, Local) or after AQUASTAT's (Country). */
 .slider-unavailable {
-  border-radius: 0 3px 3px 0;
+  border-radius: 3px 0 0 3px;
   background: repeating-linear-gradient(
     -45deg,
     var(--muted) 0 1px,
@@ -248,6 +417,9 @@
   );
   opacity: 0.5;
   cursor: not-allowed;
+}
+.slider[data-view="country"] .slider-unavailable {
+  border-radius: 0 3px 3px 0;
 }
 .slider-handle {
   position: absolute;
@@ -259,7 +431,6 @@
   background: var(--surface);
   border: 2px solid var(--accent);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
-  cursor: grab;
 }
 .slider-handle:focus-visible {
   outline: 2px solid var(--accent);
@@ -295,22 +466,8 @@
   }
 }
 
-/* Place picker: country / basin search, or coordinates (one at a time). */
-.place {
-  flex: 0 1 290px;
-  min-width: 220px;
-}
-.place-widget {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.place-label {
-  font: 500 11px/1 var(--sans);
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
+/* Place pickers (place-picker.ts): country and basin search in the panel titles (basin.css),
+   coordinates in the Local panel. */
 .combobox {
   position: relative;
 }

@@ -47,7 +47,7 @@ export function bordersLayer({ color, visible }: { color: Color; visible: boolea
     getDashArray: (f: { properties: BoundaryProperties }) => DASHES[f.properties.bdytyp] ?? [0, 0],
     dashJustified: true,
     // The lines lie on the globe surface, coplanar with MapLibre's sphere: skip the
-    // depth test (the GlobeView still culls the far side). visgl/deck.gl#9592
+    // depth test (map.ts hides the far side instead). visgl/deck.gl#9592
     parameters: { depthCompare: "always" },
   });
 }

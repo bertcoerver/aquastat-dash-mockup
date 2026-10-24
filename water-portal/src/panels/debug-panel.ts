@@ -1,12 +1,16 @@
 /*
  * A floating window that shows app state as a JSON tree, for development: objects
  * fold open and closed, and "Copy" copies it all as JSON. Drag it by its title bar;
- * resize it from the bottom-right corner. Its position, size and which branches are
- * folded are remembered in this browser.
+ * resize it from the bottom-right corner; × closes it, and "Debug window" in the Layers
+ * menu brings it back. Its position, size, whether it's open and which branches are
+ * folded are remembered in this browser. Above the tree, numbers to tune (see
+ * debugNumber), also remembered.
  */
 
 const STORAGE_KEY = "water-portal:debug-panel";
 const FOLDED_KEY = "water-portal:debug-folded";
+const CLOSED_KEY = "water-portal:debug-closed";
+const SETTINGS_KEY = "water-portal:debug-settings";
 
 interface Layout {
   left: number;
@@ -26,6 +30,8 @@ export function initDebugPanel(order: string[]): (key: string, value: unknown) =
   const body = document.getElementById("debug-body")!;
   const collapse = document.getElementById("debug-collapse")!;
   const copy = document.getElementById("debug-copy")!;
+  const close = document.getElementById("debug-close")!;
+  const toggle = document.getElementById("debug-toggle") as HTMLInputElement;
   const content: Record<string, unknown> = {};
   const folded = new Set<string>(loadFolded());
 
@@ -74,6 +80,20 @@ export function initDebugPanel(order: string[]): (key: string, value: unknown) =
     });
     setCollapsed(saved.collapsed);
   }
+  setClosed(loadClosed());
+
+  function setClosed(closed: boolean) {
+    panel.hidden = closed;
+    toggle.checked = !closed;
+    try {
+      localStorage.setItem(CLOSED_KEY, String(closed));
+    } catch {
+      // Not kept without storage.
+    }
+  }
+
+  close.addEventListener("click", () => setClosed(true));
+  toggle.addEventListener("change", () => setClosed(!toggle.checked));
 
   function setCollapsed(collapsed: boolean) {
     panel.classList.toggle("collapsed", collapsed);
@@ -106,10 +126,16 @@ export function initDebugPanel(order: string[]): (key: string, value: unknown) =
     head.addEventListener("pointercancel", end, { once: true });
   });
 
-  // Resizing uses CSS `resize: both`; remember the new size.
-  new ResizeObserver(() => save()).observe(panel);
+  // Resizing uses CSS `resize: both`; remember the new size (not the first size, which
+  // would pin it before the top bar is laid out).
+  let sized = false;
+  new ResizeObserver(() => {
+    if (sized) save();
+    sized = true;
+  }).observe(panel);
 
   function save() {
+    if (panel.hidden) return; // (it measures 0 then)
     const layout: Layout = {
       left: panel.offsetLeft,
       top: panel.offsetTop,
@@ -134,6 +160,53 @@ export function initDebugPanel(order: string[]): (key: string, value: unknown) =
     }
     block.replaceChildren(tree(key, value, key, folded));
   };
+}
+
+/**
+ * A number to tune in the debug window, above the tree. `onChange` runs with the value
+ * kept from last time, if it isn't `value`, and on every change. Clearing the field
+ * goes back to `value`.
+ */
+export function debugNumber(
+  { key, label, value, min, max, step = 1 }: { key: string; label: string; value: number; min: number; max: number; step?: number },
+  onChange: (value: number) => void,
+) {
+  const row = document.createElement("label");
+  row.className = "debug-setting";
+  const input = document.createElement("input");
+  Object.assign(input, { type: "number", min, max, step, placeholder: String(value), title: `Default ${value}` });
+  row.append(label, input);
+  document.getElementById("debug-settings")!.append(row);
+
+  const kept = loadSettings()[key];
+  if (typeof kept === "number" && kept !== value) {
+    input.value = String(kept);
+    onChange(kept);
+  }
+  input.addEventListener("input", () => {
+    const n = input.value === "" ? value : clamp(input.valueAsNumber, min, max);
+    if (Number.isNaN(n)) return; // mid-typing
+    const settings = loadSettings();
+    if (n === value) delete settings[key];
+    else settings[key] = n;
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    } catch {
+      // Not kept without storage.
+    }
+    onChange(n);
+  });
+  input.addEventListener("change", () => {
+    if (input.value !== "") input.value = String(clamp(input.valueAsNumber || value, min, max));
+  });
+}
+
+function loadSettings(): Record<string, number> {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
 }
 
 /** One entry of the tree: a foldable branch for a non-empty object or array, else a line. */
@@ -191,6 +264,14 @@ function loadFolded(): string[] {
     return JSON.parse(localStorage.getItem(FOLDED_KEY) ?? "[]");
   } catch {
     return [];
+  }
+}
+
+function loadClosed() {
+  try {
+    return localStorage.getItem(CLOSED_KEY) === "true";
+  } catch {
+    return false;
   }
 }
 

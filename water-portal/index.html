@@ -15,89 +15,59 @@
   <body>
     <div id="map"></div>
 
-    <header class="toolbar" id="toolbar">
-      <div class="brand">
-        Water Portal<span class="loading" id="loading" role="status"><span class="loading-spinner" aria-hidden="true"></span><span class="loading-text" id="loading-text"></span></span>
-        <small>SDG 6.4</small>
+    <!-- Turns while data loads (src/panels/loading-indicator.ts); main.ts puts it with
+         the map's controls, as it does the Layers button. -->
+    <div class="map-loading" id="map-loading" title="Loading indicator">
+      <span class="loading" id="loading" role="status"><span class="loading-spinner" aria-hidden="true"></span><span class="loading-text" id="loading-text"></span></span>
+    </div>
+
+    <!-- The date range, at the bottom of the map. -->
+    <div class="range-pane range" id="pane-range" role="group" aria-label="Date range">
+      <!-- Local view: play the range forward (see src/map/wapor-player.ts). -->
+      <button class="play" id="play-button" type="button" aria-label="Play" data-status="stopped" hidden>
+        <svg class="play-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor" /></svg>
+        <svg class="pause-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" fill="currentColor" /></svg>
+      </button>
+      <!-- Click a date to pick it from a calendar (src/toolbar/date-picker.ts). -->
+      <div class="range-readout">
+        <button class="range-date" id="start-label" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="range-date" id="end-label" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <span class="range-len" id="range-len" aria-hidden="true"></span>
       </div>
-
-      <nav class="tabs" role="tablist" aria-label="View">
-        <button class="tab" role="tab" data-view="country">Country</button>
-        <button class="tab" role="tab" data-view="basin">Basin</button>
-        <button class="tab" role="tab" data-view="local">Local</button>
-      </nav>
-
-      <!-- Place picker: one widget per view (see src/toolbar/place-picker.ts). -->
-      <div class="place">
-        <div class="place-widget" data-view="country">
-          <label class="place-label" for="country-input">Country</label>
-          <div class="combobox" id="country-combobox">
-            <input id="country-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
-              aria-controls="country-list" placeholder="Search countries…" autocomplete="off" spellcheck="false" />
-            <button class="combobox-clear" type="button" aria-label="Clear country" hidden>×</button>
-            <ul class="combobox-list" id="country-list" role="listbox" aria-label="Countries" hidden></ul>
-          </div>
+      <div class="slider" id="slider">
+        <div class="slider-track" id="slider-track">
+          <div class="slider-unavailable" id="slider-unavailable" hidden></div>
+          <div class="slider-buffered" id="slider-buffered" hidden></div>
+          <div class="slider-band" id="slider-band"></div>
         </div>
-
-        <div class="place-widget" data-view="basin" hidden>
-          <label class="place-label" for="basin-input">Basin</label>
-          <div class="combobox" id="basin-combobox">
-            <input id="basin-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
-              aria-haspopup="tree" aria-controls="basin-list" placeholder="Search basins and sub-basins…"
-              autocomplete="off" spellcheck="false" />
-            <button class="combobox-clear" type="button" aria-label="Clear basin" hidden>×</button>
-            <ul class="combobox-list combobox-tree" id="basin-list" role="tree" aria-label="Basins" hidden></ul>
-          </div>
-        </div>
-
-        <div class="place-widget" data-view="local" hidden>
-          <label class="place-label" for="lon-input">Point</label>
-          <form class="coords" id="coords">
-            <label>X<input id="lon-input" type="number" step="any" min="-180" max="180" required
-                placeholder="lon" aria-label="Longitude" /></label>
-            <label>Y<input id="lat-input" type="number" step="any" min="-90" max="90" required
-                placeholder="lat" aria-label="Latitude" /></label>
-            <button class="coords-go" type="submit">Go</button>
-            <button class="combobox-clear" id="coords-clear" type="button" aria-label="Clear point" hidden>×</button>
-          </form>
-        </div>
+        <div class="slider-handle" id="start-handle" role="slider" tabindex="0" aria-label="Start date"></div>
+        <div class="slider-handle" id="end-handle" role="slider" tabindex="0" aria-label="End date"></div>
+        <div class="slider-years" id="slider-years" aria-hidden="true"></div>
       </div>
-
-      <div class="range" role="group" aria-label="Date range">
-        <!-- Local view: play the range forward (see src/map/wapor-player.ts). -->
-        <button class="play" id="play-button" type="button" aria-label="Play" data-status="stopped" hidden>
-          <svg class="play-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor" /></svg>
-          <svg class="pause-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" fill="currentColor" /></svg>
-        </button>
-        <div class="range-readout" aria-hidden="true">
-          <span id="start-label"></span>
-          <span class="arrow">→</span>
-          <span id="end-label"></span>
-          <span class="range-len" id="range-len"></span>
-        </div>
-        <div class="slider" id="slider">
-          <div class="slider-track" id="slider-track">
-            <div class="slider-unavailable" id="slider-unavailable" hidden></div>
-            <div class="slider-buffered" id="slider-buffered" hidden></div>
-            <div class="slider-band" id="slider-band"></div>
-          </div>
-          <div class="slider-handle" id="start-handle" role="slider" tabindex="0" aria-label="Start date"></div>
-          <div class="slider-handle" id="end-handle" role="slider" tabindex="0" aria-label="End date"></div>
-          <div class="slider-years" id="slider-years" aria-hidden="true"></div>
-        </div>
-      </div>
-    </header>
+    </div>
 
     <div class="layers-menu" id="layers-menu">
-      <button class="layers-button" id="layers-button" aria-expanded="false" aria-controls="layers-panel">
+      <button class="layers-button" id="layers-button" aria-expanded="false" aria-controls="layers-panel"
+        aria-label="Layers" title="Layers">
         <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
           <path d="M12 3 2 8l10 5 10-5-10-5Z M2 13l10 5 10-5 M2 17.5l10 5 10-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
         </svg>
-        Layers
       </button>
       <div class="layers-panel" id="layers-panel" hidden>
         <label><input type="checkbox" data-layer="rivers" checked /> Rivers</label>
         <label><input type="checkbox" data-layer="lakes" checked /> Lakes</label>
+        <div class="layers-group" role="radiogroup" aria-label="Theme">
+          <span class="layers-group-label">Theme</span>
+          <label><input type="radio" name="theme" value="auto" /> Auto</label>
+          <label><input type="radio" name="theme" value="light" /> Light</label>
+          <label><input type="radio" name="theme" value="dark" /> Dark</label>
+        </div>
+        <div class="layers-group">
+          <span class="layers-group-label">Layout</span>
+          <label><input type="checkbox" id="debug-toggle" /> Debug window</label>
+          <button class="layers-action" id="reset-layout" type="button">Reset layout</button>
+        </div>
       </div>
     </div>
 
@@ -107,8 +77,10 @@
         <span class="debug-actions">
           <button class="debug-button" id="debug-copy" title="Copy as JSON">Copy</button>
           <button class="debug-button debug-collapse" id="debug-collapse" aria-expanded="true" aria-controls="debug-body" title="Collapse">–</button>
+          <button class="debug-button debug-collapse" id="debug-close" title="Close (Layers menu brings it back)" aria-label="Close">×</button>
         </span>
       </header>
+      <div class="debug-settings" id="debug-settings"></div>
       <div class="debug-body" id="debug-body"></div>
     </section>
 
@@ -116,9 +88,11 @@
       <div class="legend-title">
         Actual evapotranspiration<small>WaPOR v3 · ETIa · 300 m</small>
       </div>
-      <div class="legend-period"><span id="wapor-period"></span><span id="wapor-unit"></span></div>
+      <div class="legend-period"><span id="wapor-period"></span><span>mm/day</span></div>
       <div class="legend-ramp" id="wapor-ramp"></div>
       <div class="legend-ticks" id="wapor-ticks" aria-hidden="true"></div>
+      <!-- How much of the values in view the colours span (src/map/wapor-legend.ts). -->
+      <div class="legend-stretch">Colour range<button type="button" id="wapor-stretch"></button></div>
       <div class="legend-status" id="wapor-status" role="status"></div>
       <div class="legend-note" id="wapor-note"></div>
       <!-- Dekads only: hide pixels with a long NDVI gap (src/map/wapor-legend.ts). -->
@@ -147,7 +121,6 @@
     <div class="wb-tooltip" id="wb-tooltip" hidden></div>
 
     <aside class="legend cp-legend" id="bs-legend" hidden>
-      <div class="cp-legend-source" id="bs-legend-source"></div>
       <div class="legend-title" id="bs-legend-title"></div>
       <div class="legend-period"><span id="bs-legend-period"></span><span id="bs-legend-unit"></span></div>
       <div class="legend-ramp" id="bs-legend-ramp"></div>
@@ -158,8 +131,12 @@
 
     <!-- Country view: AQUASTAT statistics and the map that goes with each chart (src/country/country-panel.ts). -->
     <aside class="legend cp-legend" id="cp-legend" hidden>
-      <div class="cp-legend-source" id="cp-legend-source"></div>
-      <div class="legend-title" id="cp-legend-title"></div>
+      <!-- What the map shows; a menu of the topic's other maps (src/panels/title-menu.ts). -->
+      <div class="legend-title">
+        <button class="title-menu" id="cp-indicator" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map indicator"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+        <small id="cp-legend-note"></small>
+      </div>
       <div class="legend-period"><span id="cp-legend-year"></span><span id="cp-legend-unit"></span></div>
       <div id="cp-legend-scale"></div>
       <div class="legend-status" id="cp-legend-status" role="status"></div>
@@ -170,8 +147,25 @@
     <aside class="wb-panel cp-panel" id="cp-panel" aria-label="Country statistics" hidden>
       <header class="wb-head">
         <div class="wb-heading">
-          <small>AQUASTAT</small>
-          <h2 id="cp-title"></h2>
+          <!-- The view tabs, in whichever view's pane is showing (src/toolbar/toolbar.ts). -->
+          <div class="tabs-slot" data-view="country">
+            <nav class="tabs" role="tablist" aria-label="View">
+              <button class="tab" role="tab" data-view="country">Country</button>
+              <button class="tab" role="tab" data-view="basin">Basin</button>
+              <button class="tab" role="tab" data-view="local">Local</button>
+            </nav>
+          </div>
+          <div class="wb-title" role="heading" aria-level="2">
+            <div class="combobox title-combobox" id="country-combobox">
+              <span class="title-field" data-empty="World" data-search="Search countries…">
+                <input id="country-input" type="text" role="combobox" aria-label="Country" aria-autocomplete="list"
+                  aria-expanded="false" aria-controls="country-list" autocomplete="off" spellcheck="false" />
+                <span class="title-caret" aria-hidden="true"></span>
+              </span>
+              <button class="combobox-clear" type="button" aria-label="Show the world" title="Show the world" hidden>×</button>
+              <ul class="combobox-list" id="country-list" role="listbox" aria-label="Countries" hidden></ul>
+            </div>
+          </div>
           <p id="cp-subtitle"></p>
         </div>
         <button class="debug-button debug-collapse" id="cp-collapse" aria-expanded="true" aria-controls="cp-body" title="Collapse">–</button>
@@ -188,8 +182,18 @@
     <aside class="wb-panel" id="wb-panel" aria-label="Water balance" hidden>
       <header class="wb-head">
         <div class="wb-heading">
-          <small>Water balance</small>
-          <h2 id="wb-title"></h2>
+          <div class="tabs-slot" data-view="basin"></div>
+          <div class="wb-title" role="heading" aria-level="2">
+            <div class="combobox title-combobox" id="basin-combobox">
+              <span class="title-field" data-empty="All basins" data-search="Search basins and sub-basins…">
+                <input id="basin-input" type="text" role="combobox" aria-label="Basin" aria-autocomplete="list"
+                  aria-haspopup="tree" aria-expanded="false" aria-controls="basin-list" autocomplete="off" spellcheck="false" />
+                <span class="title-caret" aria-hidden="true"></span>
+              </span>
+              <button class="combobox-clear" type="button" aria-label="Show all basins" title="Show all basins" hidden>×</button>
+              <ul class="combobox-list combobox-tree" id="basin-list" role="tree" aria-label="Basins" hidden></ul>
+            </div>
+          </div>
           <p id="wb-subtitle"></p>
         </div>
         <button class="debug-button debug-collapse" id="wb-collapse" aria-expanded="true" aria-controls="wb-body" title="Collapse">–</button>
@@ -232,6 +236,39 @@
           <p class="wb-message" id="bs-message" hidden></p>
           <div id="bs-cards"></div>
         </section>
+      </div>
+    </aside>
+
+    <!-- Local view: the point, typed or clicked on the map (src/toolbar/place-picker.ts),
+         and, for now, a placeholder where its charts will go. -->
+    <aside class="wb-panel lp-panel" id="lp-panel" aria-label="Local" hidden>
+      <header class="wb-head">
+        <div class="wb-heading">
+          <div class="tabs-slot" data-view="local"></div>
+          <div class="wb-title" role="heading" aria-level="2">
+            <!-- The point as the title; a click opens its fields (src/toolbar/place-picker.ts). -->
+            <div class="title-combobox point-picker">
+              <button class="title-menu" id="lp-title" type="button" aria-haspopup="dialog" aria-expanded="false"
+                aria-controls="coords"><span class="title-menu-label">Pick a point</span><span class="title-caret" aria-hidden="true"></span></button>
+              <button class="combobox-clear" id="coords-clear" type="button" aria-label="Clear point" title="Clear point" hidden>×</button>
+              <form class="coords point-popup" id="coords" aria-label="Point" hidden>
+                <label>X<input id="lon-input" type="number" step="any" min="-180" max="180" required
+                    placeholder="lon" aria-label="Longitude" /></label>
+                <label>Y<input id="lat-input" type="number" step="any" min="-90" max="90" required
+                    placeholder="lat" aria-label="Latitude" /></label>
+                <button class="coords-go" type="submit">Go</button>
+              </form>
+            </div>
+          </div>
+          <p id="lp-subtitle">Click the map, or the title to type coordinates.</p>
+        </div>
+        <button class="debug-button debug-collapse" id="lp-collapse" aria-expanded="true" aria-controls="lp-body" title="Collapse">–</button>
+      </header>
+      <div class="wb-body" id="lp-body">
+        <p class="wb-message">
+          Charts for the selected point will come here: for example its WaPOR evapotranspiration
+          and precipitation over the date range, and how this period compares with other years.
+        </p>
       </div>
     </aside>
 

@@ -8,7 +8,20 @@
  * country. Here every chart works in both: regional charts get the selected country as
  * an extra row on top, and the trends compare it with its region and the World.
  */
-import { BASE_YEAR, FIRST_YEAR, VARS, WORLD, regionValue, series as seriesOf, valueAt, type Topic, type VarKey } from "./data";
+import {
+  BASE_YEAR,
+  FIRST_YEAR,
+  VARS,
+  WORLD,
+  meanAt,
+  meanOver,
+  regionValue,
+  series as seriesOf,
+  yearPeriod,
+  type Period,
+  type Topic,
+  type VarKey,
+} from "./data";
 import { bars, lines, shares, type BarRow, type LineSeries } from "./charts";
 
 
@@ -20,10 +33,10 @@ export interface Region {
 }
 
 export interface Ctx {
-  /** The year shown: the top bar's year, or AQUASTAT's latest before it. */
-  year: number;
-  /** The top bar's year. */
-  selectedYear: number;
+  /** The years shown (the top bar's, up to AQUASTAT's latest): values are their yearly mean. */
+  period: Period;
+  /** The period as shown, e.g. "2019–2023". */
+  label: string;
   country: { m49: number; name: string } | null;
   /** The selected country's region. */
   region: Region | null;
@@ -51,7 +64,7 @@ export type MapStyle =
   | { kind: "circles"; color: string };
 
 export interface MapSpec {
-  /** Names the map (with the year): the map repaints when it changes. */
+  /** Names the map (with the period): the map repaints when it changes. */
   id: string;
   title: string;
   unit: string;
@@ -99,6 +112,7 @@ const C = { base: "var(--c-base)", now: "var(--c-now)", s1: "var(--c-1)", s2: "v
 const MAP_C = { s1: "#2a78d6", s2: "#eb6834", s3: "#1baf7a" };
 
 const unitOf = (key: VarKey) => VARS[key].unit;
+const BASE = yearPeriod(BASE_YEAR);
 
 function rampMap(ctx: Ctx, key: VarKey, title: string, ramp: string[], scale: "linear" | "log", domain?: [number, number]): MapSpec {
   return {
@@ -106,7 +120,7 @@ function rampMap(ctx: Ctx, key: VarKey, title: string, ramp: string[], scale: "l
     title,
     unit: unitOf(key),
     note: domain ? "" : scale === "log" ? "Log scale" : "",
-    value: (m49) => valueAt(m49, key, ctx.year),
+    value: (m49) => meanAt(m49, key, ctx.period),
     style: { kind: "ramp", ramp, scale, domain },
   };
 }
@@ -132,7 +146,7 @@ function stressMap(ctx: Ctx, extra: Partial<MapSpec> = {}): MapSpec {
     title: "Water stress (SDG 6.4.2)",
     unit: "%",
     note: "Freshwater withdrawn, % of what is available",
-    value: (m49) => valueAt(m49, "ws", ctx.year),
+    value: (m49) => meanAt(m49, "ws", ctx.period),
     style: { kind: "classes", classes: STRESS },
     ...extra,
   };
@@ -144,7 +158,7 @@ function falkenmarkMap(ctx: Ctx, extra: Partial<MapSpec> = {}): MapSpec {
     title: "Renewable water resources per person",
     unit: "m³/inhab/yr",
     note: "Falkenmark scarcity thresholds",
-    value: (m49) => valueAt(m49, "trwrpc", ctx.year),
+    value: (m49) => meanAt(m49, "trwrpc", ctx.period),
     style: { kind: "classes", classes: FALKENMARK },
     ...extra,
   };
@@ -160,9 +174,9 @@ const membersOf = (ctx: Ctx, area: number) =>
   area === WORLD ? ctx.countries : ctx.regions.find((r) => r.code === area)?.members ?? [area];
 const isCountry = (ctx: Ctx, area: number) => area !== WORLD && !ctx.regions.some((r) => r.code === area);
 
-/** A variable for a country, region or the World (see regionValue). */
-function val(ctx: Ctx, area: number, key: VarKey, year: number, weight?: VarKey) {
-  return isCountry(ctx, area) ? valueAt(area, key, year) : regionValue(area, key, year, membersOf(ctx, area), weight);
+/** A variable's yearly mean over a period, for a country, region or the World (see regionValue). */
+function val(ctx: Ctx, area: number, key: VarKey, p: Period, weight?: VarKey) {
+  return isCountry(ctx, area) ? meanAt(area, key, p) : meanOver(p, (y) => regionValue(area, key, y, membersOf(ctx, area), weight));
 }
 
 /** The rows of a regional chart: the selected country, the regions, the World. */
@@ -186,7 +200,7 @@ function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
       if (own.size || isCountry(ctx, area)) return own;
     }
     const out = new Map<number, number>();
-    for (let y = FIRST_YEAR; y <= ctx.year; y++) out.set(y, val(ctx, area, key, y, weight));
+    for (let y = FIRST_YEAR; y <= ctx.period.to; y++) out.set(y, val(ctx, area, key, yearPeriod(y), weight));
     return out;
   };
   const s: LineSeries[] = [{ label: "World", color: C.world, values: over(WORLD) }];
@@ -195,8 +209,8 @@ function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
   return s;
 }
 
-function lineChart(ctx: Ctx, series: LineSeries[], unit: string, height?: number) {
-  return lines({ series, from: FIRST_YEAR, to: ctx.year, selected: ctx.year, unit, width: ctx.width, height, clickable: ctx.canSelect });
+function lineChart(ctx: Ctx, series: LineSeries[], unit: string, axis: string, height?: number) {
+  return lines({ series, from: FIRST_YEAR, to: ctx.period.to, selected: ctx.period.from, selectedTo: ctx.period.to, unit, axis, width: ctx.width, height, clickable: ctx.canSelect });
 }
 
 function seriesCsv(series: LineSeries[], unit: string) {
@@ -212,7 +226,7 @@ function rowsCsv(rows: BarRow[], columns: string[]) {
 /** The countries with the highest (or lowest) values, as ranked bars. */
 function ranking(ctx: Ctx, key: VarKey, n: number, order: "top" | "bottom", scale = 1) {
   const ranked = ctx.countries
-    .map((m49) => ({ m49, v: valueAt(m49, key, ctx.year) }))
+    .map((m49) => ({ m49, v: meanAt(m49, key, ctx.period) }))
     // AQUASTAT stores 0 for some small territories it has no figures for.
     .filter((d) => Number.isFinite(d.v) && d.v > 0)
     .sort((a, b) => (order === "top" ? b.v - a.v : a.v - b.v));
@@ -274,32 +288,32 @@ const SDG: TopicDef = {
   about:
     "SDG 6.4.1 water use efficiency is the value added per cubic metre of water withdrawn (US$/m³, constant 2015 prices). SDG 6.4.2 water stress is the freshwater withdrawn as a share of the renewable freshwater available after environmental flow requirements.",
   tiles: [
-    { id: "t-ws", label: "Water stress", unit: "%", color: "#c8402f", value: (c) => val(c, focus(c), "ws", c.year), map: (c) => stressMap(c) },
-    { id: "t-wue", label: "Water use efficiency", unit: "US$/m³", color: "#54278f", value: (c) => val(c, focus(c), "wue", c.year), map: (c) => rampMap(c, "wue", "Water use efficiency (SDG 6.4.1)", RAMPS.purples, "log") },
-    { id: "t-tww", label: "Water withdrawal", unit: "10⁹ m³/yr", color: MAP_C.s1, value: (c) => val(c, focus(c), "tww", c.year), map: (c) => circlesMap("tww", "Total water withdrawal", unitOf("tww"), (m) => valueAt(m, "tww", c.year)) },
-    { id: "t-pop", label: "Population", unit: "million", color: "#4292c6", value: (c) => val(c, focus(c), "pop", c.year) / 1000, map: (c) => ({ ...rampMap(c, "pop", "Population", RAMPS.blues, "log"), unit: "million", value: (m) => valueAt(m, "pop", c.year) / 1000 }) },
+    { id: "t-ws", label: "Water stress", unit: "%", color: "#c8402f", value: (c) => val(c, focus(c), "ws", c.period), map: (c) => stressMap(c) },
+    { id: "t-wue", label: "Water use efficiency", unit: "US$/m³", color: "#54278f", value: (c) => val(c, focus(c), "wue", c.period), map: (c) => rampMap(c, "wue", "Water use efficiency (SDG 6.4.1)", RAMPS.purples, "log") },
+    { id: "t-tww", label: "Water withdrawal", unit: "10⁹ m³/yr", color: MAP_C.s1, value: (c) => val(c, focus(c), "tww", c.period), map: (c) => circlesMap("tww", "Total water withdrawal", unitOf("tww"), (m) => meanAt(m, "tww", c.period)) },
+    { id: "t-pop", label: "Population", unit: "million", color: "#4292c6", value: (c) => val(c, focus(c), "pop", c.period) / 1000, map: (c) => ({ ...rampMap(c, "pop", "Population", RAMPS.blues, "log"), unit: "million", value: (m) => meanAt(m, "pop", c.period) / 1000 }) },
   ],
   cards: [
     {
       id: "sdg-stress-regions",
-      title: (c) => `Water stress per region, ${BASE_YEAR} and ${c.year}`,
+      title: (c) => `Water stress per region, ${BASE_YEAR} and ${c.label}`,
       caption: () => "Hover a row to pick out its countries on the map.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "ws", BASE_YEAR), val(c, a, "ws", c.year)]);
-        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: String(c.year), color: C.now }], rows, unit: "%", width: c.width }), csv: rowsCsv(rows, [`ws_${BASE_YEAR}`, `ws_${c.year}`]) };
+        const rows = areaRows(c, (a) => [val(c, a, "ws", BASE), val(c, a, "ws", c.period)]);
+        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: "%", axis: "Water stress", width: c.width }), csv: rowsCsv(rows, [`ws_${BASE_YEAR}`, `ws_${c.label}`]) };
       },
       map: (c) => stressMap(c),
     },
     {
       id: "sdg-stress-top",
-      title: (c) => `Highest water stress, ${c.year}`,
+      title: (c) => `Highest water stress, ${c.label}`,
       caption: (c) => {
         const { count } = ranking(c, "ws", 12, "top");
         return `The 12 most water-stressed of ${count} countries; most are small, so the map rings them. The map greys out countries below high stress (75 %).`;
       },
       render(c) {
         const { rows } = ranking(c, "ws", 12, "top");
-        return { html: bars({ series: [{ label: "Water stress", color: C.now }], rows, unit: "%", width: c.width }), csv: rowsCsv(rows, [`ws_${c.year}`]) };
+        return { html: bars({ series: [{ label: "Water stress", color: C.now }], rows, unit: "%", axis: "Water stress", width: c.width }), csv: rowsCsv(rows, [`ws_${c.label}`]) };
       },
       map: (c) => stressMap(c, { id: "ws:high", emphasis: (v) => v >= 75, listed: ranking(c, "ws", 12, "top").listed }),
     },
@@ -309,7 +323,7 @@ const SDG: TopicDef = {
       caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + " Click a year to map it.",
       render(c) {
         const s = areaSeries(c, "ws");
-        return { html: lineChart(c, s, "%"), csv: seriesCsv(s, "%") };
+        return { html: lineChart(c, s, "%", "Water stress"), csv: seriesCsv(s, "%") };
       },
       map: (c) => stressMap(c),
     },
@@ -324,7 +338,7 @@ const SDG: TopicDef = {
           { label: "Industry", color: C.s2, sub: "var:iscws", values: seriesOf(a, "iscws") },
           { label: "Municipal", color: C.s1, sub: "var:mscws", values: seriesOf(a, "mscws") },
         ];
-        return { html: lineChart(c, s, "%"), csv: seriesCsv(s, "%") };
+        return { html: lineChart(c, s, "%", "Contribution to water stress"), csv: seriesCsv(s, "%") };
       },
       map(c, sub) {
         const key = variable(sub, ["ascws", "iscws", "mscws"], "ascws") as VarKey;
@@ -334,26 +348,26 @@ const SDG: TopicDef = {
     },
     {
       id: "sdg-wue-regions",
-      title: (c) => `Water use efficiency per region, ${BASE_YEAR} and ${c.year}`,
+      title: (c) => `Water use efficiency per region, ${BASE_YEAR} and ${c.label}`,
       caption: () => "US$ of value added per m³ withdrawn.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "wue", BASE_YEAR), val(c, a, "wue", c.year)]);
-        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: String(c.year), color: C.now }], rows, unit: "US$/m³", width: c.width }), csv: rowsCsv(rows, [`wue_${BASE_YEAR}`, `wue_${c.year}`]) };
+        const rows = areaRows(c, (a) => [val(c, a, "wue", BASE), val(c, a, "wue", c.period)]);
+        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: "US$/m³", axis: "Water use efficiency", width: c.width }), csv: rowsCsv(rows, [`wue_${BASE_YEAR}`, `wue_${c.label}`]) };
       },
       map: (c) => rampMap(c, "wue", "Water use efficiency (SDG 6.4.1)", RAMPS.purples, "log"),
     },
     {
       id: "sdg-wue-sectors",
-      title: (c) => `Water use efficiency by sector, ${c.year}`,
-      caption: (c) => `${c.country ? c.country.name : "Per region"}: value added per m³ in each sector, ${BASE_YEAR} and ${c.year}. Hover a row to map that sector.`,
+      title: (c) => `Water use efficiency by sector, ${c.label}`,
+      caption: (c) => `${c.country ? c.country.name : "Per region"}: value added per m³ in each sector, ${BASE_YEAR} and ${c.label}. Hover a row to map that sector.`,
       render(c) {
         const a = focus(c);
         const rows: BarRow[] = [
-          { sub: "var:iawue", label: "Irrigated agriculture", values: [val(c, a, "iawue", BASE_YEAR), val(c, a, "iawue", c.year)] },
-          { sub: "var:iwue", label: "Industry", values: [val(c, a, "iwue", BASE_YEAR), val(c, a, "iwue", c.year)] },
-          { sub: "var:swue", label: "Services", values: [val(c, a, "swue", BASE_YEAR), val(c, a, "swue", c.year)] },
+          { sub: "var:iawue", label: "Irrigated agriculture", values: [val(c, a, "iawue", BASE), val(c, a, "iawue", c.period)] },
+          { sub: "var:iwue", label: "Industry", values: [val(c, a, "iwue", BASE), val(c, a, "iwue", c.period)] },
+          { sub: "var:swue", label: "Services", values: [val(c, a, "swue", BASE), val(c, a, "swue", c.period)] },
         ];
-        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: String(c.year), color: C.now }], rows, unit: "US$/m³", width: c.width }), csv: rowsCsv(rows, [String(BASE_YEAR), String(c.year)]) };
+        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: "US$/m³", axis: "Water use efficiency", width: c.width }), csv: rowsCsv(rows, [String(BASE_YEAR), c.label]) };
       },
       map(c, sub) {
         const key = variable(sub, ["iawue", "iwue", "swue"], "iawue") as VarKey;
@@ -364,10 +378,10 @@ const SDG: TopicDef = {
     {
       id: "sdg-wue-change",
       title: () => `Water use efficiency since ${BASE_YEAR}`,
-      caption: (c) => `${c.country ? `${c.country.name} compared with its region and the World. ` : ""}The map shows the change from ${BASE_YEAR} to ${c.year}.`,
+      caption: (c) => `${c.country ? `${c.country.name} compared with its region and the World. ` : ""}The map shows the change from ${BASE_YEAR} to ${c.label}.`,
       render(c) {
         const s = areaSeries(c, "wue");
-        return { html: lineChart(c, s, "US$/m³"), csv: seriesCsv(s, "US$/m³") };
+        return { html: lineChart(c, s, "US$/m³", "Water use efficiency"), csv: seriesCsv(s, "US$/m³") };
       },
       map: (c) => ({
         id: "wue:change",
@@ -375,8 +389,8 @@ const SDG: TopicDef = {
         unit: "%",
         note: "Red: less efficient · blue: more",
         value(m49) {
-          const a = valueAt(m49, "wue", BASE_YEAR);
-          const b = valueAt(m49, "wue", c.year);
+          const a = meanAt(m49, "wue", BASE);
+          const b = meanAt(m49, "wue", c.period);
           return a > 0 ? (b / a - 1) * 100 : NaN;
         },
         style: { kind: "ramp", ramp: RAMPS.change, scale: "diverging", domain: [-100, 100] },
@@ -393,37 +407,37 @@ const RESOURCES: TopicDef = {
   about:
     "Renewable water resources are the long-term average water a country can count on each year: produced inside it from precipitation (internal), plus what flows in from upstream countries (external). Surface water and groundwater overlap, as rivers and aquifers feed each other.",
   tiles: [
-    { id: "t-trwrpc", label: "Renewable water per person", unit: "m³/yr", color: "#2166ac", value: (c) => val(c, focus(c), "trwrpc", c.year), map: (c) => falkenmarkMap(c) },
+    { id: "t-trwrpc", label: "Renewable water per person", unit: "m³/yr", color: "#2166ac", value: (c) => val(c, focus(c), "trwrpc", c.period), map: (c) => falkenmarkMap(c) },
     {
       id: "t-trwr",
       label: "Renewable water resources",
       unit: "10⁹ m³/yr",
       color: MAP_C.s1,
       // The World's is the sum of what countries produce internally (external water comes from another country).
-      value: (c) => (c.country ? valueAt(c.country.m49, "trwr", c.year) : regionValue(WORLD, "irwr", c.year, c.countries)),
-      map: (c) => circlesMap("trwr", "Total renewable water resources", unitOf("trwr"), (m) => valueAt(m, "trwr", c.year)),
+      value: (c) => (c.country ? meanAt(c.country.m49, "trwr", c.period) : meanOver(c.period, (y) => regionValue(WORLD, "irwr", y, c.countries))),
+      map: (c) => circlesMap("trwr", "Total renewable water resources", unitOf("trwr"), (m) => meanAt(m, "trwr", c.period)),
     },
-    { id: "t-dep", label: "From other countries", unit: "%", color: "#a63603", value: (c) => (c.country ? valueAt(c.country.m49, "dep", c.year) : NaN), map: (c) => ({ ...rampMap(c, "dep", "Dependency ratio", RAMPS.oranges, "linear", [0, 100]), note: "Renewable water that comes from other countries" }) },
-    { id: "t-dam", label: "Dam capacity", unit: "km³", color: "#08519c", value: (c) => val(c, focus(c), "dam", c.year), map: (c) => circlesMap("dam", "Total dam capacity", "km³", (m) => valueAt(m, "dam", c.year)) },
+    { id: "t-dep", label: "From other countries", unit: "%", color: "#a63603", value: (c) => (c.country ? meanAt(c.country.m49, "dep", c.period) : NaN), map: (c) => ({ ...rampMap(c, "dep", "Dependency ratio", RAMPS.oranges, "linear", [0, 100]), note: "Renewable water that comes from other countries" }) },
+    { id: "t-dam", label: "Dam capacity", unit: "km³", color: "#08519c", value: (c) => val(c, focus(c), "dam", c.period), map: (c) => circlesMap("dam", "Total dam capacity", "km³", (m) => meanAt(m, "dam", c.period)) },
   ],
   cards: [
     {
       id: "wr-regions",
-      title: (c) => `Renewable water per person per region, ${BASE_YEAR} and ${c.year}`,
+      title: (c) => `Renewable water per person per region, ${BASE_YEAR} and ${c.label}`,
       caption: () => "Falls as population grows. Hover a row to pick out its countries on the map.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "trwrpc", BASE_YEAR), val(c, a, "trwrpc", c.year)]);
-        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: String(c.year), color: C.now }], rows, unit: "m³/inhab/yr", width: c.width }), csv: rowsCsv(rows, [`trwrpc_${BASE_YEAR}`, `trwrpc_${c.year}`]) };
+        const rows = areaRows(c, (a) => [val(c, a, "trwrpc", BASE), val(c, a, "trwrpc", c.period)]);
+        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: "m³/inhab/yr", axis: "Renewable water per person", width: c.width }), csv: rowsCsv(rows, [`trwrpc_${BASE_YEAR}`, `trwrpc_${c.label}`]) };
       },
       map: (c) => falkenmarkMap(c),
     },
     {
       id: "wr-lowest",
-      title: (c) => `Least renewable water per person, ${c.year}`,
+      title: (c) => `Least renewable water per person, ${c.label}`,
       caption: () => "Below 500 m³ per person a year is absolute scarcity (Falkenmark). The map greys out countries above that.",
       render(c) {
         const { rows } = ranking(c, "trwrpc", 12, "bottom");
-        return { html: bars({ series: [{ label: "m³/inhab/yr", color: C.now }], rows, unit: "m³/inhab/yr", width: c.width }), csv: rowsCsv(rows, [`trwrpc_${c.year}`]) };
+        return { html: bars({ series: [{ label: "m³/inhab/yr", color: C.now }], rows, unit: "m³/inhab/yr", axis: "Renewable water per person", width: c.width }), csv: rowsCsv(rows, [`trwrpc_${c.label}`]) };
       },
       map: (c) => falkenmarkMap(c, { id: "trwrpc:low", emphasis: (v) => v < 500, listed: ranking(c, "trwrpc", 12, "bottom").listed }),
     },
@@ -434,9 +448,9 @@ const RESOURCES: TopicDef = {
       render(c) {
         if (!c.country) return { html: "", csv: [] };
         const m = c.country.m49;
-        const rows: BarRow[] = [{ sub: `area:${m}`, label: c.country.name, values: [valueAt(m, "irwr", c.year), valueAt(m, "ext", c.year)], emphasis: true }];
+        const rows: BarRow[] = [{ sub: `area:${m}`, label: c.country.name, values: [meanAt(m, "irwr", c.period), meanAt(m, "ext", c.period)], emphasis: true }];
         return {
-          html: shares({ parts: [{ label: "Internal", color: C.s1, ink: "light" }, { label: "External (inflow)", color: C.s2, ink: "light" }], rows, unit: unitOf("irwr"), width: c.width }),
+          html: shares({ parts: [{ label: "Internal", color: C.s1, ink: "light" }, { label: "External (inflow)", color: C.s2, ink: "light" }], rows, unit: unitOf("irwr"), axis: "renewable water resources", width: c.width }),
           csv: rowsCsv(rows, ["internal_1e9m3", "external_1e9m3"]),
         };
       },
@@ -449,9 +463,9 @@ const RESOURCES: TopicDef = {
       render(c) {
         if (!c.country) return { html: "", csv: [] };
         const m = c.country.m49;
-        const sw = valueAt(m, "rsw", c.year);
-        const gw = valueAt(m, "rgw", c.year);
-        const both = valueAt(m, "overlap", c.year) || 0;
+        const sw = meanAt(m, "rsw", c.period);
+        const gw = meanAt(m, "rgw", c.period);
+        const both = meanAt(m, "overlap", c.period) || 0;
         const rows: BarRow[] = [{ sub: `area:${m}`, label: c.country.name, values: [sw - both, both, gw - both], emphasis: true }];
         return {
           html: shares({
@@ -462,13 +476,14 @@ const RESOURCES: TopicDef = {
             ],
             rows,
             unit: unitOf("rsw"),
+            axis: "renewable water resources",
             width: c.width,
           }),
           csv: rowsCsv(rows, ["surface_only_1e9m3", "overlap_1e9m3", "groundwater_only_1e9m3"]),
         };
       },
       map: (c) => ({
-        ...shareMap("gw-share", "Groundwater, % of renewable water", (m) => valueAt(m, "rgw", c.year), (m) => valueAt(m, "trwr", c.year), RAMPS.browns),
+        ...shareMap("gw-share", "Groundwater, % of renewable water", (m) => meanAt(m, "rgw", c.period), (m) => meanAt(m, "trwr", c.period), RAMPS.browns),
         note: "Can pass 100 % where groundwater and surface water overlap",
         style: { kind: "ramp", ramp: RAMPS.browns, scale: "linear", domain: [0, 100] },
       }),
@@ -479,7 +494,7 @@ const RESOURCES: TopicDef = {
       caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + " Click a year to map it.",
       render(c) {
         const s = areaSeries(c, "trwrpc");
-        return { html: lineChart(c, s, "m³/inhab/yr"), csv: seriesCsv(s, "m3/inhab/yr") };
+        return { html: lineChart(c, s, "m³/inhab/yr", "Renewable water per person"), csv: seriesCsv(s, "m3/inhab/yr") };
       },
       map: (c) => falkenmarkMap(c),
     },
@@ -497,7 +512,7 @@ const SECTORS = [
 function dominantSector(c: Ctx): MapSpec {
   const keys: VarKey[] = ["aw", "iw", "mw"];
   const category = (m49: number) => {
-    const v = keys.map((k) => valueAt(m49, k, c.year));
+    const v = keys.map((k) => meanAt(m49, k, c.period));
     const total = v.reduce((s, x) => s + (Number.isFinite(x) ? x : 0), 0);
     if (!(total > 0)) return null;
     const index = v.indexOf(Math.max(...v.filter(Number.isFinite)));
@@ -519,15 +534,15 @@ const USE: TopicDef = {
   about:
     "Water withdrawal is the water taken from rivers, lakes and aquifers (plus desalinated and reused water) for agriculture, industry and municipalities. Freshwater withdrawal leaves out desalinated water and reused wastewater.",
   tiles: [
-    { id: "t-tww", label: "Water withdrawal", unit: "10⁹ m³/yr", color: MAP_C.s1, value: (c) => val(c, focus(c), "tww", c.year), map: (c) => circlesMap("tww", "Total water withdrawal", unitOf("tww"), (m) => valueAt(m, "tww", c.year)) },
-    { id: "t-twpc", label: "Per person", unit: "m³/yr", color: "#a63603", value: (c) => val(c, focus(c), "twpc", c.year), map: (c) => rampMap(c, "twpc", "Water withdrawal per person", RAMPS.oranges, "log") },
+    { id: "t-tww", label: "Water withdrawal", unit: "10⁹ m³/yr", color: MAP_C.s1, value: (c) => val(c, focus(c), "tww", c.period), map: (c) => circlesMap("tww", "Total water withdrawal", unitOf("tww"), (m) => meanAt(m, "tww", c.period)) },
+    { id: "t-twpc", label: "Per person", unit: "m³/yr", color: "#a63603", value: (c) => val(c, focus(c), "twpc", c.period), map: (c) => rampMap(c, "twpc", "Water withdrawal per person", RAMPS.oranges, "log") },
     {
       id: "t-agri",
       label: "Agriculture's share",
       unit: "%",
       color: MAP_C.s3,
-      value: (c) => (val(c, focus(c), "aw", c.year) / val(c, focus(c), "tww", c.year)) * 100,
-      map: (c) => shareMap("aw-share", "Agriculture, % of water withdrawal", (m) => valueAt(m, "aw", c.year), (m) => valueAt(m, "tww", c.year), RAMPS.greens),
+      value: (c) => (val(c, focus(c), "aw", c.period) / val(c, focus(c), "tww", c.period)) * 100,
+      map: (c) => shareMap("aw-share", "Agriculture, % of water withdrawal", (m) => meanAt(m, "aw", c.period), (m) => meanAt(m, "tww", c.period), RAMPS.greens),
     },
     {
       id: "t-gw",
@@ -536,8 +551,8 @@ const USE: TopicDef = {
       color: "#993404",
       value: (c) => {
         const a = focus(c);
-        const gw = val(c, a, "fgw", c.year);
-        return (gw / (gw + val(c, a, "fsw", c.year))) * 100;
+        const gw = val(c, a, "fgw", c.period);
+        return (gw / (gw + val(c, a, "fsw", c.period))) * 100;
       },
       map: (c) => gwWithdrawalMap(c),
     },
@@ -545,42 +560,42 @@ const USE: TopicDef = {
   cards: [
     {
       id: "wu-volume",
-      title: (c) => `Freshwater withdrawal per region, ${BASE_YEAR} and ${c.year}`,
+      title: (c) => `Freshwater withdrawal per region, ${BASE_YEAR} and ${c.label}`,
       caption: () => "Hover a row to pick out its countries on the map.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "tfw", BASE_YEAR), val(c, a, "tfw", c.year)]);
-        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: String(c.year), color: C.now }], rows, unit: unitOf("tfw"), width: c.width }), csv: rowsCsv(rows, [`tfw_${BASE_YEAR}`, `tfw_${c.year}`]) };
+        const rows = areaRows(c, (a) => [val(c, a, "tfw", BASE), val(c, a, "tfw", c.period)]);
+        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: unitOf("tfw"), axis: "Freshwater withdrawal", width: c.width }), csv: rowsCsv(rows, [`tfw_${BASE_YEAR}`, `tfw_${c.label}`]) };
       },
-      map: (c) => circlesMap("tfw", "Freshwater withdrawal", unitOf("tfw"), (m) => valueAt(m, "tfw", c.year)),
+      map: (c) => circlesMap("tfw", "Freshwater withdrawal", unitOf("tfw"), (m) => meanAt(m, "tfw", c.period)),
     },
     {
       id: "wu-per-person",
-      title: (c) => `Water withdrawal per person per region, ${BASE_YEAR} and ${c.year}`,
+      title: (c) => `Water withdrawal per person per region, ${BASE_YEAR} and ${c.label}`,
       caption: () => "Hover a row to pick out its countries on the map.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "twpc", BASE_YEAR), val(c, a, "twpc", c.year)]);
-        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: String(c.year), color: C.now }], rows, unit: unitOf("twpc"), width: c.width }), csv: rowsCsv(rows, [`twpc_${BASE_YEAR}`, `twpc_${c.year}`]) };
+        const rows = areaRows(c, (a) => [val(c, a, "twpc", BASE), val(c, a, "twpc", c.period)]);
+        return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: unitOf("twpc"), axis: "Water withdrawal per person", width: c.width }), csv: rowsCsv(rows, [`twpc_${BASE_YEAR}`, `twpc_${c.label}`]) };
       },
       map: (c) => rampMap(c, "twpc", "Water withdrawal per person", RAMPS.oranges, "log"),
     },
     {
       id: "wu-sectors",
-      title: (c) => `Water withdrawal by sector, ${c.year}`,
+      title: (c) => `Water withdrawal by sector, ${c.label}`,
       caption: () => "The map colours each country by the sector that withdraws the most.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "aw", c.year), val(c, a, "iw", c.year), val(c, a, "mw", c.year)]);
-        return { html: shares({ parts: SECTORS, rows, unit: unitOf("aw"), width: c.width }), csv: rowsCsv(rows, ["agriculture_1e9m3", "industry_1e9m3", "municipal_1e9m3"]) };
+        const rows = areaRows(c, (a) => [val(c, a, "aw", c.period), val(c, a, "iw", c.period), val(c, a, "mw", c.period)]);
+        return { html: shares({ parts: SECTORS, rows, unit: unitOf("aw"), axis: "water withdrawal", width: c.width }), csv: rowsCsv(rows, ["agriculture_1e9m3", "industry_1e9m3", "municipal_1e9m3"]) };
       },
       map: (c) => dominantSector(c),
     },
     {
       id: "wu-source",
-      title: (c) => `Freshwater withdrawal by source, ${c.year}`,
+      title: (c) => `Freshwater withdrawal by source, ${c.label}`,
       caption: () => "Surface water (rivers, lakes) and groundwater (aquifers).",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "fsw", c.year), val(c, a, "fgw", c.year)]);
+        const rows = areaRows(c, (a) => [val(c, a, "fsw", c.period), val(c, a, "fgw", c.period)]);
         return {
-          html: shares({ parts: [{ label: "Surface water", color: C.s1, ink: "light" }, { label: "Groundwater", color: C.s2, ink: "light" }], rows, unit: unitOf("fsw"), width: c.width }),
+          html: shares({ parts: [{ label: "Surface water", color: C.s1, ink: "light" }, { label: "Groundwater", color: C.s2, ink: "light" }], rows, unit: unitOf("fsw"), axis: "freshwater withdrawal", width: c.width }),
           csv: rowsCsv(rows, ["surface_1e9m3", "groundwater_1e9m3"]),
         };
       },
@@ -588,19 +603,19 @@ const USE: TopicDef = {
     },
     {
       id: "wu-nonconventional",
-      title: (c) => `Non-conventional water, ${c.year}`,
+      title: (c) => `Non-conventional water, ${c.label}`,
       caption: () => "Desalinated water and treated wastewater used directly. Few countries use much, so the map shows amounts as circles.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "desal", c.year), val(c, a, "reuse", c.year)]);
+        const rows = areaRows(c, (a) => [val(c, a, "desal", c.period), val(c, a, "reuse", c.period)]);
         return {
-          html: bars({ series: [{ label: "Desalinated", color: C.s1 }, { label: "Treated wastewater", color: C.s3 }], rows, unit: unitOf("desal"), width: c.width }),
+          html: bars({ series: [{ label: "Desalinated", color: C.s1 }, { label: "Treated wastewater", color: C.s3 }], rows, unit: unitOf("desal"), axis: "Volume", width: c.width }),
           csv: rowsCsv(rows, ["desalinated_1e9m3", "treated_wastewater_1e9m3"]),
         };
       },
       map: (c) =>
         circlesMap("nonconv", "Desalinated and reused water", unitOf("desal"), (m) => {
-          const d = valueAt(m, "desal", c.year);
-          const r = valueAt(m, "reuse", c.year);
+          const d = meanAt(m, "desal", c.period);
+          const r = meanAt(m, "reuse", c.period);
           return Number.isFinite(d) || Number.isFinite(r) ? (d || 0) + (r || 0) : NaN;
         }),
     },
@@ -616,7 +631,7 @@ const USE: TopicDef = {
           { label: "Industry", color: C.s2, sub: "var:iwpc", values: seriesOf(a, "iwpc") },
           { label: "Municipal", color: C.s1, sub: "var:mwpc", values: seriesOf(a, "mwpc") },
         ];
-        return { html: lineChart(c, s, "m³/inhab/yr"), csv: seriesCsv(s, "m3/inhab/yr") };
+        return { html: lineChart(c, s, "m³/inhab/yr", "Water withdrawal per person"), csv: seriesCsv(s, "m3/inhab/yr") };
       },
       map(c, sub) {
         const key = variable(sub, ["twpc", "awpc", "iwpc", "mwpc"], "twpc") as VarKey;
@@ -631,8 +646,8 @@ function gwWithdrawalMap(c: Ctx): MapSpec {
   return shareMap(
     "gw-withdrawal",
     "Groundwater, % of freshwater withdrawal",
-    (m) => valueAt(m, "fgw", c.year),
-    (m) => valueAt(m, "fgw", c.year) + valueAt(m, "fsw", c.year),
+    (m) => meanAt(m, "fgw", c.period),
+    (m) => meanAt(m, "fgw", c.period) + meanAt(m, "fsw", c.period),
     RAMPS.browns,
   );
 }
@@ -645,9 +660,9 @@ const IRRIGATION: TopicDef = {
   about:
     "Area equipped for irrigation is the area with infrastructure to supply water to crops; not all of it is irrigated every year. Full control irrigation is by surface (furrows, basins), sprinkler or localized (drip) methods.",
   tiles: [
-    { id: "t-aei", label: "Equipped for irrigation", unit: "million ha", color: MAP_C.s1, value: (c) => val(c, focus(c), "aei", c.year) / 1000, map: (c) => circlesMap("aei", "Area equipped for irrigation", "million ha", (m) => valueAt(m, "aei", c.year) / 1000) },
-    { id: "t-pctci", label: "Of cultivated area", unit: "%", color: "#238b45", value: (c) => val(c, focus(c), "pctci", c.year), map: (c) => rampMap(c, "pctci", "Cultivated area equipped for irrigation", RAMPS.greens, "linear", [0, 100]) },
-    { id: "t-pctaai", label: "Actually irrigated", unit: "%", color: "#006d2c", value: (c) => val(c, focus(c), "pctaai", c.year), map: (c) => utilisationMap(c) },
+    { id: "t-aei", label: "Equipped for irrigation", unit: "million ha", color: MAP_C.s1, value: (c) => val(c, focus(c), "aei", c.period) / 1000, map: (c) => circlesMap("aei", "Area equipped for irrigation", "million ha", (m) => meanAt(m, "aei", c.period) / 1000) },
+    { id: "t-pctci", label: "Of cultivated area", unit: "%", color: "#238b45", value: (c) => val(c, focus(c), "pctci", c.period), map: (c) => rampMap(c, "pctci", "Cultivated area equipped for irrigation", RAMPS.greens, "linear", [0, 100]) },
+    { id: "t-pctaai", label: "Actually irrigated", unit: "%", color: "#006d2c", value: (c) => val(c, focus(c), "pctaai", c.period), map: (c) => utilisationMap(c) },
     {
       id: "t-pressurised",
       label: "Sprinkler or drip",
@@ -655,7 +670,7 @@ const IRRIGATION: TopicDef = {
       color: MAP_C.s3,
       value(c) {
         const a = focus(c);
-        const [s, sp, l] = (["fcSurface", "fcSprinkler", "fcLocalized"] as VarKey[]).map((k) => val(c, a, k, c.year));
+        const [s, sp, l] = (["fcSurface", "fcSprinkler", "fcLocalized"] as VarKey[]).map((k) => val(c, a, k, c.period));
         return ((sp + l) / (s + sp + l)) * 100;
       },
       map: (c) => pressurisedMap(c),
@@ -664,25 +679,26 @@ const IRRIGATION: TopicDef = {
   cards: [
     {
       id: "ir-top",
-      title: (c) => `Largest areas equipped for full control irrigation, ${c.year}`,
+      title: (c) => `Largest areas equipped for full control irrigation, ${c.label}`,
       caption: () => "In million hectares.",
       render(c) {
         const { rows } = ranking(c, "fci", 10, "top", 1 / 1000);
-        return { html: bars({ series: [{ label: "million ha", color: C.now }], rows, unit: "million ha", width: c.width }), csv: rowsCsv(rows, [`fci_Mha_${c.year}`]) };
+        return { html: bars({ series: [{ label: "million ha", color: C.now }], rows, unit: "million ha", axis: "Full control irrigation area", width: c.width }), csv: rowsCsv(rows, [`fci_Mha_${c.label}`]) };
       },
-      map: (c) => circlesMap("fci", "Area equipped for full control irrigation", "million ha", (m) => valueAt(m, "fci", c.year) / 1000, { listed: ranking(c, "fci", 10, "top").listed }),
+      map: (c) => circlesMap("fci", "Area equipped for full control irrigation", "million ha", (m) => meanAt(m, "fci", c.period) / 1000, { listed: ranking(c, "fci", 10, "top").listed }),
     },
     {
       id: "ir-method",
-      title: (c) => `Irrigation methods, ${c.year}`,
+      title: (c) => `Irrigation methods, ${c.label}`,
       caption: () => "Area equipped for full control irrigation by method. The map shows the share irrigated by sprinkler or drip.",
       render(c) {
-        const rows = areaRows(c, (a) => [val(c, a, "fcSurface", c.year), val(c, a, "fcSprinkler", c.year), val(c, a, "fcLocalized", c.year)]);
+        const rows = areaRows(c, (a) => [val(c, a, "fcSurface", c.period), val(c, a, "fcSprinkler", c.period), val(c, a, "fcLocalized", c.period)]);
         return {
           html: shares({
             parts: [{ label: "Surface", color: C.s1, ink: "light" }, { label: "Sprinkler", color: C.s2, ink: "light" }, { label: "Localized (drip)", color: C.s3, ink: "light" }],
             rows,
             unit: "1000 ha",
+            axis: "full control irrigation area",
             width: c.width,
           }),
           csv: rowsCsv(rows, ["surface_1000ha", "sprinkler_1000ha", "localized_1000ha"]),
@@ -696,18 +712,18 @@ const IRRIGATION: TopicDef = {
       caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + " Click a year to map it.",
       render(c) {
         const s = areaSeries(c, "pctci");
-        return { html: lineChart(c, s, "%"), csv: seriesCsv(s, "%") };
+        return { html: lineChart(c, s, "%", "Cultivated area equipped for irrigation"), csv: seriesCsv(s, "%") };
       },
       map: (c) => rampMap(c, "pctci", "Cultivated area equipped for irrigation", RAMPS.greens, "linear", [0, 100]),
     },
     {
       id: "ir-source",
-      title: (c) => `Where irrigation water comes from, ${c.year}`,
+      title: (c) => `Where irrigation water comes from, ${c.label}`,
       caption: () => "Area equipped for irrigation by water source (regions: weighted by each country's equipped area).",
       render(c) {
-        const rows = areaRows(c, (a) => (["srcSurface", "srcGround", "srcMixed"] as VarKey[]).map((k) => val(c, a, k, c.year, "aei")));
+        const rows = areaRows(c, (a) => (["srcSurface", "srcGround", "srcMixed"] as VarKey[]).map((k) => val(c, a, k, c.period, "aei")));
         return {
-          html: shares({ parts: [{ label: "Surface water", color: C.s1, ink: "light" }, { label: "Groundwater", color: C.s2, ink: "light" }, { label: "Mixed", color: C.s3, ink: "light" }], rows, unit: "%", width: c.width }),
+          html: shares({ parts: [{ label: "Surface water", color: C.s1, ink: "light" }, { label: "Groundwater", color: C.s2, ink: "light" }, { label: "Mixed", color: C.s3, ink: "light" }], rows, unit: "%", axis: "area equipped for irrigation", width: c.width }),
           csv: rowsCsv(rows, ["surface_pct", "groundwater_pct", "mixed_pct"]),
         };
       },
@@ -719,7 +735,7 @@ const IRRIGATION: TopicDef = {
       caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + " Click a year to map it.",
       render(c) {
         const s = areaSeries(c, "pctaai");
-        return { html: lineChart(c, s, "%"), csv: seriesCsv(s, "%") };
+        return { html: lineChart(c, s, "%", "Equipped area actually irrigated"), csv: seriesCsv(s, "%") };
       },
       map: (c) => utilisationMap(c),
     },
@@ -731,16 +747,16 @@ const IRRIGATION: TopicDef = {
         const a = focus(c);
         const mha = (key: VarKey) => {
           const out = new Map<number, number>();
-          for (let y = FIRST_YEAR; y <= c.year; y++) out.set(y, val(c, a, key, y) / 1000);
+          for (let y = FIRST_YEAR; y <= c.period.to; y++) out.set(y, val(c, a, key, yearPeriod(y)) / 1000);
           return out;
         };
         const s: LineSeries[] = [
           { label: "Cropland", color: C.s3, values: mha("crop") },
           { label: "Equipped for irrigation", color: C.s1, values: mha("aei") },
         ];
-        return { html: lineChart(c, s, "million ha"), csv: seriesCsv(s, "Mha") };
+        return { html: lineChart(c, s, "million ha", "Area"), csv: seriesCsv(s, "Mha") };
       },
-      map: (c) => shareMap("aei-crop", "Cropland equipped for irrigation", (m) => valueAt(m, "aei", c.year), (m) => valueAt(m, "crop", c.year), RAMPS.greens),
+      map: (c) => shareMap("aei-crop", "Cropland equipped for irrigation", (m) => meanAt(m, "aei", c.period), (m) => meanAt(m, "crop", c.period), RAMPS.greens),
     },
   ],
 };
@@ -750,7 +766,7 @@ function utilisationMap(c: Ctx): MapSpec {
 }
 
 function pressurisedMap(c: Ctx): MapSpec {
-  const v = (m: number, k: VarKey) => valueAt(m, k, c.year);
+  const v = (m: number, k: VarKey) => meanAt(m, k, c.period);
   return shareMap(
     "pressurised",
     "Irrigated by sprinkler or drip",

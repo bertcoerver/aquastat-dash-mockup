@@ -1,8 +1,10 @@
 /*
- * The top bar: view tabs (Country / Basin / Local), the date range slider and, in the
- * Local view, the play button. The markup lives in index.html; this module keeps the
+ * The view tabs (Country / Basin / Local), the date range slider and, in the Local view,
+ * the play button. Clicking a date above the slider picks it from a calendar
+ * (date-picker.ts). The markup lives in index.html; this module keeps the
  * range valid for the active view (see range-rules.ts) and shows when the system, not
- * the user, moved an end.
+ * the user, moved an end. The tabs sit at the top of the view's own pane (its
+ * .tabs-slot): the statistics panel, or in the Local view the point pane.
  */
 import type { PlaybackState } from "../map/wapor-player";
 import {
@@ -10,11 +12,13 @@ import {
   daysOfDekads,
   enterView,
   initialRange,
+  limitCountryYears,
   type DayRange,
   type DekadRange,
   type View,
 } from "./range-rules";
-import { initRangeSlider } from "./range-slider";
+import { initDatePicker } from "./date-picker";
+import { initRangeSlider, type Grip } from "./range-slider";
 
 export interface ToolbarState {
   view: View;
@@ -40,6 +44,8 @@ export interface Toolbar {
   setDays(days: DayRange): void;
   /** Show the playback state: the play button and how far ahead the map has loaded. */
   setPlayback(playback: PlaybackState): void;
+  /** Country view: the latest year with data; later years can't be selected. */
+  setCountryLastYear(year: number): void;
 }
 
 /**
@@ -62,25 +68,33 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     onChange(current());
   }
 
-  const slider = initRangeSlider(
-    () => state,
-    (next, grip) => {
-      const prev = state.range;
-      // Only flag the end the user didn't move; dragging the band only if its length changed.
-      const lengthChanged = next.end - next.start !== prev.end - prev.start;
-      update(next, {
-        start: grip === "end" && next.start !== prev.start,
-        end: grip === "band" ? lengthChanged : grip === "start" && next.end !== prev.end,
-      });
-    },
-  );
+  /** The user moved `grip` on the slider, or picked that end in the calendar. */
+  function onInput(next: DayRange, grip: Grip) {
+    const prev = state.range;
+    // Only flag the end the user didn't move; dragging the band only if its length changed.
+    const lengthChanged = next.end - next.start !== prev.end - prev.start;
+    update(next, {
+      start: grip === "end" && next.start !== prev.start,
+      end: grip === "band" ? lengthChanged : grip === "start" && next.end !== prev.end,
+    });
+  }
+  const slider = initRangeSlider(() => state, onInput);
+  const picker = initDatePicker(() => state, onInput);
 
   const play = document.getElementById("play-button")!;
   play.addEventListener("click", () => onPlay?.());
 
+  const tabs = document.querySelector<HTMLElement>(".tabs")!;
   function render() {
     slider.render(state);
+    picker.render();
     play.hidden = state.view !== "local";
+    const slot = document.querySelector<HTMLElement>(`.tabs-slot[data-view="${state.view}"]`)!;
+    if (tabs.parentElement !== slot) {
+      const focused = tabs.contains(document.activeElement); // (moving it drops the focus)
+      slot.append(tabs);
+      if (focused) tabs.querySelector<HTMLElement>(`[data-view="${state.view}"]`)!.focus();
+    }
     for (const tab of document.querySelectorAll<HTMLButtonElement>(".tab")) {
       tab.setAttribute("aria-selected", String(tab.dataset.view === state.view));
     }
@@ -112,6 +126,13 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
       play.setAttribute("aria-label", status === "stopped" ? "Play" : "Pause");
       play.title = status === "buffering" ? "Loading the next frames…" : "";
       slider.setBuffered(bufferedTo);
+    },
+    setCountryLastYear(year) {
+      limitCountryYears(year);
+      const prev = state.range;
+      const next = state.view === "country" ? enterView("country", prev) : prev;
+      if (next.start === prev.start && next.end === prev.end) return render();
+      update(next, { start: true, end: true });
     },
   };
 }

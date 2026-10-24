@@ -8,19 +8,21 @@
  * it (map-drivers.ts); unpinned, the map shows the topic's first tile. Within a card,
  * hovering a row picks out that area's countries on the map, hovering a series in a
  * legend maps that series, and clicking a year on a line chart sets the year in the
- * top bar.
+ * top bar. For a range of years, every value is the mean of its yearly values. Clicking a row of a region (or country) also flies the map there, keeping
+ * the selected country in view where both fit (see flyToArea).
  * Hovering a country on the map shows its value.
  *
  * The markup lives in index.html.
  */
-import type { WaterMap } from "../map/map";
+import { facing, type WaterMap } from "../map/map";
 import { mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale, type ColorScale } from "../basin/variables";
 import { dkY } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
 import { TOPICS, type Card, type Ctx, type MapSpec, type Region, type Tile, type TopicDef } from "./cards";
-import { WORLD, latestYear, loadTopic, type Topic } from "./data";
+import { WORLD, latestYear, loadTopic, periodLabel, type Period, type Topic } from "./data";
+import { initTitleMenu, type MenuOption } from "../panels/title-menu";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 
 export interface CountryInfo {
@@ -32,9 +34,13 @@ interface Options {
   map: WaterMap;
   info: CountryInfo;
   names: Map<number, string>;
+  /** Each country's [west, south, east, north] (west > east across 180°). */
+  boxes: Map<number, Box>;
   /** Select a year in the top bar (from clicking a year on a chart). */
   setYear: (year: number) => void;
   canSelect: (year: number) => boolean;
+  /** AQUASTAT's latest year, each time a topic's data are loaded. */
+  onLatestYear: (year: number) => void;
 }
 
 export interface CountryPanel {
@@ -45,14 +51,18 @@ export interface CountryPanel {
   hover(m49: number | null): void;
 }
 
+type Box = [number, number, number, number];
+
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
 
 const SHORT: Record<number, string> = { 419: "Latin Am. & Caribbean", 513: "Europe & N. America" };
 
 const $ = (id: string) => document.getElementById(id)!;
+/** The period as the subtitle and the map legend show it: "2023", or "2019–2023 average". */
+const shownPeriod = (ctx: Ctx) => (ctx.period.from < ctx.period.to ? `${ctx.label} average` : ctx.label);
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-export function initCountryPanel({ map, info, names, setYear, canSelect }: Options): CountryPanel {
+export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, onLatestYear }: Options): CountryPanel {
   const regionOf = new Map(Object.entries(info.countries).map(([m49, c]) => [Number(m49), c.region]));
   const centerOf = new Map(Object.entries(info.countries).map(([m49, c]) => [Number(m49), c.center]));
   const regions: Region[] = info.regions.map((r) => ({
@@ -64,11 +74,13 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
 
   const state = {
     view: "country" as View,
-    year: 0,
+    period: { from: 0, to: 0 } as Period,
     selection: null as Selection | null,
     topic: "sdg" as Topic,
     status: new Map<Topic, Status>(),
     pinned: new Map<Topic, Driver>(),
+    /** The map picked in the legend's menu, per topic (else the topic's first tile). */
+    chosen: new Map<Topic, Driver>(),
     mapHover: null as number | null,
   };
 
@@ -103,6 +115,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     loadTopic(topic).then(
       () => {
         state.status.set(topic, { kind: "ready" });
+        onLatestYear(latestYear());
         render();
       },
       (err: Error) => {
@@ -121,6 +134,8 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     setPinned(d) {
       if (d) state.pinned.set(state.topic, d);
       else state.pinned.delete(state.topic);
+      const area = areaOf(d);
+      if (area !== null && area !== WORLD) flyToArea(area);
     },
     onChange() {
       drawMap();
@@ -130,6 +145,36 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     onCsv: download,
     tooltip,
   });
+
+  // --- The legend's indicator menu ---------------------------------------------------------
+  // Each of the topic's maps once (several charts can share one), in the order of the
+  // tiles and cards. Picking one unpins the chart that was pinned.
+  const indicator = initTitleMenu(
+    $("cp-indicator") as HTMLButtonElement,
+    () => {
+      if (!current) return { options: [], current: null };
+      const ctx = current.ctx;
+      const topic = topicDef();
+      const options: MenuOption[] = [];
+      const seen = new Set<string>();
+      for (const [id, spec] of [
+        ...topic.tiles.map((t) => [t.id, t.map(ctx)] as const),
+        ...topic.cards.map((c) => [c.id, c.map(ctx, null)] as const),
+      ]) {
+        if (seen.has(spec.title)) continue;
+        seen.add(spec.title);
+        options.push({ id, label: spec.title });
+      }
+      return { options, current: options.find((o) => o.label === current!.spec.title)?.id ?? null };
+    },
+    (id) => {
+      state.chosen.set(state.topic, { id, sub: null });
+      state.pinned.delete(state.topic);
+      drivers.clearPreview();
+      drawMap();
+      markAll();
+    },
+  );
 
   // The map tooltip follows the pointer (to its right).
   const mapEl = map.map.getContainer();
@@ -153,9 +198,11 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     if (!latest) return null;
     const c = state.selection?.country ?? null;
     const country = c && regionOf.has(c.m49) ? { m49: c.m49, name: names.get(c.m49) ?? c.name } : null;
+    const to = Math.min(state.period.to, latest);
+    const period = { from: Math.min(state.period.from, to), to };
     return {
-      year: Math.min(state.year, latest),
-      selectedYear: state.year,
+      period,
+      label: periodLabel(period),
       country,
       region: country ? regions.find((r) => r.code === regionOf.get(country.m49)) ?? null : null,
       regions,
@@ -182,7 +229,6 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     }
 
     const sel = state.selection?.country;
-    $("cp-title").textContent = sel?.name ?? "World";
     const status = state.status.get(state.topic) ?? { kind: "loading" };
     const ctx = status.kind === "ready" ? context() : null;
     const message = $("cp-message");
@@ -202,7 +248,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
 
     $("cp-subtitle").textContent = [
       sel && !ctx.country ? "Not reported by AQUASTAT" : ctx.region?.name ?? (sel ? "" : "All countries"),
-      ctx.year < state.year ? `${ctx.year}: AQUASTAT's latest` : String(ctx.year),
+      ctx.period.to < state.period.to ? `${shownPeriod(ctx)}: AQUASTAT's latest` : shownPeriod(ctx),
     ].filter(Boolean).join(" · ");
     message.hidden = true;
 
@@ -239,8 +285,10 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
 
   /** The driver the map follows now. */
   function activeDriver(): Driver {
-    return drivers.preview() ?? state.pinned.get(state.topic) ?? { id: topicDef().tiles[0].id, sub: null };
+    return drivers.preview() ?? state.pinned.get(state.topic) ?? state.chosen.get(state.topic) ?? { id: topicDef().tiles[0].id, sub: null };
   }
+
+  const areaOf = (d: Driver | null | undefined) => (d?.sub?.startsWith("area:") ? Number(d.sub.slice(5)) : null);
 
   function specFor(ctx: Ctx): MapSpec {
     const topic = topicDef();
@@ -261,15 +309,17 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     const { ctx } = current;
     const spec = specFor(ctx);
     current.spec = spec;
-    const d = activeDriver();
-    const area = d.sub?.startsWith("area:") ? Number(d.sub.slice(5)) : null;
+    // A series hovered in the pinned card keeps the pinned row's countries picked out.
+    const area = areaOf(drivers.preview()) ?? areaOf(state.pinned.get(state.topic));
     // A row of a regional chart picks out its countries.
     const picked = area === null || area === WORLD ? null : new Set(regions.find((r) => r.code === area)?.members ?? [area]);
-    const key = `${spec.id}:${ctx.year}:${area ?? ""}:${ctx.country?.m49 ?? ""}`;
+    const key = `${spec.id}:${ctx.label}:${area ?? ""}:${ctx.country?.m49 ?? ""}`;
     const values = countries.map((m49) => spec.value(m49));
     const theme = map.theme;
+    // The selected country keeps its colour even outside the rows' countries.
+    const outside = (m49: number) => !!picked && !picked.has(m49) && m49 !== ctx.country?.m49;
     const dim = (c: Color, m49: number, v: number): Color => {
-      const out = (picked && !picked.has(m49)) || (spec.emphasis && !spec.emphasis(v));
+      const out = outside(m49) || (spec.emphasis && !spec.emphasis(v));
       return out ? mix(c, theme.land, 0.78) : c;
     };
 
@@ -287,7 +337,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
         const v = values[i];
         const center = centerOf.get(m49);
         if (!center || !(v > 0)) return;
-        const faded = (picked && !picked.has(m49)) || (spec.emphasis && !spec.emphasis(v));
+        const faded = outside(m49) || (spec.emphasis && !spec.emphasis(v));
         symbols.push({
           position: center,
           radius: Math.max(1.5, MAX_R * Math.sqrt(v / max)),
@@ -325,19 +375,15 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     }
     map.setCountryFills({ key, colors: fills });
     map.setCountrySymbols(symbols.length ? { key: `${key}:${symbols.length}`, items: symbols } : null);
-    drawLegend(spec, scale, d, ctx);
+    drawLegend(spec, scale, ctx);
     showMapTooltip();
   }
 
-  function drawLegend(spec: MapSpec, scale: ColorScale | null, d: Driver, ctx: Ctx) {
+  function drawLegend(spec: MapSpec, scale: ColorScale | null, ctx: Ctx) {
     legend.hidden = false;
-    const topic = topicDef();
-    const name = topic.tiles.find((t) => t.id === d.id)?.label ?? topic.cards.find((c) => c.id === d.id)?.title(ctx) ?? "";
-    const pinned = state.pinned.get(state.topic);
-    const mode = drivers.preview() ? "Preview" : pinned ? "Pinned" : "Default";
-    $("cp-legend-source").innerHTML = `<b>${mode}</b> · ${esc(name)}` + (pinned && !drivers.preview() ? ` <span class="cp-unpin">(Esc to unpin)</span>` : "");
-    $("cp-legend-title").innerHTML = `${esc(spec.title)}${spec.note ? `<small>${esc(spec.note)}</small>` : ""}`;
-    $("cp-legend-year").textContent = String(ctx.year);
+    indicator.setLabel(spec.title);
+    $("cp-legend-note").textContent = spec.note ?? "";
+    $("cp-legend-year").textContent = shownPeriod(ctx);
     $("cp-legend-unit").textContent = spec.unit;
     const style = spec.style;
     const scaleEl = $("cp-legend-scale");
@@ -356,7 +402,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
       scaleEl.innerHTML = "";
     }
     const latest = latestYear();
-    $("cp-legend-status").textContent = state.year > latest ? `AQUASTAT's latest data are for ${latest}.` : "";
+    $("cp-legend-status").textContent = state.period.to > latest ? `AQUASTAT's latest data are for ${latest}.` : "";
   }
 
   function showMapTooltip() {
@@ -373,6 +419,32 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     tooltip.hidden = false;
   }
 
+  // --- The camera ------------------------------------------------------------------------------
+  /**
+   * Fly to an area's countries and the selected country. Where they don't fit in one
+   * view (the country is far round the globe), show the whole globe if both are on its
+   * near side, else the area alone: it was what was clicked.
+   */
+  function flyToArea(area: number) {
+    const members = regions.find((r) => r.code === area)?.members ?? [area];
+    const own = members.filter((m49) => boxes.has(m49));
+    if (!own.length) return;
+    const sel = state.selection?.country?.m49;
+    const extra = sel !== undefined && !members.includes(sel) && boxes.has(sel) ? sel : null;
+    const region = unionBox(own.map((m49) => boxes.get(m49)!));
+    const both = extra === null ? region : unionBox([region, boxes.get(extra)!]);
+    if (fits(both)) return map.showBox(both);
+    const middle = meanCenter(own.map((m49) => [centerOf.get(m49) ?? boxCenter(boxes.get(m49)!), boxArea(boxes.get(m49)!)]));
+    const there = extra === null ? null : centerOf.get(extra) ?? boxCenter(boxes.get(extra)!);
+    if (there && facing(middle, there) > 0.2) return showGlobe(meanCenter([[middle, 1], [there, 1]]));
+    if (fits(region)) return map.showBox(region);
+    showGlobe(middle);
+  }
+
+  function showGlobe(center: [number, number]) {
+    map.showPoint(center, Math.min(map.map.getZoom(), GLOBE_ZOOM));
+  }
+
   // --- Downloads ----------------------------------------------------------------------------------
   function download(id: string) {
     const rows = current?.csv.get(id);
@@ -380,7 +452,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `${id}_${current.ctx.country?.m49 ?? "world"}_${current.ctx.year}.csv`;
+    a.download = `${id}_${current.ctx.country?.m49 ?? "world"}_${current.ctx.period.from}-${current.ctx.period.to}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -396,9 +468,9 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
       render();
     },
     setRange(range) {
-      const year = dkY(range.start);
-      if (year === state.year) return;
-      state.year = year;
+      const [from, to] = [dkY(range.start), dkY(range.end)];
+      if (from === state.period.from && to === state.period.to) return;
+      state.period = { from, to };
       render();
     },
     setSelection(selection) {
@@ -411,6 +483,49 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
       else showMapTooltip();
     },
   };
+}
+
+/** The zoom that shows the whole globe. */
+const GLOBE_ZOOM = 1.4;
+/** The widest box showBox can frame on the globe, in degrees of longitude. */
+const MAX_SPAN = 170;
+
+const lonSpan = ([w, , e]: Box) => (((e - w) % 360) + 360) % 360;
+const fits = (box: Box) => lonSpan(box) <= MAX_SPAN && box[3] - box[1] <= MAX_SPAN;
+const boxCenter = (box: Box): [number, number] => {
+  const lon = box[0] + lonSpan(box) / 2;
+  return [lon > 180 ? lon - 360 : lon, (box[1] + box[3]) / 2];
+};
+/** Roughly a box's area on the globe (square degrees at its middle latitude). */
+const boxArea = (box: Box) => Math.max(lonSpan(box), 0.1) * Math.max(box[3] - box[1], 0.1) * Math.cos(((box[1] + box[3]) / 2) * (Math.PI / 180));
+
+/** The smallest box around `list`: around the globe, it leaves out the widest gap in longitude. */
+function unionBox(list: Box[]): Box {
+  const arcs = list.map((b) => [b[0], lonSpan(b)]).sort((a, b) => a[0] - b[0]);
+  // Walk east from the westernmost start, keeping how far east the arcs so far reach.
+  let reach = arcs[0][0] + arcs[0][1];
+  let gap = { width: -Infinity, west: arcs[0][0] };
+  for (const [start, span] of arcs.slice(1)) {
+    if (start - reach > gap.width) gap = { width: start - reach, west: start };
+    reach = Math.max(reach, start + span);
+  }
+  // …and the gap from the furthest reach round to the first start.
+  if (arcs[0][0] + 360 - reach > gap.width) gap = { width: arcs[0][0] + 360 - reach, west: arcs[0][0] };
+  const west = gap.west;
+  const east = west + Math.min(359.9, 360 - Math.max(0, gap.width));
+  return [west, Math.min(...list.map((b) => b[1])), east > 180 ? east - 360 : east, Math.max(...list.map((b) => b[3]))];
+}
+
+/** The weighted mean of points on the globe. */
+function meanCenter(points: [[number, number], number][]): [number, number] {
+  const r = Math.PI / 180;
+  let [x, y, z] = [0, 0, 0];
+  for (const [[lon, lat], w] of points) {
+    x += w * Math.cos(lat * r) * Math.cos(lon * r);
+    y += w * Math.cos(lat * r) * Math.sin(lon * r);
+    z += w * Math.sin(lat * r);
+  }
+  return [Math.atan2(y, x) / r, Math.atan2(z, Math.hypot(x, y)) / r];
 }
 
 const csvCell = (v: string | number) =>

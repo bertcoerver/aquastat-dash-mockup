@@ -146,6 +146,33 @@ export function valueAt(area: number, key: VarKey, year: number): number {
   return NaN;
 }
 
+/** Calendar years `from` to `to`, both included: the top bar's range in the Country view. */
+export interface Period {
+  from: number;
+  to: number;
+}
+
+export const yearPeriod = (y: number): Period => ({ from: y, to: y });
+
+/** "2023", or "2019–2023". */
+export const periodLabel = ({ from, to }: Period) => (from === to ? String(from) : `${from}–${to}`);
+
+/** The mean of `value` over a period's years, leaving out years without one. */
+export function meanOver(p: Period, value: (year: number) => number): number {
+  let sum = 0;
+  let n = 0;
+  for (let y = p.from; y <= p.to; y++) {
+    const v = value(y);
+    if (!Number.isFinite(v)) continue;
+    sum += v;
+    n++;
+  }
+  return n ? sum / n : NaN;
+}
+
+/** A variable's yearly mean over a period (each year as in valueAt). */
+export const meanAt = (area: number, key: VarKey, p: Period) => meanOver(p, (y) => valueAt(area, key, y));
+
 /** All countries (not aggregates) with data loaded. */
 export function countryCodes(countryRegion: Map<number, number>): number[] {
   return [...store.keys()].filter((a) => countryRegion.has(a));
