@@ -4,13 +4,18 @@
  * dekads (as mm/day × days), a year the sum of its months. So any range of dekads is a
  * sum of rasters with signs, e.g. Feb–Nov 2025 = A[2025] − M[2025-01] − M[2025-12].
  *
+ * A range can also start or end within a dekad. A dekadal raster is the dekad's
+ * average mm/day, so k of its days count as k × that raster: this assumes ET is spread
+ * evenly over the dekad (WaPOR v3 has nothing daily), e.g. 5 Jan – 31 Dec 2025 =
+ * A[2025] − 4·D[2025-01-D1].
+ *
  * Of the many ways to write a range, planRange picks the one that's cheapest to load.
  * Years hold months and months hold dekads, so it can search them as a tree: for each
  * year, then each month in it, add the raster, subtract it or leave it out, and at the
  * dekads fix whatever is still off. That's exact, and only a few thousand steps.
  */
-import { MAX_DK, endDay, startDay } from "../../toolbar/dekads";
-import type { DekadRange } from "../../toolbar/range-rules";
+import { MAX_DK, dayDk, dkFirstDay, dkLastDay, endDay, startDay } from "../../toolbar/dekads";
+import type { DayRange } from "../../toolbar/range-rules";
 
 export type BlockKind = "D" | "M" | "A";
 
@@ -23,10 +28,14 @@ export interface Block {
   code: string;
 }
 
-/** A raster in a plan: its total over its own period (mm), times `coef`. */
+/**
+ * A raster in a plan: its total over its own period (mm), times `coef`. A dekadal
+ * raster counts per day instead: `days` of it (coef = days / days in the dekad).
+ */
 export interface Term {
   block: Block;
   coef: number;
+  days?: number;
 }
 
 export interface Plan {
@@ -67,19 +76,24 @@ const better = (a: Plan, b: Plan) => a.cost < b.cost || (a.cost === b.cost && a.
 const add = (a: Plan, b: Plan): Plan => ({ terms: [...a.terms, ...b.terms], cost: a.cost + b.cost });
 
 /**
- * The cheapest sum of rasters for a range, or null if there is none, e.g. when a
- * dekad in it isn't published. `unpublished(block)` tells which rasters can't be used;
- * those ending after the current dekad never can.
+ * The cheapest sum of rasters for a range of days, or null if there is none, e.g. when
+ * a dekad in it isn't published. `unpublished(block)` tells which rasters can't be
+ * used; those ending after the current dekad never can.
  */
-export function planRange({ start, end }: DekadRange, unpublished: (b: Block) => boolean = () => false): Plan | null {
+export function planRange(days: DayRange, unpublished: (b: Block) => boolean = () => false): Plan | null {
   const usable = (b: Block) => b.start + b.len - 1 <= MAX_DK && !unpublished(b);
+  // The dekads the range lies in.
+  const start = dayDk(days.start);
+  const end = dayDk(days.end);
 
   // `c`: how many times the rasters chosen above already count each dekad here.
   function dekad(dk: number, c: number): Plan {
-    const need = (dk >= start && dk <= end ? 1 : 0) - c;
+    const all = dekadDays(dk);
+    const covered = Math.max(0, Math.min(days.end, dkLastDay(dk)) - Math.max(days.start, dkFirstDay(dk)) + 1);
+    const need = covered - c * all; // in days
     if (need === 0) return { terms: [], cost: 0 };
     const b = block("D", dk);
-    return usable(b) ? { terms: [{ block: b, coef: need }], cost: COST.D } : NONE;
+    return usable(b) ? { terms: [{ block: b, coef: need / all, days: need }], cost: COST.D } : NONE;
   }
 
   // A year or month: leave its raster out, add it or subtract it (in that order of
@@ -114,10 +128,10 @@ export function planRange({ start, end }: DekadRange, unpublished: (b: Block) =>
  */
 export function formatPlan({ terms }: Plan) {
   return terms
-    .map(({ block: b, coef }, i) => {
-      const factor = Math.abs(coef) * (b.kind === "D" ? dekadDays(b.start) : 1);
+    .map(({ block: b, coef, days }, i) => {
+      const factor = Math.abs(days ?? coef);
       const sign = coef < 0 ? (i ? " − " : "−") : i ? " + " : "";
-      return `${sign}${factor === 1 ? "" : `${factor}·`}${blockName(b)}`;
+      return `${sign}${factor === 1 && days === undefined ? "" : `${factor}·`}${blockName(b)}`;
     })
     .join("");
 }

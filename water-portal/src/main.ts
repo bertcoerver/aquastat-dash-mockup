@@ -1,3 +1,4 @@
+import { initBasinStats } from "./basin/basin-stats";
 import { initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
 import {
@@ -17,10 +18,10 @@ import { initWaporPlayer } from "./map/wapor-player";
 import { initDebugPanel } from "./panels/debug-panel";
 import { initLayersMenu } from "./panels/layers-menu";
 import { initLoadingIndicator } from "./panels/loading-indicator";
-import { COUNTRY_MAX_YEAR, MIN_YEAR, fmtEnd, fmtStart, mk } from "./toolbar/dekads";
+import { COUNTRY_MAX_YEAR, MIN_YEAR, fmtDay, mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
 import { initToolbar, type Toolbar, type ToolbarState } from "./toolbar/toolbar";
-import type { DekadRange, View } from "./toolbar/range-rules";
+import type { DayRange, View } from "./toolbar/range-rules";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/toolbar.css";
@@ -49,6 +50,7 @@ async function showHover(lngLat: LngLat | null) {
     setHoveredSubBasin(null);
     waterBalance.hover(null);
     countryPanel.hover(null);
+    basinStats.hover(null);
     return debug("hover", null);
   }
   const place = await placeAt(lngLat);
@@ -56,6 +58,7 @@ async function showHover(lngLat: LngLat | null) {
   const upstream = place.subBasin && upstreamOf(place.subBasin.id);
   waterBalance.hover(view === "basin" ? (place.subBasin?.id ?? null) : null);
   countryPanel.hover(view === "country" ? (place.country?.m49 ?? null) : null);
+  basinStats.hover(view === "basin" ? place : null);
   setHoveredSubBasin(view === "basin" && place.subBasin ? { id: place.subBasin.id, upstream: upstream! } : null);
   debug("hover", {
     lon: round(lngLat[0]),
@@ -100,6 +103,13 @@ const waterBalance = initWaterBalance({
   subBasins,
   upstreamOf,
   setRange: (range) => toolbarApi?.setRange(range),
+});
+// Basin view: statistics charts below the model, each with its map.
+const basinStats = initBasinStats({
+  map: waterMap,
+  majorBasins: basins,
+  subBasins,
+  setMapOverride: (override) => waterBalance.setMapOverride(override),
 });
 // Country view: AQUASTAT statistics for the selected country (panel, map colours).
 const countryPanel = initCountryPanel({
@@ -148,6 +158,7 @@ selection.subscribe((s) => {
   picker.show(s);
   waterBalance.setSelection(s);
   countryPanel.setSelection(s);
+  basinStats.setSelection(s);
   debug("click", {
     source: s.source,
     lon: s.lngLat && round(s.lngLat[0]),
@@ -190,10 +201,10 @@ const waporLegend = initWaporLegend({
     showWaporDebug();
   },
 });
-let waporWanted: string | null = null; // the range, as "start-end"
+let waporWanted: string | null = null; // the range, as "start-end" (days)
 let waporShown: WaporPeriod | null = null;
 let waporTimer = 0;
-function showWapor(range: DekadRange | null) {
+function showWapor(range: DayRange | null) {
   const wanted = range && `${range.start}-${range.end}`;
   waporWanted = wanted;
   clearTimeout(waporTimer);
@@ -233,13 +244,13 @@ function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boo
 
 // Playback: each frame sets the range on the toolbar, and its period, loaded ahead, on
 // the map. Any other change of range or view stops it.
-let waporRange: DekadRange | null = null;
+let waporRange: DayRange | null = null;
 let playing = false; // a frame is being shown
 const player = initWaporPlayer({
   getRange: () => waporRange!,
   show(range, checked) {
     playing = true;
-    toolbarApi!.setRange(range);
+    toolbarApi!.setDays(range);
     playing = false;
     clearTimeout(waporTimer);
     waporWanted = `${range.start}-${range.end}`;
@@ -266,6 +277,7 @@ function showWaporDebug() {
   waporDebugFrame = requestAnimationFrame(() => {
     const value = {
       equation: period.equation,
+      note: period.note,
       rasters: period.terms.length,
       cost: Math.round(period.cost * 10) / 10,
       unpublished: period.unpublished.length ? period.unpublished : null,
@@ -290,7 +302,7 @@ function hideWapor() {
 }
 
 // The map follows the view tab, and in the Local view the date range.
-function onToolbarChange({ view: newView, range }: ToolbarState) {
+function onToolbarChange({ view: newView, range, days }: ToolbarState) {
   if (newView !== view) setHoveredSubBasin(null);
   view = newView;
   setView(view);
@@ -299,15 +311,18 @@ function onToolbarChange({ view: newView, range }: ToolbarState) {
   waterBalance.setRange(range);
   countryPanel.setView(view);
   countryPanel.setRange(range);
-  waporRange = range;
+  basinStats.setView(view);
+  basinStats.setRange(range);
+  waporRange = days;
   if (!playing) {
     player.stop();
-    showWapor(view === "local" ? range : null);
+    showWapor(view === "local" ? days : null);
   }
   debug("time", {
     view,
-    start: fmtStart(range.start),
-    end: fmtEnd(range.end),
+    start: fmtDay(days.start),
+    end: fmtDay(days.end),
+    days: { start: days.start, end: days.end, count: days.end - days.start + 1 },
     dekads: { start: range.start, end: range.end, count: range.end - range.start + 1 },
   });
 }

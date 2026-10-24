@@ -3,7 +3,9 @@
  * straight from FAO's bucket (it sends CORS headers). WaPOR publishes one COG per
  * dekad, calendar month and calendar year; a range that is exactly one of those shows
  * that COG, in its own unit. Any other range is added up from several of them, as the
- * total in mm (see wapor-plan.ts for which), tile by tile as they load.
+ * total in mm (see wapor-plan.ts for which), tile by tile as they load. A range can
+ * start and end on any day: of a dekad it only partly covers, it takes those days'
+ * share of the dekad's raster.
  *
  * Catalogue: https://data.apps.fao.org/gismgr/api/v2/catalog/workspaces/WAPOR-3/mapsets/L1-AETI-D
  * (-M, -A). Colour maps are WaPOR's own styles AETI-D-INT16, AETI-M and AETI-A.
@@ -18,9 +20,9 @@ import type { TileLayer } from "@deck.gl/geo-layers";
 import { MultiCOGLayer } from "@developmentseed/deck.gl-geotiff";
 import { GeoTIFF, PerOriginSemaphore, defaultDecoderPool, type RasterArray, type RasterTypedArray } from "@developmentseed/geotiff";
 import type { Texture } from "@luma.gl/core";
-import { MONTHS, dkD, dkM, dkY, fmtEnd, fmtStart, startDay } from "../../toolbar/dekads";
-import type { DekadRange } from "../../toolbar/range-rules";
-import { blockName, dekadDays, formatPlan, planRange, type Block, type BlockKind } from "./wapor-plan";
+import { MONTHS, dkD, dkFirstDay, dkLastDay, dkM, dkY, fmtDay } from "../../toolbar/dekads";
+import { isDekads, type DayRange } from "../../toolbar/range-rules";
+import { blockName, formatPlan, planRange, type BlockKind } from "./wapor-plan";
 import { AetiRamp, rampProps, type WaporRamp } from "./wapor-shader";
 
 const BUCKET = "https://storage.googleapis.com/fao-gismgr-wapor-3-data/DATA/WAPOR-3/MAPSET";
@@ -88,6 +90,8 @@ export interface WaporPeriod {
   unpublished: string[];
   /** A single dekad: its NDVI quality raster (null: none). */
   qualityUrl: string | null;
+  /** About how the value is made, if there's something to know (partial dekads). */
+  note: string | null;
   unit: string;
   scale: number; // legend value = shown value * scale
   ramp: WaporRamp;
@@ -105,16 +109,21 @@ const nice = (v: number) => {
  * What to show for a Local view range, assuming every raster is published except
  * those in `unpublished` (by name, e.g. "A[2025]"). Null if no sum can make the range.
  */
-export function waporPeriod(range: DekadRange, unpublished: ReadonlySet<string> = new Set()): WaporPeriod | null {
+export function waporPeriod(range: DayRange, unpublished: ReadonlySet<string> = new Set()): WaporPeriod | null {
   const plan = planRange(range, (b) => unpublished.has(blockName(b)));
   if (!plan) return null;
-  const { start, end } = range;
   const skipped = [...unpublished];
   const [only] = plan.terms;
 
   // Exactly one raster: as published, in its own unit.
-  if (plan.terms.length === 1 && only.coef === 1 && only.block.start === start && only.block.len === end - start + 1) {
+  if (
+    plan.terms.length === 1 &&
+    only.coef === 1 &&
+    dkFirstDay(only.block.start) === range.start &&
+    dkLastDay(only.block.start + only.block.len - 1) === range.end
+  ) {
     const b = only.block;
+    const start = b.start;
     const mapset = MAPSETS[b.kind];
     const y = dkY(start);
     const m = dkM(start);
@@ -130,6 +139,7 @@ export function waporPeriod(range: DekadRange, unpublished: ReadonlySet<string> 
       cost: plan.cost,
       unpublished: skipped,
       qualityUrl,
+      note: null,
       unit: mapset.unit,
       scale: SCALE,
       ramp: mapset.ramp,
@@ -138,23 +148,25 @@ export function waporPeriod(range: DekadRange, unpublished: ReadonlySet<string> 
   }
 
   // A sum, as the total in mm: a dekadal raster is mm/day, so times its days.
-  const terms = plan.terms.map(({ block: b, coef }: { block: Block; coef: number }) => ({
+  const terms = plan.terms.map(({ block: b, coef, days }) => ({
     url: rasterUrl(MAPSETS[b.kind].code, b.code),
     name: blockName(b),
-    factor: coef * SCALE * (b.kind === "D" ? dekadDays(b.start) : 1),
+    factor: SCALE * (days ?? coef),
   }));
   // The annual colour map, scaled to the length of the range.
-  let days = 0;
-  for (let dk = start; dk <= end; dk++) days += dekadDays(dk);
+  const days = range.end - range.start + 1;
   const annual = MAPSETS.A.ramp;
+  const [first, last] = [fmtDay(range.start), fmtDay(range.end)];
   return {
     resolution: "custom",
-    label: `${dkY(start) === dkY(end) ? `${startDay(start)} ${MONTHS[dkM(start)]}` : fmtStart(start)} – ${fmtEnd(end)}`,
+    label: `${first.slice(-4) === last.slice(-4) ? first.slice(0, -5) : first} – ${last}`,
     terms,
     equation: `ETIa (mm) = ${formatPlan(plan)}`,
     cost: plan.cost,
     unpublished: skipped,
     qualityUrl: null,
+    // A range that starts or ends within a dekad.
+    note: isDekads(range) ? null : "Part of a dekad: its average per day, times the days in the range.",
     unit: "mm total",
     scale: 1,
     ramp: {
@@ -170,7 +182,7 @@ export function waporPeriod(range: DekadRange, unpublished: ReadonlySet<string> 
  * that isn't out yet (the latest year or month), so plan again without it. Null if the
  * range can't be made from published rasters. Rejects if the bucket can't be reached.
  */
-export async function publishedWaporPeriod(range: DekadRange): Promise<WaporPeriod | null> {
+export async function publishedWaporPeriod(range: DayRange): Promise<WaporPeriod | null> {
   const unpublished = new Set<string>();
   for (;;) {
     const period = waporPeriod(range, unpublished);
@@ -193,7 +205,7 @@ export interface CheckedWaporPeriod {
  * What to show for a range, checked: the rasters published and opened, so the map can
  * show it straight away. Null if it can't be made; rejects if the bucket can't be reached.
  */
-export async function checkedWaporPeriod(range: DekadRange): Promise<CheckedWaporPeriod | null> {
+export async function checkedWaporPeriod(range: DayRange): Promise<CheckedWaporPeriod | null> {
   const period = await publishedWaporPeriod(range);
   if (!period) return null;
   const quality = period.qualityUrl && (await waporAvailable(period.qualityUrl).catch(() => false));

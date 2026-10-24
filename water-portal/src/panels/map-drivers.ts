@@ -1,0 +1,142 @@
+/*
+ * Chart cards that drive the map (Country and Basin panels). Elements marked
+ * data-driver="<id>" are drivers; the map follows one of them:
+ *
+ * - hovering a driver (or focusing it with the keyboard) previews its map, after a
+ *   short delay so crossing it on the way elsewhere doesn't repaint the map;
+ * - clicking it pins that map, so it stays while the pointer moves on; clicking it
+ *   again, or Escape, unpins it;
+ * - inside a driver, the element under the pointer with data-sub (a chart row, a
+ *   legend series) is passed along, so the map can pick out that area or series;
+ * - data-tip on a chart mark is shown as a tooltip, data-x (a year or month on a
+ *   line chart) and data-csv (a download button) are clicked through to the owner.
+ *
+ * Where the pins are kept (one per topic, say) is up to the owner.
+ */
+
+export interface Driver {
+  id: string;
+  sub: string | null;
+}
+
+interface Options {
+  /** Whether the panel is on screen (Escape only unpins then). */
+  enabled(): boolean;
+  pinned(): Driver | null;
+  setPinned(driver: Driver | null): void;
+  /** The preview or pin changed: redraw the map and mark the drivers. */
+  onChange(): void;
+  onX?(x: number): void;
+  onCsv?(id: string): void;
+  tooltip: HTMLElement;
+}
+
+export interface Drivers {
+  preview(): Driver | null;
+  /** Drop the preview without redrawing (when the panel's content is replaced). */
+  clearPreview(): void;
+}
+
+const HOVER_DELAY = 120; // ms
+
+const same = (a: Driver | null, b: Driver | null) => a?.id === b?.id && a?.sub === b?.sub;
+
+export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onChange, onX, onCsv, tooltip }: Options): Drivers {
+  let preview: Driver | null = null;
+  let timer = 0;
+
+  function setPreview(next: Driver | null, delay = 0) {
+    clearTimeout(timer);
+    const apply = () => {
+      if (same(next, preview)) return;
+      preview = next;
+      onChange();
+    };
+    if (delay) timer = window.setTimeout(apply, delay);
+    else apply();
+  }
+
+  function pin(driver: Driver) {
+    // Clicking the pinned card again unpins it (a click on another row or series re-pins).
+    setPinned(same(pinned(), driver) ? null : driver);
+    onChange();
+  }
+
+  const driverAt = (target: EventTarget | null): Driver | null => {
+    const el = (target as Element | null)?.closest?.<HTMLElement>("[data-driver]");
+    if (!el || !root.contains(el)) return null;
+    const sub = (target as Element).closest<HTMLElement>("[data-sub]")?.dataset.sub ?? null;
+    return { id: el.dataset.driver!, sub };
+  };
+
+  root.addEventListener("pointerover", (e) => {
+    const d = driverAt(e.target);
+    if (!d) return;
+    // Moving within the previewed card (to another row) follows at once.
+    setPreview(d, preview?.id === d.id ? 0 : HOVER_DELAY);
+  });
+  root.addEventListener("pointerleave", () => {
+    setPreview(null, HOVER_DELAY);
+    tooltip.hidden = true;
+  });
+  root.addEventListener("pointermove", (e) => {
+    if (!driverAt(e.target)) setPreview(null, HOVER_DELAY);
+    const tip = (e.target as Element).closest<HTMLElement>("[data-tip]")?.dataset.tip;
+    showTip(tip ?? null, e);
+  });
+  root.addEventListener("click", (e) => {
+    const target = e.target as Element;
+    const csv = target.closest<HTMLElement>("[data-csv]");
+    if (csv && onCsv) return onCsv(csv.dataset.csv!);
+    const x = target.closest<HTMLElement>("[data-x]")?.dataset.x;
+    if (x !== undefined && onX) onX(Number(x));
+    const d = driverAt(target);
+    if (d) pin(d);
+  });
+  root.addEventListener("focusin", (e) => {
+    const d = driverAt(e.target);
+    if (d) setPreview(d);
+  });
+  root.addEventListener("focusout", () => setPreview(null));
+  root.addEventListener("keydown", (e) => {
+    const d = driverAt(e.target);
+    if (d && (e.key === "Enter" || e.key === " ") && (e.target as Element).matches("[data-driver]")) {
+      e.preventDefault();
+      pin(d);
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !enabled() || !pinned()) return;
+    setPinned(null);
+    onChange();
+  });
+
+  function showTip(html: string | null, e: { clientX: number; clientY: number }) {
+    if (!html) return void (tooltip.hidden = true);
+    tooltip.innerHTML = html;
+    tooltip.hidden = false;
+    // Left of the pointer: the panels are on the right edge of the screen.
+    const w = tooltip.offsetWidth;
+    tooltip.style.left = `${Math.max(8, e.clientX - w - 14)}px`;
+    tooltip.style.top = `${e.clientY + 14}px`;
+  }
+
+  return {
+    preview: () => preview,
+    clearPreview() {
+      clearTimeout(timer);
+      preview = null;
+    },
+  };
+}
+
+/** Mark the drivers under `root`: the one the map shows, the previewed and the pinned one. */
+export function markDrivers(root: HTMLElement, shown: Driver | null, preview: Driver | null, pinned: Driver | null) {
+  for (const el of root.querySelectorAll<HTMLElement>("[data-driver]")) {
+    const id = el.dataset.driver;
+    el.classList.toggle("previewing", preview?.id === id);
+    el.classList.toggle("pinned", pinned?.id === id);
+    el.classList.toggle("mapped", shown?.id === id);
+    el.setAttribute("aria-pressed", String(pinned?.id === id));
+  }
+}

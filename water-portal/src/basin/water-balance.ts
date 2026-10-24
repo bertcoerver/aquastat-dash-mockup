@@ -38,6 +38,8 @@ export interface WaterBalance {
   setSelection(selection: Selection): void;
   /** The sub-basin under the pointer on the map (null: none). */
   hover(subBasinId: number | null): void;
+  /** A statistics chart drives the map (basin-stats.ts): hide the legend and the map tooltip. */
+  setMapOverride(override: boolean): void;
 }
 
 type Status = { kind: "idle" } | { kind: "loading"; since: number } | { kind: "error"; message: string } | { kind: "ready"; result: NetworkResult };
@@ -55,6 +57,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     status: { kind: "idle" } as Status,
     sankeyHover: null as number | null,
     mapHover: null as number | null,
+    override: false,
   };
   // What the last render computed, for tooltips and downloads.
   let current: { result: NetworkResult; range: DekadRange; means: Means } | null = null;
@@ -169,7 +172,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     }
 
     const name = state.selection?.subBasin?.name ?? state.selection?.majorBasin?.name ?? null;
-    $("wb-title").textContent = name ?? "No sub-basin selected";
+    $("wb-title").textContent = name ?? "All basins";
     renderMessage();
     showOutlines();
 
@@ -230,7 +233,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       if (c) colors.set(id, c);
     }
     map.setSubBasinFills({ key: `${result.outlet}:${state.variable}:${range.start}-${range.end}`, colors });
-    legend.hidden = false;
+    legend.hidden = state.override;
     for (const b of legend.querySelectorAll<HTMLElement>("[data-var]")) b.setAttribute("aria-checked", String(b.dataset.var === state.variable));
     $("wb-legend-title").innerHTML = `${style.label}<small>${style.scale === "log" ? "Log scale · " : ""}Mean per sub-basin</small>`;
     $("wb-legend-period").textContent = period;
@@ -313,7 +316,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
   function showHoverTooltip() {
     const id = state.mapHover;
     const m = id !== null ? current?.means.get(id) : undefined;
-    if (!m || id === null) {
+    if (!m || id === null || state.override) {
       tooltip.hidden = true;
       return;
     }
@@ -390,6 +393,11 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     hover(id) {
       state.mapHover = id;
       showHoverTooltip();
+    },
+    setMapOverride(override) {
+      if (override === state.override) return;
+      state.override = override;
+      render();
     },
   };
 }

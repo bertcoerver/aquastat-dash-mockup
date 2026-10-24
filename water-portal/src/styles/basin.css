@@ -314,6 +314,23 @@
   color: var(--muted);
 }
 
+/* --- Basin statistics (cards: country.css) ------------------------------------------- */
+.bs-section {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.wb-message[hidden] + #wb-results[hidden] + .bs-section,
+#wb-body > .bs-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.bs-heading {
+  margin: 0 0 2px;
+  font: 600 14px/1.3 var(--sans);
+}
+
 /* On narrow screens the panel would cover the map: keep it to the lower half. */
 @media (max-width: 640px) {
   .wb-panel {

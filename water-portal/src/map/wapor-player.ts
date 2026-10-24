@@ -1,7 +1,8 @@
 /*
  * Playback in the Local view: the range moves forward one step at a time, keeping its
  * length, and the map shows WaPOR for each. The step is the range's own unit: a year
- * for whole calendar years, a month for whole months, else a dekad.
+ * for whole calendar years, a month for whole months, a dekad for whole dekads, else
+ * 10 days.
  *
  * Each frame is loaded ahead: its rasters checked and opened, and the tiles the map
  * shows fetched into the tile cache (see bufferWapor), up to AHEAD frames, LOADERS at
@@ -9,8 +10,8 @@
  * starts, and after a stall goes on, once a few frames are in. Moving the map changes
  * the tiles, so the frames ahead are loaded again for the new view.
  */
-import { MAX_DK } from "../toolbar/dekads";
-import type { DekadRange } from "../toolbar/range-rules";
+import { MAX_DAY } from "../toolbar/dekads";
+import { coveringDekads, daysOfDekads, isDekads, type DayRange, type DekadRange } from "../toolbar/range-rules";
 import { bufferWapor, checkedWaporPeriod, onWaporView, waporBuffered, type CheckedWaporPeriod } from "./layers/wapor";
 
 const FRAME_MS = 700;
@@ -22,23 +23,38 @@ export type PlaybackStatus = "stopped" | "buffering" | "playing";
 
 export interface PlaybackState {
   status: PlaybackStatus;
-  /** How far ahead frames are loaded: the dekad boundary after the last one (null: none). */
+  /** How far ahead frames are loaded: the day boundary after the last one (null: none). */
   bufferedTo: number | null;
 }
 
 interface Frame {
-  range: DekadRange;
+  range: DayRange;
   checked?: CheckedWaporPeriod | null; // null: can't be shown
   buffered: boolean;
   loading?: boolean;
 }
 
-/** The step to play a range with, in dekads. */
-function stepOf({ start, end }: DekadRange) {
+/** The step to play whole dekads with, in dekads. */
+function dekadStep({ start, end }: DekadRange) {
   const len = end - start + 1;
   if (start % 36 === 0 && len % 36 === 0) return 36;
   if (start % 3 === 0 && len % 3 === 0) return 3;
   return 1;
+}
+
+/** How to play a range: the frame after one, and the first of all (as far back as it goes). */
+function framesOf(range: DayRange): { next: (r: DayRange) => DayRange; first: DayRange } {
+  const shift = ({ start, end }: { start: number; end: number }, n: number) => ({ start: start + n, end: end + n });
+  if (!isDekads(range)) {
+    const step = 10;
+    return { next: (r) => shift(r, step), first: shift(range, -step * Math.floor(range.start / step)) };
+  }
+  const dekads = coveringDekads(range);
+  const step = dekadStep(dekads);
+  return {
+    next: (r) => daysOfDekads(shift(coveringDekads(r), step)),
+    first: daysOfDekads(shift(dekads, -dekads.start + (dekads.start % step))),
+  };
 }
 
 export interface WaporPlayer {
@@ -57,16 +73,16 @@ export function initWaporPlayer({
   show,
   onState,
 }: {
-  getRange: () => DekadRange;
-  show: (range: DekadRange, checked: CheckedWaporPeriod) => void;
+  getRange: () => DayRange;
+  show: (range: DayRange, checked: CheckedWaporPeriod) => void;
   onState: (state: PlaybackState) => void;
 }): WaporPlayer {
   let run: {
     frames: Frame[]; // from the next one to show
-    last: DekadRange; // of the frames made so far
+    last: DayRange; // of the frames made so far
     end: number; // frames that can be shown (Infinity: not known yet)
-    step: number;
-    first: DekadRange; // of all, at the same length
+    next: (range: DayRange) => DayRange;
+    first: DayRange; // of all, at the same length
     shown: number;
     rewound: boolean;
     status: PlaybackStatus;
@@ -88,12 +104,12 @@ export function initWaporPlayer({
   /** Frame `i` ahead, made when first needed; null past the current dekad. */
   function frameAt(i: number): Frame | null {
     const current = run!;
-    const { frames, step } = current;
+    const { frames } = current;
     while (frames.length <= i) {
-      const prev = current.last;
-      if (prev.end + step > MAX_DK) return null;
-      current.last = { start: prev.start + step, end: prev.end + step };
-      frames.push({ range: current.last, buffered: false });
+      const next = current.next(current.last);
+      if (next.end > MAX_DAY) return null;
+      current.last = next;
+      frames.push({ range: next, buffered: false });
     }
     return frames[i];
   }
@@ -181,16 +197,15 @@ export function initWaporPlayer({
 
   function play() {
     const range = getRange();
-    const step = stepOf(range);
-    const first = { start: range.start % step, end: (range.start % step) + range.end - range.start };
+    const { next, first } = framesOf(range);
     // From the start if there's no next frame.
-    const rewound = range.end + step > MAX_DK;
-    const from = rewound ? first : { start: range.start + step, end: range.end + step };
+    const rewound = next(range).end > MAX_DAY;
+    const from = rewound ? first : next(range);
     const current = {
       frames: [{ range: from, buffered: false }],
       last: from,
       end: Infinity,
-      step,
+      next,
       first,
       shown: 0,
       rewound,

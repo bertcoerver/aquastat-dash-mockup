@@ -48,6 +48,13 @@ export interface WaterMap {
   /** Basin view: draw a thick outline around these sub-basins. */
   setOutlinedSubBasins(ids: number[]): void;
   /**
+   * Basin view: a statistics map (basin-stats.ts): fill the major basins or the
+   * sub-basins with their own colours, and outline some sub-basins. It takes over from
+   * the model's values, the hover shading and the selected fill (the selected sub-basin
+   * is outlined instead). `key` names the set, as above (null: none).
+   */
+  setBasinStatFills(fills: BasinStatFills | null): void;
+  /**
    * Country view: fill countries with their own colours (a statistic's values), and
    * outline the selected country instead of filling it (null: none). `key` names the
    * set of colours: the map only repaints when it changes.
@@ -62,6 +69,13 @@ interface WaporEntry {
   period: WaporPeriod;
   onLoad?: () => void;
   id: number; // a layer of its own, so a new period doesn't take over the shown one's tiles
+}
+
+export interface BasinStatFills {
+  level: "major" | "sub";
+  key: string;
+  colors: Map<number, Color>;
+  outlined: number[];
 }
 
 interface MapSelection {
@@ -96,6 +110,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
     outlined: [] as number[],
     countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
+    basinStats: null as BasinStatFills | null,
   };
 
   const map = new maplibregl.Map({
@@ -119,24 +134,31 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
   // Bottom to top. Rivers and lakes stay on top of whichever areas are shown.
   function layers() {
     const basins = state.view === "basin";
+    const stats = basins ? state.basinStats : null;
     const major = majorBasinsLayers({
       fill: theme.land,
       border: theme.basinBorder,
       visible: basins,
-      selected: state.selection.subBasin ? null : state.selection.majorBasin, // the most precise one only
+      // the most precise one only
+      selected: state.selection.subBasin || stats ? null : state.selection.majorBasin,
       selectedColor: theme.selected,
+      fills: stats?.level === "major" ? stats : undefined,
     });
     // Sub-basins are only drawn to fill the selected one, to shade the hovered one
-    // and those upstream of it, or to show the water balance model's values.
-    const values = state.valueFills;
+    // and those upstream of it, or to show the water balance model's values or a
+    // statistics map.
+    const values = stats ? (stats.level === "sub" ? stats : undefined) : state.valueFills;
     const sub = subBasinsLayers({
       fill: [0, 0, 0, 0],
       border: theme.basinBorder,
-      visible: basins && Boolean(values || state.hoverFills || state.selection.subBasin),
+      visible: basins && Boolean(stats ? values : values || state.hoverFills || state.selection.subBasin),
       selected: values ? null : state.selection.subBasin,
       selectedColor: theme.selectedSubBasin,
       fills: values ?? state.hoverFills,
     });
+    const outlined = stats
+      ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])]
+      : state.outlined;
     return [
       countriesLayer({
         color: theme.land,
@@ -163,7 +185,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
       major.outlines, // (sub.outlines: not drawn for now)
       riversLayer({ color: theme.river, visible: state.visible.rivers }),
       lakesLayer({ color: theme.water, visible: state.visible.lakes }),
-      subBasinOutlinesLayer({ ids: state.outlined, color: theme.outline, visible: basins }),
+      subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
       countryOutlineLayer({
         m49: state.selection.country,
         color: theme.outline,
@@ -262,6 +284,11 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
     setOutlinedSubBasins(ids) {
       if (ids.join() === state.outlined.join()) return;
       state.outlined = ids;
+      render();
+    },
+    setBasinStatFills(fills) {
+      if (fills?.key === state.basinStats?.key) return;
+      state.basinStats = fills;
       render();
     },
     setCountryFills(fills) {

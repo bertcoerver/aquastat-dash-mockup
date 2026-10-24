@@ -5,11 +5,22 @@
  * the user, moved an end.
  */
 import type { PlaybackState } from "../map/wapor-player";
-import { enterView, initialRange, type DekadRange, type View } from "./range-rules";
+import {
+  coveringDekads,
+  daysOfDekads,
+  enterView,
+  initialRange,
+  type DayRange,
+  type DekadRange,
+  type View,
+} from "./range-rules";
 import { initRangeSlider } from "./range-slider";
 
 export interface ToolbarState {
   view: View;
+  /** The range, in days: any day in Local, else on dekad boundaries. */
+  days: DayRange;
+  /** The dekads it lies in (in Basin and Country, exactly the range). */
   range: DekadRange;
 }
 
@@ -23,8 +34,10 @@ function flash(id: string) {
 
 export interface Toolbar {
   state: ToolbarState;
-  /** Set the range from elsewhere (the Basin view's time series, playback); it must fit the view. */
+  /** Set the range from elsewhere (the Basin view's time series); it must fit the view. */
   setRange(range: DekadRange): void;
+  /** The same in days (playback in the Local view). */
+  setDays(days: DayRange): void;
   /** Show the playback state: the play button and how far ahead the map has loaded. */
   setPlayback(playback: PlaybackState): void;
 }
@@ -34,10 +47,11 @@ export interface Toolbar {
  * when the play button is pressed.
  */
 export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: () => void): Toolbar {
-  const state: ToolbarState = { view: "country", range: initialRange() };
+  const state: { view: View; range: DayRange } = { view: "country", range: initialRange() };
+  const current = (): ToolbarState => ({ view: state.view, days: state.range, range: coveringDekads(state.range) });
 
   /** Apply a new range; `adjusted` names the ends the system changed. */
-  function update(next: DekadRange, adjusted: { start?: boolean; end?: boolean }) {
+  function update(next: DayRange, adjusted: { start?: boolean; end?: boolean }) {
     state.range = next;
     render();
     for (const end of ["start", "end"] as const) {
@@ -45,7 +59,7 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
       flash(`${end}-handle`);
       flash(`${end}-label`);
     }
-    onChange({ ...state });
+    onChange(current());
   }
 
   const slider = initRangeSlider(
@@ -85,10 +99,13 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
 
   render();
   return {
-    state: { ...state },
+    state: current(),
     setRange(range) {
-      if (range.start === state.range.start && range.end === state.range.end) return;
-      update(range, {}); // the user chose it (elsewhere), so no highlight
+      this.setDays(daysOfDekads(range));
+    },
+    setDays(days) {
+      if (days.start === state.range.start && days.end === state.range.end) return;
+      update(days, {}); // the user chose it (elsewhere), so no highlight
     },
     setPlayback({ status, bufferedTo }) {
       play.dataset.status = status;

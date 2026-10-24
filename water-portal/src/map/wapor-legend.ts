@@ -72,6 +72,7 @@ export function initWaporLegend({ onMaxGap }: { onMaxGap: (maxGap: number | null
       $("wapor-period").textContent = period.label;
       $("wapor-unit").textContent = period.unit;
       $("wapor-status").textContent = STATUS_TEXT[status];
+      $("wapor-note").textContent = period.note ?? "";
 
       // Stops sit where their value falls between the first and the last.
       const { quantities: q, colors } = period.ramp;

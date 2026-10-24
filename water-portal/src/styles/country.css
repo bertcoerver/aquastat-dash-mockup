@@ -8,6 +8,8 @@
   --c-2: #eb6834;
   --c-3: #1baf7a;
   --c-world: #898781;
+  --c-pcp: #27ae60; /* the Basin view's precipitation and evapotranspiration (variables.ts) */
+  --c-aeti: #e74c3c;
   --c-base: #9ec5f4;
   --c-now: #256abf;
 }
@@ -145,6 +147,10 @@
 .ch-row-label.em {
   font-weight: 600;
 }
+.ch-row-label.gap {
+  fill: var(--muted);
+  font-style: italic;
+}
 .ch-value {
   font: 400 10px var(--mono);
   fill: var(--muted);
@@ -198,6 +204,15 @@
 }
 .ch-col:hover .ch-cursor {
   opacity: 1;
+}
+.ch-equal {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.ch-point:hover .ch-dot,
+.ch-point.em .ch-dot {
+  stroke: var(--ink);
+  stroke-width: 1.5;
 }
 .ch-col.clickable {
   cursor: pointer;

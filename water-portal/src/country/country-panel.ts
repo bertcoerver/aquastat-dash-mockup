@@ -4,25 +4,24 @@
  * view's, has one tab per topic (SDG 6.4, water resources, water use, irrigation),
  * each with number tiles and chart cards (cards.ts).
  *
- * Every tile and card has a map that goes with it:
- * - hovering a card (or focusing it with the keyboard) previews its map;
- * - clicking it pins that map, so it stays while the pointer moves on; clicking it
- *   again, or Escape, unpins it (back to the topic's first tile);
- * - within a card, hovering a row picks out that area's countries on the map, and
- *   hovering a series in a legend maps that series;
- * - clicking a year on a line chart sets the year in the top bar.
+ * Every tile and card has a map that goes with it: hovering previews it, clicking pins
+ * it (map-drivers.ts); unpinned, the map shows the topic's first tile. Within a card,
+ * hovering a row picks out that area's countries on the map, hovering a series in a
+ * legend maps that series, and clicking a year on a line chart sets the year in the
+ * top bar.
  * Hovering a country on the map shows its value.
  *
  * The markup lives in index.html.
  */
 import type { WaterMap } from "../map/map";
-import type { Color } from "../map/theme";
+import { mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale, type ColorScale } from "../basin/variables";
 import { dkY } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
 import { TOPICS, type Card, type Ctx, type MapSpec, type Region, type Tile, type TopicDef } from "./cards";
 import { WORLD, latestYear, loadTopic, type Topic } from "./data";
+import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 
 export interface CountryInfo {
   regions: { code: number; name: string }[];
@@ -47,14 +46,8 @@ export interface CountryPanel {
 }
 
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
-/** What drives the map: a tile or card, and the row or series under the pointer in it. */
-interface Driver {
-  id: string;
-  sub: string | null;
-}
 
 const SHORT: Record<number, string> = { 419: "Latin Am. & Caribbean", 513: "Europe & N. America" };
-const HOVER_DELAY = 120; // ms: crossing a card on the way elsewhere doesn't repaint the map
 
 const $ = (id: string) => document.getElementById(id)!;
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -76,7 +69,6 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     topic: "sdg" as Topic,
     status: new Map<Topic, Status>(),
     pinned: new Map<Topic, Driver>(),
-    preview: null as Driver | null,
     mapHover: null as number | null,
   };
 
@@ -92,7 +84,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     const button = (e.target as Element).closest<HTMLElement>("[data-topic]");
     if (!button) return;
     state.topic = button.dataset.topic as Topic;
-    state.preview = null;
+    drivers.clearPreview();
     load();
     render();
   });
@@ -121,90 +113,23 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
   }
 
   // --- Preview and pin -------------------------------------------------------------------
-  // Tiles and cards are both "drivers" (data-driver). The map follows the previewed
-  // one, else the pinned one, else the topic's first tile.
-  let previewTimer = 0;
-  function setPreview(next: Driver | null, delay = 0) {
-    clearTimeout(previewTimer);
-    const apply = () => {
-      if (next?.id === state.preview?.id && next?.sub === state.preview?.sub) return;
-      state.preview = next;
+  // Tiles and cards are both drivers (map-drivers.ts). The map follows the previewed
+  // one, else the pinned one, else the topic's first tile. Pins are kept per topic.
+  const drivers = initDrivers($("cp-body"), {
+    enabled: () => state.view === "country",
+    pinned: () => state.pinned.get(state.topic) ?? null,
+    setPinned(d) {
+      if (d) state.pinned.set(state.topic, d);
+      else state.pinned.delete(state.topic);
+    },
+    onChange() {
       drawMap();
-      markDrivers();
-    };
-    if (delay) previewTimer = window.setTimeout(apply, delay);
-    else apply();
-  }
-
-  function pin(driver: Driver) {
-    const pinned = state.pinned.get(state.topic);
-    // Clicking the pinned card again unpins it (a click on another row or series re-pins).
-    if (pinned?.id === driver.id && pinned.sub === driver.sub) state.pinned.delete(state.topic);
-    else state.pinned.set(state.topic, driver);
-    drawMap();
-    markDrivers();
-  }
-
-  const driverAt = (target: EventTarget | null): Driver | null => {
-    const el = (target as Element | null)?.closest?.<HTMLElement>("[data-driver]");
-    if (!el) return null;
-    const sub = (target as Element).closest<HTMLElement>("[data-sub]")?.dataset.sub ?? null;
-    return { id: el.dataset.driver!, sub };
-  };
-
-  const body = $("cp-body");
-  body.addEventListener("pointerover", (e) => {
-    const d = driverAt(e.target);
-    if (!d) return;
-    // Moving within the previewed card (to another row) follows at once.
-    setPreview(d, state.preview?.id === d.id ? 0 : HOVER_DELAY);
+      markAll();
+    },
+    onX: setYear,
+    onCsv: download,
+    tooltip,
   });
-  body.addEventListener("pointerleave", () => {
-    setPreview(null, HOVER_DELAY);
-    tooltip.hidden = true;
-  });
-  body.addEventListener("pointermove", (e) => {
-    if (!driverAt(e.target)) setPreview(null, HOVER_DELAY);
-    const tip = (e.target as Element).closest<HTMLElement>("[data-tip]")?.dataset.tip;
-    showTooltip(tip ?? null, e);
-  });
-  body.addEventListener("click", (e) => {
-    const target = e.target as Element;
-    const csv = target.closest<HTMLElement>("[data-csv]");
-    if (csv) return download(csv.dataset.csv!);
-    const year = target.closest<HTMLElement>("[data-year]")?.dataset.year;
-    if (year) setYear(Number(year));
-    const d = driverAt(target);
-    if (d) pin(d);
-  });
-  body.addEventListener("focusin", (e) => {
-    const d = driverAt(e.target);
-    if (d) setPreview(d);
-  });
-  body.addEventListener("focusout", () => setPreview(null));
-  body.addEventListener("keydown", (e) => {
-    const d = driverAt(e.target);
-    if (d && (e.key === "Enter" || e.key === " ") && (e.target as Element).matches("[data-driver]")) {
-      e.preventDefault();
-      pin(d);
-    }
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || state.view !== "country" || !state.pinned.has(state.topic)) return;
-    state.pinned.delete(state.topic);
-    drawMap();
-    markDrivers();
-  });
-
-  function showTooltip(html: string | null, e: { clientX: number; clientY: number }) {
-    if (!html) return void (tooltip.hidden = true);
-    tooltip.innerHTML = html;
-    tooltip.hidden = false;
-    // Left of the pointer: the panel is on the right edge of the screen.
-    const w = tooltip.offsetWidth;
-    tooltip.style.left = `${Math.max(8, e.clientX - w - 14)}px`;
-    tooltip.style.top = `${e.clientY + 14}px`;
-  }
 
   // The map tooltip follows the pointer (to its right).
   const mapEl = map.map.getContainer();
@@ -292,7 +217,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
       })
       .join("") + `<p class="wb-about">${esc(topic.about)} Source: FAO AQUASTAT.</p>`;
     current = { ctx, spec: specFor(ctx), csv };
-    markDrivers();
+    markAll();
     drawMap();
   }
 
@@ -314,7 +239,7 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
 
   /** The driver the map follows now. */
   function activeDriver(): Driver {
-    return state.preview ?? state.pinned.get(state.topic) ?? { id: topicDef().tiles[0].id, sub: null };
+    return drivers.preview() ?? state.pinned.get(state.topic) ?? { id: topicDef().tiles[0].id, sub: null };
   }
 
   function specFor(ctx: Ctx): MapSpec {
@@ -326,16 +251,8 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     return card.map(ctx, d.sub);
   }
 
-  function markDrivers() {
-    const d = activeDriver();
-    const pinned = state.pinned.get(state.topic);
-    for (const el of panel.querySelectorAll<HTMLElement>("[data-driver]")) {
-      const id = el.dataset.driver;
-      el.classList.toggle("previewing", state.preview?.id === id);
-      el.classList.toggle("pinned", pinned?.id === id);
-      el.classList.toggle("mapped", d.id === id);
-      el.setAttribute("aria-pressed", String(pinned?.id === id));
-    }
+  function markAll() {
+    markDrivers(panel, activeDriver(), drivers.preview(), state.pinned.get(state.topic) ?? null);
   }
 
   // --- The map ---------------------------------------------------------------------------------
@@ -417,8 +334,8 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
     const topic = topicDef();
     const name = topic.tiles.find((t) => t.id === d.id)?.label ?? topic.cards.find((c) => c.id === d.id)?.title(ctx) ?? "";
     const pinned = state.pinned.get(state.topic);
-    const mode = state.preview ? "Preview" : pinned ? "Pinned" : "Default";
-    $("cp-legend-source").innerHTML = `<b>${mode}</b> · ${esc(name)}` + (pinned && !state.preview ? ` <span class="cp-unpin">(Esc to unpin)</span>` : "");
+    const mode = drivers.preview() ? "Preview" : pinned ? "Pinned" : "Default";
+    $("cp-legend-source").innerHTML = `<b>${mode}</b> · ${esc(name)}` + (pinned && !drivers.preview() ? ` <span class="cp-unpin">(Esc to unpin)</span>` : "");
     $("cp-legend-title").innerHTML = `${esc(spec.title)}${spec.note ? `<small>${esc(spec.note)}</small>` : ""}`;
     $("cp-legend-year").textContent = String(ctx.year);
     $("cp-legend-unit").textContent = spec.unit;
@@ -494,11 +411,6 @@ export function initCountryPanel({ map, info, names, setYear, canSelect }: Optio
       else showMapTooltip();
     },
   };
-}
-
-/** `a` blended towards `b` by `t` (0: a, 1: b). */
-function mix(a: Color, b: Color, t: number): Color {
-  return [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)).concat(255) as Color;
 }
 
 const csvCell = (v: string | number) =>

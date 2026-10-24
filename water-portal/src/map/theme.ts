@@ -54,3 +54,8 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     markerRing: [13, 22, 27, 255],
   },
 };
+
+/** Colour `a` blended towards `b` by `t` (0: a, 1: b), opaque. */
+export function mixColor(a: Color, b: Color, t: number): Color {
+  return [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)).concat(255) as Color;
+}

@@ -70,6 +70,14 @@
 .legend-status:empty {
   display: none;
 }
+/* How the value is made, when it's worth knowing (part of a dekad). */
+.legend-note {
+  font-size: 11px;
+  color: var(--muted);
+}
+.legend-note:empty {
+  display: none;
+}
 .legend:is([data-status="missing"], [data-status="error"]) .legend-status {
   color: var(--snap);
 }

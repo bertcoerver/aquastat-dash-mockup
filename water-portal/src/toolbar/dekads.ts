@@ -34,3 +34,32 @@ export const MAX_DK = mk(
 
 /** Country view: only complete calendar years whose 31 Dec is not after the current dekad. */
 export const COUNTRY_MAX_YEAR = dkM(MAX_DK) === 11 && dkD(MAX_DK) === 2 ? dkY(MAX_DK) : dkY(MAX_DK) - 1;
+
+/*
+ * Days, for the Local view, which can start and end on any day: DAY INDEX 0 = 1 Jan 2018.
+ */
+const DAY_MS = 86_400_000;
+const EPOCH = Date.UTC(MIN_YEAR, 0, 1);
+/** Day index of a date (month 0–11, day of the month 1–31). */
+export const dayOf = (y: number, m: number, d: number) => Math.round((Date.UTC(y, m, d) - EPOCH) / DAY_MS);
+const dateOf = (day: number) => new Date(EPOCH + day * DAY_MS);
+/** First and last day of a dekad. */
+export const dkFirstDay = (dk: number) => dayOf(dkY(dk), dkM(dk), startDay(dk));
+export const dkLastDay = (dk: number) => dayOf(dkY(dk), dkM(dk), endDay(dk));
+/** The dekad a day is in. */
+export const dayDk = (day: number) => {
+  const date = dateOf(day);
+  const d = date.getUTCDate();
+  return mk(date.getUTCFullYear(), date.getUTCMonth(), d <= 10 ? 0 : d <= 20 ? 1 : 2);
+};
+/** The same date `years` later (or earlier), e.g. for Page Up on a handle. */
+export const addYears = (day: number, years: number) => {
+  const date = dateOf(day);
+  return dayOf(date.getUTCFullYear() + years, date.getUTCMonth(), date.getUTCDate());
+};
+export const fmtDay = (day: number) => {
+  const date = dateOf(day);
+  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+};
+/** The last day that can be selected: the end of the current dekad. */
+export const MAX_DAY = dkLastDay(MAX_DK);
