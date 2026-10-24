@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Water Portal</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <header class="toolbar" id="toolbar">
+      <div class="brand">
+        Water Portal<span class="loading" id="loading" role="status"><span class="loading-spinner" aria-hidden="true"></span><span class="loading-text" id="loading-text"></span></span>
+        <small>SDG 6.4</small>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="View">
+        <button class="tab" role="tab" data-view="country">Country</button>
+        <button class="tab" role="tab" data-view="basin">Basin</button>
+        <button class="tab" role="tab" data-view="local">Local</button>
+      </nav>
+
+      <!-- Place picker: one widget per view (see src/toolbar/place-picker.ts). -->
+      <div class="place">
+        <div class="place-widget" data-view="country">
+          <label class="place-label" for="country-input">Country</label>
+          <div class="combobox" id="country-combobox">
+            <input id="country-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
+              aria-controls="country-list" placeholder="Search countries…" autocomplete="off" spellcheck="false" />
+            <button class="combobox-clear" type="button" aria-label="Clear country" hidden>×</button>
+            <ul class="combobox-list" id="country-list" role="listbox" aria-label="Countries" hidden></ul>
+          </div>
+        </div>
+
+        <div class="place-widget" data-view="basin" hidden>
+          <label class="place-label" for="basin-input">Basin</label>
+          <div class="combobox" id="basin-combobox">
+            <input id="basin-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
+              aria-haspopup="tree" aria-controls="basin-list" placeholder="Search basins and sub-basins…"
+              autocomplete="off" spellcheck="false" />
+            <button class="combobox-clear" type="button" aria-label="Clear basin" hidden>×</button>
+            <ul class="combobox-list combobox-tree" id="basin-list" role="tree" aria-label="Basins" hidden></ul>
+          </div>
+        </div>
+
+        <div class="place-widget" data-view="local" hidden>
+          <label class="place-label" for="lon-input">Point</label>
+          <form class="coords" id="coords">
+            <label>X<input id="lon-input" type="number" step="any" min="-180" max="180" required
+                placeholder="lon" aria-label="Longitude" /></label>
+            <label>Y<input id="lat-input" type="number" step="any" min="-90" max="90" required
+                placeholder="lat" aria-label="Latitude" /></label>
+            <button class="coords-go" type="submit">Go</button>
+            <button class="combobox-clear" id="coords-clear" type="button" aria-label="Clear point" hidden>×</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="range" role="group" aria-label="Date range">
+        <div class="range-readout" aria-hidden="true">
+          <span id="start-label"></span>
+          <span class="arrow">→</span>
+          <span id="end-label"></span>
+          <span class="range-len" id="range-len"></span>
+        </div>
+        <div class="slider" id="slider">
+          <div class="slider-track" id="slider-track">
+            <div class="slider-unavailable" id="slider-unavailable" hidden></div>
+            <div class="slider-band" id="slider-band"></div>
+            <div class="slider-snaps" id="slider-snaps"></div>
+          </div>
+          <div class="slider-handle" id="start-handle" role="slider" tabindex="0" aria-label="Start date"></div>
+          <div class="slider-handle" id="end-handle" role="slider" tabindex="0" aria-label="End date"></div>
+          <div class="slider-years" id="slider-years" aria-hidden="true"></div>
+        </div>
+      </div>
+    </header>
+
+    <div class="layers-menu" id="layers-menu">
+      <button class="layers-button" id="layers-button" aria-expanded="false" aria-controls="layers-panel">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M12 3 2 8l10 5 10-5-10-5Z M2 13l10 5 10-5 M2 17.5l10 5 10-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+        </svg>
+        Layers
+      </button>
+      <div class="layers-panel" id="layers-panel" hidden>
+        <label><input type="checkbox" data-layer="rivers" checked /> Rivers</label>
+        <label><input type="checkbox" data-layer="lakes" checked /> Lakes</label>
+      </div>
+    </div>
+
+    <section class="debug-panel" id="debug-panel" aria-label="Debug">
+      <header class="debug-head" id="debug-head">
+        Debug
+        <span class="debug-actions">
+          <button class="debug-button" id="debug-copy" title="Copy as JSON">Copy</button>
+          <button class="debug-button debug-collapse" id="debug-collapse" aria-expanded="true" aria-controls="debug-body" title="Collapse">–</button>
+        </span>
+      </header>
+      <div class="debug-body" id="debug-body"></div>
+    </section>
+
+    <aside class="legend" id="wapor-legend" hidden>
+      <div class="legend-title">
+        Actual evapotranspiration<small>WaPOR v3 · ETIa · 300 m</small>
+      </div>
+      <div class="legend-period"><span id="wapor-period"></span><span id="wapor-unit"></span></div>
+      <div class="legend-ramp" id="wapor-ramp"></div>
+      <div class="legend-ticks" id="wapor-ticks" aria-hidden="true"></div>
+      <div class="legend-status" id="wapor-status" role="status"></div>
+    </aside>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

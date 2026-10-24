@@ -1,0 +1,70 @@
+/* Legend for the WaPOR raster: floats over the map, bottom left. */
+.legend {
+  position: fixed;
+  left: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 5;
+  width: 240px;
+  max-width: calc(100vw - 24px - 56px); /* leave room for the map controls */
+  padding: 10px 12px 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) var(--glass), transparent);
+  background: color-mix(in srgb, var(--surface) var(--glass), transparent);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  font: 400 12px/1.4 var(--sans);
+}
+.legend[hidden] {
+  display: none;
+}
+.legend-title {
+  font-weight: 600;
+}
+.legend-title small {
+  display: block;
+  font: 500 10px/1.4 var(--sans);
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.legend-period {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font: 400 12px/1.4 var(--mono);
+}
+.legend-period > :last-child {
+  color: var(--muted);
+}
+.legend-ramp {
+  height: 10px;
+  margin-top: 4px;
+  border-radius: 2px;
+}
+.legend[data-status="missing"] .legend-ramp,
+.legend[data-status="missing"] .legend-ticks {
+  opacity: 0.35;
+}
+.legend-ticks {
+  position: relative;
+  height: 16px;
+  margin: 0 6px; /* the outer labels are centred on the ends */
+}
+.legend-ticks > span {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  font: 400 10px/1 var(--mono);
+  color: var(--muted);
+}
+.legend-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+.legend-status:empty {
+  display: none;
+}
+.legend[data-status="missing"] .legend-status {
+  color: var(--snap);
+}

@@ -1,0 +1,86 @@
+import type { ShaderModule } from "@luma.gl/shadertools";
+
+/** A WaPOR colour map: five stops, in raw raster values (before the 0.1 scale). */
+export interface WaporRamp {
+  quantities: [number, number, number, number, number];
+  colors: [string, string, string, string, string];
+}
+
+type Vec3 = [number, number, number];
+
+export type AetiRampProps = {
+  /** First four stops, and the last. */
+  q0123: [number, number, number, number];
+  q4: number;
+  c0: Vec3;
+  c1: Vec3;
+  c2: Vec3;
+  c3: Vec3;
+  c4: Vec3;
+};
+
+const rgb = (hex: string): Vec3 => {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+};
+
+export const rampProps = ({ quantities: q, colors: c }: WaporRamp): AetiRampProps => ({
+  q0123: [q[0], q[1], q[2], q[3]],
+  q4: q[4],
+  c0: rgb(c[0]),
+  c1: rgb(c[1]),
+  c2: rgb(c[2]),
+  c3: rgb(c[3]),
+  c4: rgb(c[4]),
+});
+
+const MODULE_NAME = "aetiRamp";
+
+/**
+ * Colours a single-band WaPOR raster, which MultiCOGLayer puts in color.r as raw
+ * values: linear between the stops, clamped outside them. Nodata (-9999), any other
+ * negative value and NaN are dropped.
+ */
+export const AetiRamp = {
+  name: MODULE_NAME,
+  fs: `\
+uniform ${MODULE_NAME}Uniforms {
+  vec4 q0123;
+  float q4;
+  vec3 c0;
+  vec3 c1;
+  vec3 c2;
+  vec3 c3;
+  vec3 c4;
+} ${MODULE_NAME};
+`,
+  inject: {
+    "fs:#decl": /* glsl */ `
+vec3 aetiRamp_color(float v) {
+  vec4 q = ${MODULE_NAME}.q0123;
+  if (v <= q.x) return ${MODULE_NAME}.c0;
+  if (v < q.y) return mix(${MODULE_NAME}.c0, ${MODULE_NAME}.c1, (v - q.x) / (q.y - q.x));
+  if (v < q.z) return mix(${MODULE_NAME}.c1, ${MODULE_NAME}.c2, (v - q.y) / (q.z - q.y));
+  if (v < q.w) return mix(${MODULE_NAME}.c2, ${MODULE_NAME}.c3, (v - q.z) / (q.w - q.z));
+  if (v < ${MODULE_NAME}.q4) return mix(${MODULE_NAME}.c3, ${MODULE_NAME}.c4, (v - q.w) / (${MODULE_NAME}.q4 - q.w));
+  return ${MODULE_NAME}.c4;
+}
+`,
+    "fs:DECKGL_FILTER_COLOR": /* glsl */ `
+  float value = color.r;
+  // Also catches NaN, which fails every comparison.
+  if (!(value >= 0.0)) discard;
+  color = vec4(aetiRamp_color(value), 1.0);
+`,
+  },
+  uniformTypes: {
+    q0123: "vec4<f32>",
+    q4: "f32",
+    c0: "vec3<f32>",
+    c1: "vec3<f32>",
+    c2: "vec3<f32>",
+    c3: "vec3<f32>",
+    c4: "vec3<f32>",
+  },
+  getUniforms: (props: Partial<AetiRampProps>) => props,
+} as const satisfies ShaderModule<AetiRampProps>;

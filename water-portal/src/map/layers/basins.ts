@@ -1,0 +1,150 @@
+import { COORDINATE_SYSTEM } from "@deck.gl/core";
+import { MVTLayer, type GeoBoundingBox } from "@deck.gl/geo-layers";
+import { PathLayer } from "@deck.gl/layers";
+import type { Feature, Position } from "geojson";
+import type { Color } from "../theme";
+import { FAO_TILES, ignoreMissingTile } from "./tile-urls";
+
+export interface MajorBasinProperties {
+  SDG6_MB_ID: number;
+  S6_MB_NAME: string;
+}
+
+export interface SubBasinProperties extends MajorBasinProperties {
+  SDG6_SB_ID: number;
+  S6_SB_NAME: string;
+}
+
+interface BasinOptions {
+  fill: Color;
+  border: Color;
+  visible: boolean;
+  /** The selected basin (by ID), filled with `selectedColor`. */
+  selected?: number | null;
+  selectedColor?: Color;
+  /**
+   * Basins (by ID) filled with their own colour instead of `fill`. `key` names the set
+   * (deck.gl only redraws the colours when it changes).
+   */
+  fills?: { key: number; colors: Map<number, Color> };
+}
+
+/**
+ * SDG 6 major basins, as two layers: the areas (filled with the land colour) and their
+ * outlines. Separate layers, so that all outlines are drawn after all areas: the tiles
+ * overlap a little, and a neighbouring tile's area would cover part of an outline.
+ */
+export function majorBasinsLayers(options: BasinOptions) {
+  return basinsLayers<MajorBasinProperties>("major-basins", FAO_TILES.majorBasins, "SDG6_MB_ID", options);
+}
+
+/** SDG 6 sub-basins (subdivisions of the major basins), as areas and outlines. */
+export function subBasinsLayers(options: BasinOptions) {
+  return basinsLayers<SubBasinProperties>("sub-basins", FAO_TILES.subBasins, "SDG6_SB_ID", options);
+}
+
+function basinsLayers<P>(
+  id: string,
+  data: string,
+  idProperty: string,
+  { fill, border, visible, selected = null, selectedColor, fills }: BasinOptions,
+) {
+  const common = {
+    data,
+    visible,
+    minZoom: 0,
+    maxZoom: 8,
+    onTileError: ignoreMissingTile,
+    parameters: { depthCompare: "always" as const },
+  };
+
+  const areas = new MVTLayer<P>({
+    ...common,
+    id,
+    pickable: visible,
+    stroked: false,
+    getFillColor: fills
+      ? (f: { properties: P }) => fills.colors.get((f.properties as Record<string, number>)[idProperty]) ?? fill
+      : fill,
+    updateTriggers: { getFillColor: fills?.key },
+    uniqueIdProperty: idProperty,
+    highlightedFeatureId: selected,
+    highlightColor: selectedColor,
+  });
+
+  // The outlines are the polygon rings as lines (see tileOutlines for why they aren't
+  // simply a polygon stroke).
+  const outlines = new MVTLayer<P>({
+    ...common,
+    id: `${id}-outlines`,
+    renderSubLayers: (props) => {
+      const features = (props.data as Feature[] | null) ?? []; // null for an empty tile
+      const local = props.coordinateSystem === COORDINATE_SYSTEM.CARTESIAN;
+      return new PathLayer<Position[]>({
+        ...props,
+        id: `${props.id}-path`,
+        data: tileOutlines(features, local ? LOCAL_BOUNDS : geoBounds(props.tile.bbox as GeoBoundingBox)),
+        pickable: false,
+        getPath: (path) => path as [number, number][],
+        getColor: border,
+        getWidth: 1.2,
+        widthUnits: "pixels",
+        jointRounded: true,
+      });
+    },
+  });
+
+  return { areas, outlines };
+}
+
+interface Bounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+// Tile-local coordinates (used once MapLibre leaves globe mode at high zoom) run
+// from 0 to 1 across the tile.
+const LOCAL_BOUNDS: Bounds = { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+
+function geoBounds({ west, south, east, north }: GeoBoundingBox): Bounds {
+  return { minX: west, minY: south, maxX: east, maxY: north };
+}
+
+/**
+ * The polygon rings of one tile as lines, without the parts outside the tile.
+ *
+ * The tiles were cut with a small buffer: each polygon runs a little past the tile
+ * edge and is closed off there by an artificial edge. A polygon stroke would draw
+ * those edges as lines along every tile seam. Keeping only segments that reach into
+ * the tile drops them; the real borders in the buffer are drawn by the neighbouring
+ * tile anyway.
+ */
+function tileOutlines(features: Feature[], b: Bounds): Position[][] {
+  const paths: Position[][] = [];
+  const outside = (p: Position, q: Position) =>
+    (p[0] < b.minX && q[0] < b.minX) ||
+    (p[0] > b.maxX && q[0] > b.maxX) ||
+    (p[1] < b.minY && q[1] < b.minY) ||
+    (p[1] > b.maxY && q[1] > b.maxY);
+
+  for (const { geometry } of features) {
+    const polygons =
+      geometry.type === "Polygon" ? [geometry.coordinates] : geometry.type === "MultiPolygon" ? geometry.coordinates : [];
+    for (const ring of polygons.flat()) {
+      let path: Position[] = [];
+      for (let i = 1; i < ring.length; i++) {
+        if (outside(ring[i - 1], ring[i])) {
+          if (path.length > 1) paths.push(path);
+          path = [];
+        } else {
+          if (path.length === 0) path.push(ring[i - 1]);
+          path.push(ring[i]);
+        }
+      }
+      if (path.length > 1) paths.push(path);
+    }
+  }
+  return paths;
+}

@@ -1,0 +1,16 @@
+diff --git a/node_modules/@developmentseed/deck.gl-geotiff/dist/multi-cog-layer.js b/node_modules/@developmentseed/deck.gl-geotiff/dist/multi-cog-layer.js
+index 2727697..3ef270d 100644
+--- a/node_modules/@developmentseed/deck.gl-geotiff/dist/multi-cog-layer.js
++++ b/node_modules/@developmentseed/deck.gl-geotiff/dist/multi-cog-layer.js
+@@ -602,6 +602,11 @@ function selectImage(geotiff, z) {
+  * Uses nearest sampling when the device can't linearly filter the format.
+  */
+ export function createBandTexture(device, array) {
++    // A single band stored band-separate (TIFF PlanarConfiguration=2, e.g. GDAL
++    // INTERLEAVE=BAND) holds the same samples as a pixel-interleaved one.
++    if (array.layout === "band-separate" && array.count === 1) {
++        array = { ...array, layout: "pixel-interleaved", data: array.bands[0] };
++    }
+     if (array.layout !== "pixel-interleaved") {
+         throw new Error("Band-separate layout not yet supported in MultiCOGLayer");
+     }

@@ -1,0 +1,205 @@
+/* Small panels floating over the map, below the top bar. --toolbar-h is set from
+   main.ts as the top bar's height. */
+
+/* Layers button and menu (top left) */
+.layers-menu {
+  position: fixed;
+  top: calc(var(--toolbar-h, 64px) + 12px);
+  left: 12px;
+  z-index: 5;
+}
+.layers-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 13px/1 var(--sans);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface) var(--glass), transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.layers-button:hover,
+.layers-button[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+.layers-panel {
+  margin-top: 6px;
+  min-width: 140px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+}
+.layers-panel label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.layers-panel label:hover {
+  background: var(--ground);
+}
+.layers-panel input {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.layers-button:focus-visible,
+.layers-panel input:focus-visible,
+.debug-collapse:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Debug window (top right; draggable and resizable) */
+.debug-panel {
+  position: fixed;
+  top: calc(var(--toolbar-h, 64px) + 12px);
+  right: 12px;
+  z-index: 6;
+  width: 340px;
+  height: 380px;
+  min-width: 200px;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
+}
+.debug-panel.collapsed {
+  height: auto !important;
+  min-height: 0;
+  resize: none;
+}
+.debug-panel.collapsed .debug-body {
+  display: none;
+}
+.debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 6px 12px;
+  font: 500 11px/1 var(--sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.debug-head:active {
+  cursor: grabbing;
+}
+.debug-actions {
+  display: flex;
+  gap: 2px;
+}
+.debug-button {
+  font: 500 11px/1 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  cursor: pointer;
+}
+.debug-collapse {
+  font: 500 14px/1 var(--mono);
+  padding: 0;
+}
+.debug-button:hover {
+  color: var(--ink);
+  background: var(--ground);
+}
+.debug-body {
+  flex: 1;
+  padding: 8px 10px;
+  overflow: auto;
+  font: 400 12px/1.6 var(--mono);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* JSON tree */
+.jv-branch > summary {
+  list-style: none;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.jv-branch > summary::-webkit-details-marker {
+  display: none;
+}
+.jv-branch > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 1.2em;
+  color: var(--muted);
+  transition: transform 0.1s;
+}
+.jv-branch[open] > summary::before {
+  transform: rotate(90deg);
+}
+.jv-branch > summary:hover {
+  background: var(--ground);
+}
+.jv-branch[open] > summary .jv-preview {
+  display: none;
+}
+.jv-children {
+  margin-left: 0.55em;
+  padding-left: 0.65em;
+  border-left: 1px solid var(--line);
+}
+.jv-line {
+  padding-left: 1.2em;
+}
+.jv-key {
+  color: var(--accent);
+}
+.jv-preview {
+  color: var(--muted);
+}
+.jv-string {
+  color: #3f7d3a;
+}
+.jv-number {
+  color: #a3561c;
+}
+.jv-boolean,
+.jv-null {
+  color: var(--muted);
+  font-style: italic;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .jv-string {
+    color: #9fd08f;
+  }
+  :root:not([data-theme="light"]) .jv-number {
+    color: #f0a868;
+  }
+}
+:root[data-theme="dark"] .jv-string {
+  color: #9fd08f;
+}
+:root[data-theme="dark"] .jv-number {
+  color: #f0a868;
+}

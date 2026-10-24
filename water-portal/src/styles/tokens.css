@@ -1,0 +1,49 @@
+/* Design tokens: colours and fonts. Dark values follow the OS setting unless
+   <html data-theme="light|dark"> forces one. */
+:root {
+  --ground: #f2f5f6;
+  --surface: #ffffff;
+  --ink: #13232b;
+  --muted: #5a6b73;
+  --line: #d5dee2;
+  --accent: #0e6a88;
+  --accent-ink: #ffffff;
+  --accent-soft: #ddeef3;
+  --snap: #b26f12;
+  --snap-soft: #fbebd2;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* How opaque floating panels over the map are. */
+  --glass: 78%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --ground: #0d161b;
+    --surface: #142128;
+    --ink: #e3ecef;
+    --muted: #93a6ae;
+    --line: #25363f;
+    --accent: #4db1d3;
+    --accent-ink: #0d161b;
+    --accent-soft: #163341;
+    --snap: #e6a94c;
+    --snap-soft: #3a2a12;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --ground: #0d161b;
+  --surface: #142128;
+  --ink: #e3ecef;
+  --muted: #93a6ae;
+  --line: #25363f;
+  --accent: #4db1d3;
+  --accent-ink: #0d161b;
+  --accent-soft: #163341;
+  --snap: #e6a94c;
+  --snap-soft: #3a2a12;
+}

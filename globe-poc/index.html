@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AQUASTAT Globe PoC</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <aside class="panel">
+      <h1>Water on the globe</h1>
+      <p class="lede">deck.gl GlobeView over MapLibre — proof of concept</p>
+
+      <section>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-cog" checked />
+          <span>
+            <strong>Wheat harvested area</strong>
+            <small>Two GAEZ v4 COGs added on the GPU</small>
+          </span>
+        </label>
+        <div class="segmented" role="radiogroup" aria-label="Raster arithmetic">
+          <label><input type="radio" name="cog-mode" value="sum" checked /><span>Rainfed + irrigated</span></label>
+          <label><input type="radio" name="cog-mode" value="rainfed" /><span>Rainfed</span></label>
+          <label><input type="radio" name="cog-mode" value="irrigated" /><span>Irrigated</span></label>
+        </div>
+        <div class="ramp" aria-hidden="true"></div>
+        <div class="ramp-ticks"><span>1 ha</span><span>10</span><span>100</span><span>1k</span><span>10k ha</span></div>
+        <p class="note">Per 5′ cell (~9 km), 2010. Log scale.</p>
+      </section>
+
+      <section>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-countries" checked />
+          <span>
+            <strong>Water stress — SDG 6.4.2</strong>
+            <small>M49 countries, vector tiles (.pbf)</small>
+          </span>
+        </label>
+        <label class="year">Year <select id="year" disabled><option>…</option></select></label>
+        <ul class="legend">
+          <li><i style="background: rgb(253, 231, 199)"></i>No stress (&lt;25%)</li>
+          <li><i style="background: rgb(251, 184, 122)"></i>Low (25–50%)</li>
+          <li><i style="background: rgb(240, 124, 74)"></i>Medium (50–75%)</li>
+          <li><i style="background: rgb(200, 64, 47)"></i>High (75–100%)</li>
+          <li><i style="background: rgb(127, 29, 29)"></i>Critical (&gt;100%)</li>
+          <li><i class="nodata"></i>No data</li>
+        </ul>
+      </section>
+
+      <footer>
+        <p id="status" class="note"></p>
+        <p class="note">
+          Data: FAO AQUASTAT (SDG 6.4.2), FAO/IIASA GAEZ v4, FAO M49 boundaries. Boundaries do not imply
+          official endorsement.
+        </p>
+      </footer>
+    </aside>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

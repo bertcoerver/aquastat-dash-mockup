@@ -1,0 +1,5 @@
+/* The map fills the window; the top bar floats over it. */
+#map {
+  position: fixed;
+  inset: 0;
+}

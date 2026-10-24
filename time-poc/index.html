@@ -1,0 +1,514 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Date Range Mechanics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ground: #F2F5F6;
+    --surface: #FFFFFF;
+    --ink: #13232B;
+    --muted: #5A6B73;
+    --line: #D5DEE2;
+    --accent: #0E6A88;
+    --accent-ink: #FFFFFF;
+    --accent-soft: #DDEEF3;
+    --snap: #B26F12;
+    --snap-soft: #FBEBD2;
+    --future: repeating-linear-gradient(135deg, #E3E9EC 0 4px, #F2F5F6 4px 8px);
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground: #0D161B;
+      --surface: #142128;
+      --ink: #E3ECEF;
+      --muted: #93A6AE;
+      --line: #25363F;
+      --accent: #4DB1D3;
+      --accent-ink: #0D161B;
+      --accent-soft: #163341;
+      --snap: #E6A94C;
+      --snap-soft: #3A2A12;
+      --future: repeating-linear-gradient(135deg, #1B2A31 0 4px, #0D161B 4px 8px);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground: #0D161B;
+    --surface: #142128;
+    --ink: #E3ECEF;
+    --muted: #93A6AE;
+    --line: #25363F;
+    --accent: #4DB1D3;
+    --accent-ink: #0D161B;
+    --accent-soft: #163341;
+    --snap: #E6A94C;
+    --snap-soft: #3A2A12;
+    --future: repeating-linear-gradient(135deg, #1B2A31 0 4px, #0D161B 4px 8px);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 14px/1.5 var(--sans);
+  }
+
+  /* ---------- Toolbar ---------- */
+  .toolbar {
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    z-index: 10;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 24px;
+  }
+  .brand { font-weight: 600; letter-spacing: .01em; margin-right: 8px; }
+  .brand small { display: block; font: 500 11px/1.2 var(--sans); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+
+  .tabs { display: flex; gap: 4px; background: var(--ground); padding: 3px; border-radius: 8px; border: 1px solid var(--line); }
+  .tab {
+    font: 500 14px/1 var(--sans);
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+  .tab:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .range { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin-left: auto; }
+  .field { display: flex; flex-direction: column; gap: 3px; }
+  .field > label, .field > .lbl { font: 500 11px/1 var(--sans); color: var(--muted); letter-spacing: .06em; text-transform: uppercase; }
+  .pick { display: flex; gap: 4px; }
+  select {
+    font: 400 13px/1 var(--mono);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 7px 6px;
+    cursor: pointer;
+  }
+  select:disabled { color: var(--muted); background: var(--ground); cursor: not-allowed; }
+  .arrow { color: var(--muted); padding-bottom: 7px; font-family: var(--mono); }
+
+  .flash { animation: flash 1.4s ease-out; }
+  @keyframes flash { 0%, 40% { background-color: var(--snap-soft); border-color: var(--snap); } 100% { } }
+  @media (prefers-reduced-motion: reduce) { .flash { animation: none; outline: 2px solid var(--snap); } }
+
+  /* ---------- Main ---------- */
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 16px 48px; display: grid; gap: 20px; }
+  .view-head h1 { font: 600 26px/1.2 var(--sans); margin: 0 0 4px; text-wrap: balance; }
+  .view-head p { margin: 0; color: var(--muted); max-width: 65ch; }
+
+  .grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: 20px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .panel h2 { font: 500 11px/1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 14px; }
+
+  .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 480px) { .summary { grid-template-columns: 1fr 1fr; } }
+  .kv .k { font-size: 12px; color: var(--muted); }
+  .kv .v { font: 500 18px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+
+  .timeline { margin-top: 20px; }
+  .tl-bar { position: relative; height: 28px; background: var(--ground); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .tl-future { position: absolute; top: 0; bottom: 0; right: 0; background: var(--future); }
+  .tl-sel { position: absolute; top: 3px; bottom: 3px; background: var(--accent); border-radius: 2px; min-width: 3px; transition: left .25s, width .25s; }
+  @media (prefers-reduced-motion: reduce) { .tl-sel { transition: none; } }
+  .tl-year { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--line); }
+  .tl-labels { position: relative; height: 16px; margin-top: 4px; font: 400 11px/1 var(--mono); color: var(--muted); }
+  .tl-labels span { position: absolute; transform: translateX(2px); }
+  .tl-legend { display: flex; gap: 16px; margin-top: 8px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+  .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 5px; }
+
+  ul.rules { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+  ul.rules li::marker { color: var(--accent); }
+  code { font: 400 12.5px/1 var(--mono); background: var(--ground); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
+
+  ol.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  ol.log li { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; }
+  ol.log .tag { font: 500 10px/1 var(--sans); letter-spacing: .06em; text-transform: uppercase; padding: 4px 6px; border-radius: 4px; white-space: nowrap; }
+  .tag.snap { background: var(--snap-soft); color: var(--snap); }
+  .tag.ok { background: var(--accent-soft); color: var(--accent); }
+  .tag.user { background: var(--ground); color: var(--muted); border: 1px solid var(--line); }
+  ol.log .when { font: 400 11px/1 var(--mono); color: var(--muted); margin-top: 3px; }
+  .empty { color: var(--muted); }
+  .note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+</style>
+
+<header class="toolbar">
+  <div class="brand">Water Dashboard<small>Mockup · date range rules</small></div>
+
+  <nav class="tabs" role="tablist" aria-label="View">
+    <button class="tab" role="tab" id="tab-country" data-view="country">Country</button>
+    <button class="tab" role="tab" id="tab-basin" data-view="basin">Basin</button>
+    <button class="tab" role="tab" id="tab-local" data-view="local">Local</button>
+  </nav>
+
+  <div class="range" aria-label="Date range">
+    <div class="field">
+      <label for="s-day">Start</label>
+      <div class="pick" id="start-pick">
+        <select id="s-day" aria-label="Start day"></select>
+        <select id="s-month" aria-label="Start month"></select>
+        <select id="s-year" aria-label="Start year"></select>
+      </div>
+    </div>
+    <span class="arrow">→</span>
+    <div class="field">
+      <label for="e-day">End</label>
+
+      <!-- country: locked to 31 Dec of start year / basin: any dekad end after start / local: only the end of the start's dekad, calendar month or calendar year -->
+      <div class="pick" id="end-pick">
+        <select id="e-day" aria-label="End day"></select>
+        <select id="e-month" aria-label="End month"></select>
+        <select id="e-year" aria-label="End year"></select>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="view-head">
+    <h1 id="view-title"></h1>
+    <p id="view-desc"></p>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Selected range</h2>
+      <div class="summary">
+        <div class="kv"><div class="k">Start</div><div class="v" id="sum-start"></div></div>
+        <div class="kv"><div class="k">End (inclusive)</div><div class="v" id="sum-end"></div></div>
+        <div class="kv"><div class="k">Length</div><div class="v" id="sum-len"></div></div>
+      </div>
+      <div class="timeline">
+        <div class="tl-bar" id="tl-bar"><div class="tl-future" id="tl-future"></div><div class="tl-sel" id="tl-sel"></div></div>
+        <div class="tl-labels" id="tl-labels"></div>
+        <div class="tl-legend">
+          <span><i class="sw" style="background:var(--accent)"></i>Selected</span>
+          <span><i class="sw" style="background:var(--future);border:1px solid var(--line)"></i>Not yet available (after current dekad)</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Rules in this view</h2>
+      <ul class="rules" id="rules"></ul>
+    </section>
+  </div>
+
+  <section class="panel">
+    <h2>Adjustment log</h2>
+    <ol class="log" id="log"></ol>
+    <p class="note">Every time the range is changed by the system rather than the user (switching tabs, or one field forcing the other), an entry appears here and the affected field briefly highlights.</p>
+  </section>
+</main>
+
+<script>
+/*
+ * Model
+ * -----
+ * Every date is stored as a DEKAD INDEX: dekad 0 = 1–10 Jan 2018, 1 = 11–20 Jan 2018, 2 = 21–31 Jan 2018, ...
+ * 36 dekads per year, 3 per month. A range is { s, e } = first and last dekad (both inclusive).
+ *   start date of dekad  -> day 1, 11 or 21
+ *   end date of dekad    -> day 10, 20 or last day of month
+ * With this model:  1 dekad = 1 index,  1 month = 3 indices,  1 year = 36 indices.
+ */
+const MIN_YEAR = 2018;
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+const mk   = (y, m, d) => (y - MIN_YEAR) * 36 + m * 3 + d;
+const dkY  = dk => MIN_YEAR + Math.floor(dk / 36);
+const dkM  = dk => Math.floor((dk % 36) / 3);
+const dkD  = dk => dk % 3;
+const dim  = (y, m) => new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+const startDay = dk => [1, 11, 21][dkD(dk)];
+const endDay   = dk => dkD(dk) < 2 ? [10, 20][dkD(dk)] : dim(dkY(dk), dkM(dk));
+const fmtStart = dk => `${startDay(dk)} ${MONTHS[dkM(dk)]} ${dkY(dk)}`;
+const fmtEnd   = dk => `${endDay(dk)} ${MONTHS[dkM(dk)]} ${dkY(dk)}`;
+const days = (s, e) => Math.round((Date.UTC(dkY(e), dkM(e), endDay(e)) - Date.UTC(dkY(s), dkM(s), startDay(s))) / 864e5) + 1;
+
+// Latest selectable dekad = the dekad containing today. No range may end after it.
+const now = new Date();
+const MAX_DK = mk(now.getFullYear(), now.getMonth(), now.getDate() <= 10 ? 0 : now.getDate() <= 20 ? 1 : 2);
+// Country: only complete calendar years whose 31 Dec is not after the current dekad.
+const COUNTRY_MAX_YEAR = dkM(MAX_DK) === 11 && dkD(MAX_DK) === 2 ? dkY(MAX_DK) : dkY(MAX_DK) - 1;
+const TOTAL_DK = (dkY(MAX_DK) - MIN_YEAR + 1) * 36;
+
+const LENGTHS = { 1: "1 dekad", 3: "1 month", 36: "1 year" };
+
+const VIEWS = {
+  country: {
+    title: "Country view",
+    desc: "National statistics are annual, so the range is always one full calendar year. Only the start year is chosen; the end date follows. Optionally, we could later also allow averages over multiple years (e.g. the 2019–2023 mean); the start would still be 1 Jan and the end 31 Dec of a later year.",
+    rules: [
+      "Start is always <code>1 Jan</code>; only the year can be chosen.",
+      `Years ${MIN_YEAR}–${COUNTRY_MAX_YEAR}: a year is only offered once its 31 December has passed.`,
+      "End picker is locked: it always shows <code>31 Dec</code> of the start year.",
+      "On entering this tab: start snaps back to 1 Jan of its year; end becomes 31 Dec of that year.",
+    ],
+  },
+  basin: {
+    title: "Basin view",
+    desc: "Basin data is fetched from a BigQuery table with dekadal granularity (one row per ≈10-day period), so both ends of the range sit on dekad boundaries. Because the values for any range can be aggregated in the query, any length is allowed.",
+    rules: [
+      "Start day is <code>1</code>, <code>11</code> or <code>21</code> of any month.",
+      "End day is <code>10</code>, <code>20</code> or the <code>last day</code> of any month, i.e. the last day of a dekad.",
+      `Anywhere from 1 Jan ${MIN_YEAR} up to the end of the current dekad (${fmtEnd(MAX_DK)}).`,
+      "Length is unlimited. End can never be before start; moving start past end pushes end along.",
+      "On entering this tab: ranges from the other tabs already fit, only an end after the current dekad is pulled back.",
+    ],
+  },
+  local: {
+    title: "Local view",
+    desc: "The range is limited to standard periods (a dekad, a calendar month or a calendar year) because of a technical limitation: local data are COGs, and for now the viewer can't do any algebra on COGs, so it can only show a pre-computed layer. Those only exist per dekad, per full month and per full year. Start is chosen like in Basin; the end picker only offers the end dates that match a pre-computed layer.",
+    rules: [
+      "Start day is <code>1</code>, <code>11</code> or <code>21</code> of any month (same as Basin).",
+      "<code>1 dekad</code> is always available: end = 10th, 20th or last day of the start month.",
+      "<code>1 month</code> only when start is the <code>1st</code>: end = last day of that month.",
+      "<code>1 year</code> only when start is <code>1 Jan</code>: end = 31 Dec of that year.",
+      "Examples: start 1 Jan 2024 → end 10 Jan, 31 Jan or 31 Dec 2024. Start 1 Mar 2024 → 10 Mar or 31 Mar. Start 21 Jan 2025 → only 31 Jan.",
+      `An end date after the current dekad (${fmtEnd(MAX_DK)}) is not offered.`,
+      "Changing the start keeps the current length if it is still available there, otherwise it snaps to the closest available length.",
+      "On entering this tab: start is kept, and the length snaps to the closest length available from that start.",
+    ],
+  },
+};
+
+// ---------- State ----------
+const state = { view: "country", s: mk(COUNTRY_MAX_YEAR, 0, 0), e: mk(COUNTRY_MAX_YEAR, 11, 2) };
+const log = [];
+
+const $ = id => document.getElementById(id);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const lenLabel = (s, e) => LENGTHS[e - s + 1] || `${e - s + 1} dekads`;
+
+// Local: pre-computed COGs exist per dekad, per calendar month and per calendar year. So from a given start:
+//   1 dekad  -> always
+//   1 month  -> only if start is the 1st of a month
+//   1 year   -> only if start is 1 Jan
+// and never ending after the current dekad.
+const localLengths = s => [1, ...(dkD(s) === 0 ? [3] : []), ...(s % 36 === 0 ? [36] : [])].filter(l => s + l - 1 <= MAX_DK);
+const localEnds = s => localLengths(s).map(l => s + l - 1);
+const nearestLocalLen = (s, cur) => localLengths(s).reduce((best, l) => Math.abs(l - cur) < Math.abs(best - cur) ? l : best);
+
+function addLog(kind, text) {
+  const t = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  log.unshift({ kind, text, t, view: state.view });
+  log.length = Math.min(log.length, 8);
+}
+function flash(...ids) {
+  ids.forEach(id => { const el = $(id); if (!el) return; el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); });
+}
+
+// ---------- Constraint logic: entering a tab ----------
+function enterView(view) {
+  if (view === state.view) return;
+  const from = state.view, { s: s0, e: e0 } = state;
+  state.view = view;
+  const notes = [];
+  let s = s0, e = e0;
+
+  if (view === "country") {
+    let y = dkY(s0);
+    if (y > COUNTRY_MAX_YEAR) { notes.push(`${y} is not complete yet, so the year moved to ${COUNTRY_MAX_YEAR}.`); y = COUNTRY_MAX_YEAR; }
+    s = mk(y, 0, 0); e = s + 35;
+    if (s !== s0) notes.push(`Start snapped from ${fmtStart(s0)} to ${fmtStart(s)}: country ranges start on 1 January.`);
+    if (e !== e0) notes.push(`End set from ${fmtEnd(e0)} to ${fmtEnd(e)}: country ranges cover one full calendar year.`);
+  }
+
+  if (view === "basin") {
+    // Other tabs always produce dekad-aligned ranges, so only the upper bound can be violated.
+    if (e > MAX_DK) { e = MAX_DK; notes.push(`End pulled back from ${fmtEnd(e0)} to ${fmtEnd(e)}: basin ranges cannot extend past the current dekad.`); }
+  }
+
+  if (view === "local") {
+    const len = nearestLocalLen(s, e0 - s0 + 1);
+    e = s + len - 1;
+    if (e !== e0) notes.push(`End moved from ${fmtEnd(e0)} to ${fmtEnd(e)}: local ranges must be one dekad, one calendar month or one calendar year. From ${fmtStart(s)} the closest match to ${lenLabel(s0, e0)} is ${LENGTHS[len]}.`);
+  }
+
+  state.s = s; state.e = e;
+  addLog("user", `Switched tab: ${VIEWS[from].title.split(" ")[0]} → ${VIEWS[view].title.split(" ")[0]}.`);
+  if (notes.length) { notes.forEach(n => addLog("snap", n)); }
+  else addLog("ok", `No adjustment needed: ${fmtStart(s)} – ${fmtEnd(e)} already fits the ${view} rules.`);
+
+  render();
+  if (s !== s0) flash("start-pick");
+  if (e !== e0) flash("end-pick");
+}
+
+// ---------- Constraint logic: editing inside a tab ----------
+function readPick(prefix) {
+  return { y: +$(prefix + "-year").value, m: +$(prefix + "-month").value, d: +$(prefix + "-day").value };
+}
+
+function onStartChange() {
+  const { y, m, d } = readPick("s");
+  const s0 = state.s, e0 = state.e;
+  const v = state.view;
+
+  if (v === "country") {
+    state.s = mk(y, 0, 0); state.e = state.s + 35;
+  } else {
+    state.s = clamp(mk(y, m, d), 0, MAX_DK);
+    if (v === "basin" && state.e < state.s) {
+      state.e = state.s;
+      addLog("snap", `End pushed from ${fmtEnd(e0)} to ${fmtEnd(state.e)}: end cannot be before start.`);
+      flash("end-pick");
+    }
+    if (v === "local") {
+      const len = e0 - s0 + 1;
+      const newLen = nearestLocalLen(state.s, len);
+      if (newLen !== len) {
+        const why = state.s + len - 1 > MAX_DK ? "would end after the current dekad"
+          : len === 3 ? "is only available for full calendar months (start on the 1st)"
+          : "is only available for full calendar years (start on 1 Jan)";
+        addLog("snap", `Length changed from ${LENGTHS[len]} to ${LENGTHS[newLen]}: a ${LENGTHS[len]} range from ${fmtStart(state.s)} ${why}.`);
+      }
+      state.e = state.s + newLen - 1;
+      flash("end-pick");
+    }
+  }
+  if (state.s !== mk(y, m, d) && v !== "country") addLog("snap", `Start clamped to ${fmtStart(state.s)}: later dates are not available yet.`);
+  render();
+}
+
+
+function onEndChange(ev) {
+  const { y, m, d } = readPick("e");
+
+  if (state.view === "local") {
+    // Each select only lists values that occur in an allowed end date. Changing year or month can leave the
+    // other selects on a combination that doesn't exist, so fall back to the first allowed date in that year/month.
+    const ends = localEnds(state.s);
+    const changed = ev.target.id;
+    state.e =
+      ends.find(dk => dkY(dk) === y && dkM(dk) === m && dkD(dk) === d) ??
+      (changed !== "e-year" ? ends.find(dk => dkY(dk) === y && dkM(dk) === m) : undefined) ??
+      ends.find(dk => dkY(dk) === y) ??
+      state.e;
+    render();
+    return;
+  }
+
+  const want = mk(y, m, d);
+  state.e = clamp(want, state.s, MAX_DK);
+  if (state.e !== want) {
+    addLog("snap", want < state.s
+      ? `End set to ${fmtEnd(state.e)}: end cannot be before start (${fmtStart(state.s)}).`
+      : `End clamped to ${fmtEnd(state.e)}: later dates are not available yet.`);
+    flash("end-pick");
+  }
+  render();
+}
+
+// ---------- Rendering ----------
+function fillSelect(sel, options, value) {
+  sel.innerHTML = options.map(o =>
+    `<option value="${o.v}"${o.v === value ? " selected" : ""}${o.disabled ? " disabled" : ""}>${o.t}</option>`).join("");
+}
+const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+
+function renderStart() {
+  const v = state.view, s = state.s;
+  const y = dkY(s), m = dkM(s), d = dkD(s);
+  const maxStart = v === "country" ? mk(COUNTRY_MAX_YEAR, 0, 0) : MAX_DK;
+  const maxY = v === "country" ? COUNTRY_MAX_YEAR : dkY(MAX_DK);
+
+  fillSelect($("s-year"), range(MIN_YEAR, maxY).map(yy => ({ v: yy, t: yy })), y);
+  fillSelect($("s-month"), MONTHS.map((t, i) => ({ v: i, t, disabled: mk(y, i, 0) > maxStart })), m);
+  fillSelect($("s-day"), [1, 11, 21].map((t, i) => ({ v: i, t: String(t).padStart(2, "0"), disabled: mk(y, m, i) > maxStart })), d);
+
+  $("s-day").disabled = $("s-month").disabled = v === "country";
+}
+
+function renderEnd() {
+  const v = state.view, { s, e } = state;
+  ["e-year", "e-month", "e-day"].forEach(id => $(id).disabled = v === "country");
+
+  if (v === "country") {
+    fillSelect($("e-year"), [{ v: dkY(e), t: dkY(e) }], dkY(e));
+    fillSelect($("e-month"), [{ v: 11, t: "Dec" }], 11);
+    fillSelect($("e-day"), [{ v: 2, t: "31" }], 2);
+  }
+
+  if (v === "basin") {
+    const y = dkY(e), m = dkM(e), d = dkD(e);
+    fillSelect($("e-year"), range(dkY(s), dkY(MAX_DK)).map(yy => ({ v: yy, t: yy })), y);
+    fillSelect($("e-month"), MONTHS.map((t, i) => ({ v: i, t, disabled: mk(y, i, 2) < s || mk(y, i, 0) > MAX_DK })), m);
+    fillSelect($("e-day"), [0, 1, 2].map(i => {
+      const dk = mk(y, m, i);
+      return { v: i, t: String(i < 2 ? [10, 20][i] : dim(y, m)), disabled: dk < s || dk > MAX_DK };
+    }), d);
+  }
+
+  if (v === "local") {
+    // Only list values that belong to one of the (max three) allowed end dates.
+    const ends = localEnds(s);
+    const y = dkY(e), m = dkM(e), d = dkD(e);
+    const uniq = a => [...new Set(a)];
+    fillSelect($("e-year"), uniq(ends.map(dkY)).map(yy => ({ v: yy, t: yy })), y);
+    fillSelect($("e-month"), uniq(ends.filter(dk => dkY(dk) === y).map(dkM)).map(i => ({ v: i, t: MONTHS[i] })), m);
+    fillSelect($("e-day"), ends.filter(dk => dkY(dk) === y && dkM(dk) === m).map(dk => ({ v: dkD(dk), t: String(endDay(dk)) })), d);
+  }
+}
+
+function renderMain() {
+  const { view, s, e } = state, V = VIEWS[view];
+  $("view-title").textContent = V.title;
+  $("view-desc").textContent = V.desc;
+  $("rules").innerHTML = V.rules.map(r => `<li>${r}</li>`).join("");
+
+  $("sum-start").textContent = fmtStart(s);
+  $("sum-end").textContent = fmtEnd(e);
+  const n = e - s + 1;
+  $("sum-len").textContent = LENGTHS[n] ? `${LENGTHS[n]}` : `${n} dekads`;
+  $("sum-len").title = `${days(s, e)} days`;
+
+  const pct = dk => (dk / TOTAL_DK) * 100;
+  $("tl-sel").style.left = pct(s) + "%";
+  $("tl-sel").style.width = pct(n) + "%";
+  $("tl-future").style.left = pct(MAX_DK + 1) + "%";
+
+  $("log").innerHTML = log.length
+    ? log.map(l => `<li><span class="tag ${l.kind}">${{ snap: "Auto-adjusted", ok: "Unchanged", user: "User" }[l.kind]}</span>
+        <div>${l.text}<div class="when">${l.t}</div></div></li>`).join("")
+    : `<li class="empty">Nothing yet. Switch tabs or change a date to see how the range is adjusted.</li>`;
+
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-selected", String(t.dataset.view === view)));
+}
+
+function buildTimeline() {
+  const years = range(MIN_YEAR, dkY(MAX_DK));
+  $("tl-bar").insertAdjacentHTML("afterbegin", years.slice(1).map(y =>
+    `<div class="tl-year" style="left:${((y - MIN_YEAR) * 36 / TOTAL_DK) * 100}%"></div>`).join(""));
+  $("tl-labels").innerHTML = years.map(y =>
+    `<span style="left:${((y - MIN_YEAR) * 36 / TOTAL_DK) * 100}%">${y}</span>`).join("");
+}
+
+function render() { renderStart(); renderEnd(); renderMain(); }
+
+// ---------- Wiring ----------
+document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => enterView(t.dataset.view)));
+["s-year", "s-month", "s-day"].forEach(id => $(id).addEventListener("change", onStartChange));
+["e-year", "e-month", "e-day"].forEach(id => $(id).addEventListener("change", onEndChange));
+
+buildTimeline();
+render();
+</script>

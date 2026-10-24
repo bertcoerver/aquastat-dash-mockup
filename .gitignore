@@ -1,0 +1,25 @@
+# Dependencies and build output
+node_modules/
+dist/
+.vite/
+
+# Generated vector tiles ({z}/{x}/{y}.pbf); `npm run tiles` rebuilds them.
+*.pbf
+**/public/tiles/
+
+# Source boundaries (~150 MB each) and their derived lines; `npm run tiles` re-downloads them.
+**/data/*.geojson
+
+# iCloud Drive sync conflict copies ("file 2.js", "dir 2/")
+* [0-9].*
+* [0-9]/
+
+# OS / editor
+.DS_Store
+.idea/
+*.swp
+
+# Env and logs
+.env
+.env.*
+*.log
