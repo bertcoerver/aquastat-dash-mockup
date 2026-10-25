@@ -189,9 +189,10 @@ water-portal/
   onto L2's grid with the Local panel's lean COG reader (one tile of it, not every
   overview's tags). L1 and L2 differ (L2 averaged 3×3 against L1: a median
   difference of 0.1–0.4 mm/day in July 2025, and a bias in places), so colours can
-  shift at the switch. The Local panel's time series read L2 at a point in its
-  countries where L2 has a value; the legend and panel say which pixel size. The
-  basin statistics stay L1 (precomputed zonal statistics).
+  shift at the switch. The Local panel's time series stay L1 (a series from L2's
+  512-pixel tiles is 70 MB against 20 MB, for the same time; FAO's zonalstats API
+  would be 113 KB but 14–20 s with nothing shown until the end), as do the basin
+  statistics (precomputed zonal statistics).
 - **Any range in the Local view** is a sum of published rasters with signs, e.g.
   Feb–Nov 2025 = `A[2025] − M[2025-01] − M[2025-12]`
   ([src/map/layers/wapor-plan.ts](src/map/layers/wapor-plan.ts)). Of the possible

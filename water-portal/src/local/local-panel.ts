@@ -6,7 +6,7 @@
  * the years. The series fills in as it's read, the selected period first.
  */
 import { initTimeseries } from "../basin/timeseries";
-import { fmtArea, unitFactor, waporPixel, waporUnit, waporUnitsFor, waporVariable, type WaporUnits, type WaporVariable } from "../map/layers/wapor";
+import { fmtArea, unitFactor, waporUnit, waporUnitsFor, waporVariable, type WaporUnits, type WaporVariable } from "../map/layers/wapor";
 import type { LngLat } from "../map/places";
 import type { Selection } from "../selection";
 import { MAX_DAY, MAX_DK, WAPOR_MIN_YEAR, addYears, dayDk, dkFirstDay, dkLastDay, dkY, fmtDay, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
@@ -78,12 +78,16 @@ export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: 
     const controller = (loading = new AbortController());
     status = { kind: "loading" };
     render();
+    waporPixelArea(variable, lngLat[1]).then((area) => {
+      if (loading !== controller) return;
+      pixelArea = area;
+      render();
+    });
     const started = performance.now();
     const before = { ...cogStats };
     const report = (done: boolean) =>
       debug({
         variable: variable.id,
-        level: series?.level,
         lon: lngLat[0],
         lat: lngLat[1],
         dekads: series && `${series.loaded} of ${series.dekads.length}`,
@@ -98,14 +102,6 @@ export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: 
       lngLat,
       controller.signal,
       (next) => {
-        // The first update: the level it's read from is known, so its pixel's size.
-        if (!series) {
-          waporPixelArea(variable, lngLat[1], next.level).then((area) => {
-            if (loading !== controller) return;
-            pixelArea = area;
-            render();
-          });
-        }
         series = next;
         scheduleRender();
       },
@@ -167,7 +163,7 @@ export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: 
         color: lineColor(variable),
       });
       $("lp-bars-caption").textContent =
-        `Each bar is total ${num.short} over total ${den.short} for the same days in that year, in the ${waporPixel(variable, series?.level ?? "L1")} pixel at this point. ` +
+        `Each bar is total ${num.short} over total ${den.short} for the same days in that year, in the ${variable.pixel} pixel at this point. ` +
         "The dashed line is the average of the years that are over, the band ± one standard deviation. " +
         (variable.ratioMin ? `None where ${den.short} averages under ${variable.ratioMin} ${den.unit}. ` : "") +
         "Hover a bar to read it, click it to select its days.";
@@ -198,7 +194,7 @@ export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: 
       windows: total && days ? yearlyWindows(days) : undefined,
     });
     const record = `(${fmtStart(dekads[0])} – ${fmtEnd(dekads[dekads.length - 1])})`;
-    const where = `in the ${waporPixel(variable, series.level)} pixel at this point` + (units.pixel ? ` (${pixelArea ? fmtArea(pixelArea) : "area not known yet"})` : "");
+    const where = `in the ${variable.pixel} pixel at this point` + (units.pixel ? ` (${pixelArea ? fmtArea(pixelArea) : "area not known yet"})` : "");
     // A ratio's parts: "NPP over AETI".
     const [num, den] = (variable.parts ?? []).map((p) => waporVariable(p.id).short);
     caption.textContent =

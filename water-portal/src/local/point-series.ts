@@ -4,16 +4,14 @@
  * (PCP − AETI) is made the same way at the point, each part read on its own grid; a
  * ratio (WP: NPP over AETI) keeps its parts too, so totals can be made of each.
  *
- * Where WaPOR has level 2 (100 m), the series is read from it: if the point is in L2's
- * countries (see wapor-l2.ts) and L2 has a value there in the latest dekad. Otherwise
- * from L1. A variable made from others reads its parts without L2 from L1 (PCP).
+ * Always from L1 (300 m), even where the map shows L2 (100 m): a series from L2's
+ * 512-pixel tiles is 70 MB, from L1's about 20 MB, for about the same time.
  *
  * The dekads in the selected period are read first, then outwards from it: the period
  * is asked for again at each dekad, so a period chosen while it loads goes first too.
  */
 import type { LngLat } from "../map/places";
-import { pixelArea, waporAvailable, waporDekadUrl, waporHasL2, waporVariable, type WaporLevel, type WaporVariable } from "../map/layers/wapor";
-import { inL2 } from "../map/layers/wapor-l2";
+import { pixelArea, waporAvailable, waporDekadUrl, waporVariable, type WaporLevel, type WaporVariable } from "../map/layers/wapor";
 import { MAX_DK, WAPOR_MIN_YEAR, mk } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
 import { cogPixel, cogPixelSize } from "./cog-pixel";
@@ -21,8 +19,6 @@ import { cogPixel, cogPixelSize } from "./cog-pixel";
 export interface PointSeries {
   variable: WaporVariable;
   lngLat: LngLat;
-  /** The level it's read from. */
-  level: WaporLevel;
   /** Every dekad from WaPOR's first to its latest published one. */
   dekads: number[];
   /** Per day, in the variable's unit; NaN: no data there, or not read yet. */
@@ -41,13 +37,6 @@ export async function waporPixelArea(variable: WaporVariable, lat: number, level
   const grid = waporVariable(variable.grid ?? variable.id);
   const size = await cogPixelSize(waporDekadUrl(grid, mk(WAPOR_MIN_YEAR, 0, 0), level)).catch(() => null);
   return size && pixelArea(size, lat);
-}
-
-/** The level to read a point's series from: L2 if it has a value there in dekad `dk`. */
-async function pointLevel(variable: WaporVariable, [lon, lat]: LngLat, dk: number, signal: AbortSignal): Promise<WaporLevel> {
-  if (!waporHasL2(variable) || !inL2(lon, lat)) return "L1";
-  const grid = waporVariable(variable.grid ?? variable.id);
-  return (await cogPixel(waporDekadUrl(grid, dk, "L2"), [lon, lat], signal)) === null ? "L1" : "L2";
 }
 
 /** Dekads read at the same time (the bucket speaks HTTP/2; each is a few requests in turn). */
@@ -70,12 +59,11 @@ export async function loadPointSeries(
   // The latest dekads are published some time after: up to the last of every part.
   let last = MAX_DK;
   while (last > first && !(await Promise.all(parts.map((p) => waporAvailable(waporDekadUrl(p.variable, last))))).every(Boolean)) last--;
-  const level = await pointLevel(variable, lngLat, last, signal);
   signal.throwIfAborted();
 
   const dekads = Array.from({ length: last - first + 1 }, (_, i) => first + i);
   const none = () => new Float64Array(dekads.length).fill(Number.NaN);
-  const series: PointSeries = { variable, lngLat, level, dekads, values: none(), loaded: 0, ...(variable.ratio ? { ratio: { num: none(), den: none() } } : {}) };
+  const series: PointSeries = { variable, lngLat, dekads, values: none(), loaded: 0, ...(variable.ratio ? { ratio: { num: none(), den: none() } } : {}) };
   onUpdate(series);
 
   // The next dekad to read: the unread one nearest the period (the earliest on a tie).
@@ -100,7 +88,7 @@ export async function loadPointSeries(
   async function loader() {
     while (left > 0) {
       const i = next();
-      const raw = await Promise.all(parts.map((p) => cogPixel(waporDekadUrl(p.variable, dekads[i], level), lngLat, signal)));
+      const raw = await Promise.all(parts.map((p) => cogPixel(waporDekadUrl(p.variable, dekads[i]), lngLat, signal)));
       signal.throwIfAborted();
       const value = (k: number) => (raw[k] === null ? Number.NaN : parts[k].sign * parts[k].variable.scale * raw[k]!);
       if (series.ratio) {
