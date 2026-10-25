@@ -19,6 +19,8 @@ export type AetiRampProps = {
   c4: Vec3;
   /** Hide pixels whose NDVI quality (in color.g) is a longer gap than this; -1: none. */
   maxGap: number;
+  /** 1: negative values are shown too (a signed variable); 0: dropped. */
+  signed: number;
 };
 
 const rgb = (hex: string): Vec3 => {
@@ -26,7 +28,7 @@ const rgb = (hex: string): Vec3 => {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 };
 
-export const rampProps = ({ quantities: q, colors: c }: WaporRamp, maxGap: number | null = null): AetiRampProps => ({
+export const rampProps = ({ quantities: q, colors: c }: WaporRamp, maxGap: number | null = null, signed = false): AetiRampProps => ({
   q0123: [q[0], q[1], q[2], q[3]],
   q4: q[4],
   c0: rgb(c[0]),
@@ -35,6 +37,7 @@ export const rampProps = ({ quantities: q, colors: c }: WaporRamp, maxGap: numbe
   c3: rgb(c[3]),
   c4: rgb(c[4]),
   maxGap: maxGap ?? -1,
+  signed: signed ? 1 : 0,
 });
 
 const MODULE_NAME = "aetiRamp";
@@ -42,7 +45,7 @@ const MODULE_NAME = "aetiRamp";
 /**
  * Colours a single-band WaPOR raster, which MultiCOGLayer puts in color.r as raw
  * values: linear between the stops, clamped outside them. Nodata (-9999), any other
- * negative value and NaN are dropped.
+ * negative value and NaN are dropped; a signed variable's negative values are kept.
  *
  * With a quality mask, color.g holds L1-QUAL-NDVI-D: dekads since the last valid
  * observation, as a byte read normalised to 0-1. Pixels with a longer gap are dropped,
@@ -60,6 +63,7 @@ uniform ${MODULE_NAME}Uniforms {
   vec3 c3;
   vec3 c4;
   float maxGap;
+  float signed;
 } ${MODULE_NAME};
 `,
   inject: {
@@ -77,7 +81,7 @@ vec3 aetiRamp_color(float v) {
     "fs:DECKGL_FILTER_COLOR": /* glsl */ `
   float value = color.r;
   // Also catches NaN, which fails every comparison.
-  if (!(value >= 0.0)) discard;
+  if (!(value >= 0.0) && !(${MODULE_NAME}.signed > 0.5 && value < 0.0)) discard;
   if (${MODULE_NAME}.maxGap >= 0.0 && floor(color.g * 255.0 + 0.5) > ${MODULE_NAME}.maxGap) discard;
   color = vec4(aetiRamp_color(value), 1.0);
 `,
@@ -91,6 +95,7 @@ vec3 aetiRamp_color(float v) {
     c3: "vec3<f32>",
     c4: "vec3<f32>",
     maxGap: "f32",
+    signed: "f32",
   },
   getUniforms: (props: Partial<AetiRampProps>) => props,
 } as const satisfies ShaderModule<AetiRampProps>;

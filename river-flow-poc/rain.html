@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Rain PoC</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <aside class="panel">
+      <h1>Rainfall</h1>
+      <p class="lede">
+        WaPOR's dekadal precipitation as rain falling on a tilted map, and the rivers carrying it away — proof of
+        concept. <a href="./">River flow</a>
+      </p>
+
+      <label class="field">
+        <span>Year</span>
+        <select id="year"></select>
+      </label>
+      <p id="status" class="note"></p>
+
+      <section>
+        <h2>Precipitation</h2>
+        <div id="legend">
+          <div id="ramp" class="ramp" aria-hidden="true"></div>
+          <div class="ramp-ticks"><span>0</span><span>2</span><span>6</span><span>15</span><span>30 mm/day</span></div>
+        </div>
+        <p class="note">
+          Dekad means (WaPOR v3 L1 PCP, 0.2° overview). More rain, more drops: a drop falls where a random number is
+          below the rain there. Drag with the right mouse button (or ctrl) to tilt and turn.
+        </p>
+      </section>
+
+      <section class="controls">
+        <label><span>Drops</span><input id="count" type="range" min="20000" max="1000000" step="20000" value="300000" /></label>
+        <label><span>Fall time</span><input id="period" type="range" min="0.4" max="3" step="0.1" value="1.2" /></label>
+        <label><span>Height</span><input id="height" type="range" min="60" max="600" step="20" value="140" /></label>
+        <label><span>Wind</span><input id="wind" type="range" min="0" max="0.6" step="0.02" value="0.12" /></label>
+        <label><span>Splashes</span><input id="splash" type="checkbox" checked /></label>
+        <label><span>Ground colour</span><input id="ground" type="checkbox" checked /></label>
+        <label><span>Rivers</span><input id="rivers" type="checkbox" checked /></label>
+        <p id="stats" class="note"></p>
+      </section>
+
+      <footer>
+        <p class="note">
+          Precipitation: WaPOR v3 L1 PCP (dekadal, from CHIRPS), FAO. Rivers: FAO rivers_world_47950, discharge from
+          upstream area (proxy). Relief: Mapzen terrain tiles (AWS open data).
+        </p>
+      </footer>
+    </aside>
+
+    <div id="timeline" class="timeline">
+      <button id="play" type="button" aria-label="Play">▶</button>
+      <input id="dekad" type="range" min="0" max="35" step="1" value="0" aria-label="Dekad" />
+      <output id="date"></output>
+    </div>
+
+    <script type="module" src="/src/rain-main.ts"></script>
+  </body>
+</html>

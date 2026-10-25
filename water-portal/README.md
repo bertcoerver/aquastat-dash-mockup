@@ -7,14 +7,17 @@ on top. In the Local view, the map shows WaPOR's actual evapotranspiration for a
 selected range, to the day, added up from WaPOR's dekadal, monthly and annual rasters, and a play
 button moves the range forward as an animation; for a single dekad, a slider in its
 legend hides pixels whose
-NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, selecting a sub-basin runs FAO's water balance
-model for it and everything upstream of it: the map colours those sub-basins by precipitation,
-evapotranspiration, discharge or storage change over the selected range, and a panel shows its
-time series and a Sankey diagram of the network's water balance. Below that, charts after FAO's
-Water Portal rank the world's major basins and sub-basins (or the selected major basin's
+NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, charts after FAO's
+Water Portal rank the world's major basins (or the selected major basin's
 sub-basins) by precipitation minus evapotranspiration, evapotranspiration and share of
 precipitation over the range, with the monthly cycle and, for a basin, precipitation against
-evapotranspiration per sub-basin. In the Country view, a panel
+evapotranspiration per sub-basin; the legend's title switches between the charts' maps and the
+discharge and storage change from FAO's water balance model (precomputed; per major basin, or per
+sub-basin of the selected one), and the range ends at the model's latest dekad. The model's own panel (a sub-basin and
+everything upstream of it, with its time series and a Sankey diagram) is in the code but switched
+off for now (`MODEL_SHOWN` in
+`src/basin/water-balance.ts`); until then, picking a sub-basin, by name or on the map, selects
+its major basin. In the Country view, a panel
 shows FAO AQUASTAT statistics for the selected country (or the World) in four topics (SDG 6.4,
 water resources, water use, irrigation): number tiles and charts, each with a map that goes with
 it. Hovering a tile or chart previews its map, clicking pins it (Escape unpins), and hovering a
@@ -52,7 +55,8 @@ water-portal/
 ├── vite.config.ts          Dev server / build settings (Vite)
 ├── public/                 Copied as-is into the site
 │   ├── data/               Country, major basin and sub-basin lists (name, ID, bounding
-│   │                       box; for sub-basins also their major basin, where they drain and area)
+│   │   │                   box; for sub-basins also their major basin, where they drain and area)
+│   │   └── model/          Precomputed Q and ΔS (not in git; see Notes: the water balance model)
 │   └── tiles/              Vector tiles ({z}/{x}/{y}.pbf)
 │       ├── m49/            Country areas
 │       └── borders/        Country borders and coastlines (UN boundary lines)
@@ -80,12 +84,13 @@ water-portal/
     │       ├── basins.ts     SDG 6 major basins and sub-basins: areas + outlines (sub-basins only shade the hovered one and those upstream)
     │       ├── water.ts      Lakes (HydroLAKES) and rivers
     │       ├── wapor.ts      WaPOR v3 ETIa for a range (Local view): one COG or a sum
+    │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
     │       └── marker.ts     The click marker
     ├── basin/              Basin view: the water balance of the selected sub-basin
-    │   ├── calc_runoff.sql The model (copy of fao-wapor-discharge's sql/calc_runoff.sql)
-    │   ├── model.ts        Runs it in BigQuery for a network; period means
+    │   ├── calc_runoff.js  The model (copy of fao-wapor-discharge's js/calc_runoff.js)
+    │   ├── model.ts        Loads the precomputed Q and ΔS; for the panel, fetches a network's PCP/AETI (BigQuery) and runs the model
     │   ├── variables.ts    PCP / AETI / Q / ΔS: labels, units, colour scales
     │   ├── timeseries.ts   Time series charts (drag to choose the period)
     │   ├── sankey.ts       Sankey diagram of the network's water balance
@@ -171,6 +176,22 @@ water-portal/
   newest periods are published with a delay; the legend then says so. The files are
   written with `INTERLEAVE=BAND`, which `MultiCOGLayer` 0.9 rejects even for one band;
   [patches/](patches/) fixes that and is applied by `npm install` (patch-package).
+- **WaPOR level 2** (`L2-AETI-D`, `-M`, `-A`, `L2-T-`, `-E-`, `-I-`, `-NPP-`,
+  `L2-QUAL-NDVI-D`: 100 m) covers Africa, the Near East, Pakistan, Afghanistan, Sri
+  Lanka and Colombia, for the same periods as L1 and published in step with it. Each
+  file spans 60° N – 60° S on a grid three times as fine as L1's, lined up with it, with
+  nodata outside those countries (tiles of ~2 KB, not sparse ones). The map shows it
+  only where L1 runs out, from about zoom 9 (`L2_FROM` in
+  [wapor.ts](src/map/layers/wapor.ts)), and only when the view reaches its countries
+  ([wapor-l2.ts](src/map/layers/wapor-l2.ts): a 1° footprint). So a view loads one
+  level or the other, never both, and an L2 view costs about what an L1 view at
+  zoom 8 does. Across a border, pixels L2 has no data for are filled from L1, sampled
+  onto L2's grid with the Local panel's lean COG reader (one tile of it, not every
+  overview's tags). L1 and L2 differ (L2 averaged 3×3 against L1: a median
+  difference of 0.1–0.4 mm/day in July 2025, and a bias in places), so colours can
+  shift at the switch. The Local panel's time series read L2 at a point in its
+  countries where L2 has a value; the legend and panel say which pixel size. The
+  basin statistics stay L1 (precomputed zonal statistics).
 - **Any range in the Local view** is a sum of published rasters with signs, e.g.
   Feb–Nov 2025 = `A[2025] − M[2025-01] − M[2025-12]`
   ([src/map/layers/wapor-plan.ts](src/map/layers/wapor-plan.ts)). Of the possible
@@ -219,15 +240,32 @@ water-portal/
   hidden. Moving the map loads the frames ahead again for the new view; any change of
   range or view stops playback. Up to 16 requests to the bucket at once (it speaks
   HTTP/2), instead of deck.gl-raster's default of 6.
-- **The water balance model** (Basin view) is
-  [fao-wapor-discharge](../../fao-wapor-discharge)'s `sql/calc_runoff.sql`, copied to
-  [src/basin/calc_runoff.sql](src/basin/calc_runoff.sql) (copy it again when it changes). It
-  runs on FAO's read-only BigQuery proxy (`data.apps.fao.org/api/v2/bigquery`, which sends
-  CORS headers), so [src/basin/model.ts](src/basin/model.ts) inlines the network's routes
-  instead of reading a routes table, and returns one row per sub-basin with arrays (the proxy
-  returns at most 50,000 rows). A run takes about 5 s for a small network and 20 s for the
-  biggest (Lower Mississippi, 766 sub-basins, ~7 MB); results are kept for the session. The
-  network is the selected sub-basin and everything upstream of it, as in FAO's
+- **The water balance model's maps** (Q and ΔS in the Basin view's legend) read files
+  precomputed by [fao-wapor-discharge](../../fao-wapor-discharge)'s
+  `python -m fao_wapor_discharge.portal --sub-basins public/data/sub-basins.json --out-dir …`,
+  which downloads all PCP and AETI, runs the model for every outlet network (as its
+  pipeline does) and writes `latest.json` (the dekads covered), `majors.json` (per major
+  basin: Q at its outlets, ΔS summed) and `major/<id>.json` (per sub-basin). Meant to run
+  after each new dekad (a scheduled job, not set up yet); a full run, not an append,
+  since a new calendar year moves the model's warmup and changes earlier dekads. The
+  files are looked for in `public/data/model/` (not in git: ~80 MB), or at
+  `VITE_MODEL_FILES` (a URL ending in `/`, e.g. a bucket) when set at build time.
+  `latest.json` is fetched afresh each time; the others carry its `updated` time in their
+  URL, so browsers don't keep old copies. The Basin view's range can't go past the last
+  dekad in `latest.json` (hatched on the slider), so a failed or late update shows as a
+  shorter range rather than gaps; without the files the range isn't limited and Q and ΔS
+  say they couldn't be loaded.
+- **The water balance panel** (switched off for now) runs the model itself:
+  [fao-wapor-discharge](../../fao-wapor-discharge)'s `js/calc_runoff.js`, a JavaScript port
+  of its Python `calc_runoff` that gives identical numbers (checked bit for bit by its
+  `examples/verify_js_runoff.py`), copied with its `.d.ts` to
+  [src/basin/calc_runoff.js](src/basin/calc_runoff.js) (copy them again when they change).
+  [src/basin/model.ts](src/basin/model.ts) fetches the network's dekadal PCP and AETI from
+  FAO's read-only BigQuery proxy (`data.apps.fao.org/api/v2/bigquery`, which sends CORS
+  headers), one row per sub-basin with arrays (the proxy returns at most 50,000 rows), and
+  runs the model in the browser. That takes about 3 s for a small network and 8 s for the
+  biggest (Lower Mississippi, 766 sub-basins, ~11 MB; the model itself ~0.2 s); results are
+  kept for the session. The network is the selected sub-basin and everything upstream of it, as in FAO's
   [WaPOR Discharge](https://storage.googleapis.com/fao-wapor-accounter/wapor-discharge/main.html)
   app, which this view replicates.
 - **Light / dark** follows the operating system setting, both for the top bar and the

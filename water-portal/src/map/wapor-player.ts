@@ -12,7 +12,7 @@
  */
 import { MAX_DAY } from "../toolbar/dekads";
 import type { DayRange } from "../toolbar/range-rules";
-import { bufferWapor, checkedWaporPeriod, onWaporView, waporBuffered, type CheckedWaporPeriod } from "./layers/wapor";
+import { bufferWapor, checkedWaporPeriod, onWaporView, waporBuffered, type CheckedWaporPeriod, type WaporVariable } from "./layers/wapor";
 
 export interface PlaybackSettings {
   stepDays: number; // how far each frame moves the range (from the next play)
@@ -57,21 +57,24 @@ export interface WaporPlayer {
 }
 
 /**
- * `getRange` is the range shown when play is pressed; `show` shows a frame (the range
- * on the toolbar and the period on the map); `onState` follows the play button and
- * the buffered part of the slider.
+ * `getRange` and `getVariable` are the range and variable shown when play is pressed;
+ * `show` shows a frame (the range on the toolbar and the period on the map); `onState`
+ * follows the play button and the buffered part of the slider.
  */
 export function initWaporPlayer({
   getRange,
+  getVariable,
   show,
   onState,
 }: {
   getRange: () => DayRange;
+  getVariable: () => WaporVariable;
   show: (range: DayRange, checked: CheckedWaporPeriod) => void;
   onState: (state: PlaybackState) => void;
 }): WaporPlayer {
   const settings = { ...DEFAULT_PLAYBACK };
   let run: {
+    variable: WaporVariable;
     frames: Frame[]; // from the next one to show
     last: DayRange; // of the frames made so far
     end: number; // frames that can be shown (Infinity: not known yet)
@@ -131,7 +134,7 @@ export function initWaporPlayer({
       }
       frame.loading = true;
       try {
-        if (frame.checked === undefined) frame.checked = await checkedWaporPeriod(frame.range);
+        if (frame.checked === undefined) frame.checked = await checkedWaporPeriod(current.variable, frame.range);
         // Not published (yet): playback ends before it.
         if (!frame.checked) {
           current.end = Math.min(current.end, current.frames.indexOf(frame));
@@ -196,6 +199,7 @@ export function initWaporPlayer({
     const rewound = next(range).end > MAX_DAY;
     const from = rewound ? first : next(range);
     const current = {
+      variable: getVariable(),
       frames: [{ range: from, buffered: false }],
       last: from,
       end: Infinity,

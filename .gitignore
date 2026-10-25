@@ -7,6 +7,9 @@ dist/
 *.pbf
 **/public/tiles/
 
+# Precomputed water balance model output (fao_wapor_discharge.portal; see the README).
+**/public/data/model/
+
 # Source boundaries (~150 MB each) and their derived lines; `npm run tiles` re-downloads them.
 **/data/*.geojson
 

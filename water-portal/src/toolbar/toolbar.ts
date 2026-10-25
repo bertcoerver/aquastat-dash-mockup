@@ -1,10 +1,11 @@
 /*
  * The view tabs (Country / Basin / Local), the date range slider and, in the Local view,
  * the play button. Clicking a date above the slider picks it from a calendar
- * (date-picker.ts). The markup lives in index.html; this module keeps the
- * range valid for the active view (see range-rules.ts) and shows when the system, not
- * the user, moved an end. The tabs sit at the top of the view's own pane (its
- * .tabs-slot): the statistics panel, or in the Local view the point pane.
+ * (date-picker.ts); clicking the length changes it (length-picker.ts). The arrows
+ * either side of the dates move the range a year. The markup lives in index.html; this module keeps the range valid for the active view (see
+ * range-rules.ts) and shows when the system, not the user, moved an end. The tabs sit
+ * at the top of the view's own pane (its .tabs-slot): the statistics panel, or in the
+ * Local view the point pane.
  */
 import type { PlaybackState } from "../map/wapor-player";
 import {
@@ -12,13 +13,17 @@ import {
   daysOfDekads,
   enterView,
   initialRange,
+  limitBasinDekads,
   limitCountryYears,
+  shiftYears,
   type DayRange,
   type DekadRange,
   type View,
 } from "./range-rules";
 import { initDatePicker } from "./date-picker";
+import { initLengthPicker } from "./length-picker";
 import { initRangeSlider, type Grip } from "./range-slider";
+import { slideSelection } from "../panels/segmented";
 
 export interface ToolbarState {
   view: View;
@@ -46,6 +51,8 @@ export interface Toolbar {
   setPlayback(playback: PlaybackState): void;
   /** Country view: the latest year with data; later years can't be selected. */
   setCountryLastYear(year: number): void;
+  /** Basin view: the latest dekad with model output; later dekads can't be selected. */
+  setBasinLastDekad(dk: number): void;
 }
 
 /**
@@ -80,14 +87,34 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
   }
   const slider = initRangeSlider(() => state, onInput);
   const picker = initDatePicker(() => state, onInput);
+  // A typed length moves the end; flag the start if it had to move too (to fit).
+  const lengthPicker = initLengthPicker(
+    () => state,
+    (next, how) => update(next, { start: how === "length" && next.start !== state.range.start }),
+  );
+
+  // The arrows: the same dates a year earlier or later.
+  const shifts = [
+    [document.getElementById("shift-back") as HTMLButtonElement, -1],
+    [document.getElementById("shift-ahead") as HTMLButtonElement, 1],
+  ] as const;
+  for (const [btn, n] of shifts) {
+    btn.addEventListener("click", () => {
+      const next = shiftYears(state.view, state.range, n);
+      if (next) update(next, {});
+    });
+  }
 
   const play = document.getElementById("play-button")!;
   play.addEventListener("click", () => onPlay?.());
 
   const tabs = document.querySelector<HTMLElement>(".tabs")!;
+  slideSelection(tabs);
   function render() {
     slider.render(state);
     picker.render();
+    lengthPicker.render();
+    for (const [btn, n] of shifts) btn.disabled = !shiftYears(state.view, state.range, n);
     play.hidden = state.view !== "local";
     const slot = document.querySelector<HTMLElement>(`.tabs-slot[data-view="${state.view}"]`)!;
     if (tabs.parentElement !== slot) {
@@ -111,6 +138,14 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     });
   }
 
+  /** After `view`'s limits changed: keep its range within them. */
+  function fitLimit(view: View) {
+    const prev = state.range;
+    const next = state.view === view ? enterView(view, prev) : prev;
+    if (next.start === prev.start && next.end === prev.end) return render();
+    update(next, { start: next.start !== prev.start, end: next.end !== prev.end });
+  }
+
   render();
   return {
     state: current(),
@@ -129,10 +164,11 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     },
     setCountryLastYear(year) {
       limitCountryYears(year);
-      const prev = state.range;
-      const next = state.view === "country" ? enterView("country", prev) : prev;
-      if (next.start === prev.start && next.end === prev.end) return render();
-      update(next, { start: true, end: true });
+      fitLimit("country");
+    },
+    setBasinLastDekad(dk) {
+      limitBasinDekads(dk);
+      fitLimit("basin");
     },
   };
 }

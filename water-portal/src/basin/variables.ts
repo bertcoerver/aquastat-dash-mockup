@@ -2,12 +2,15 @@
  * How each model variable is labelled and coloured: on the map, in the legend, in the
  * charts and the Sankey diagram.
  *
- * Map colours run over the 2nd–98th percentile of the sub-basins' values, so one
- * extreme sub-basin doesn't wash out the rest. Discharge uses a log scale: it grows
+ * Map colours run over the 1st–99th percentile of the sub-basins' values (or as picked
+ * in the legend's ramp menu: panels/ramp-menu.ts), so one extreme sub-basin doesn't
+ * wash out the rest. Discharge uses a log scale: it grows
  * by orders of magnitude from headwaters to the outlet. Storage change is centred on
  * zero (red: storage falls, blue: it rises).
  */
+import type { WaporStretch } from "../map/layers/wapor";
 import type { Color } from "../map/theme";
+import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Variable } from "./model";
 
 interface VariableStyle {
@@ -72,12 +75,13 @@ export function colorScale(variable: Variable, values: number[]): ColorScale {
 
 /**
  * A colour scale for any ramp and scale type (also the Country view's maps), fitted to
- * `values`, or spanning `domain` ([low, high]) when given.
+ * `values` without `cut`% at either end, or spanning `domain` ([low, high]) when given.
  */
 export function rampScale(
   style: Pick<VariableStyle, "ramp" | "scale">,
   values: number[],
   domain?: [number, number],
+  cut: WaporStretch = DEFAULT_STRETCH,
 ): ColorScale {
   const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
   const stops = style.ramp.map(hexToColor);
@@ -90,8 +94,9 @@ export function rampScale(
   };
 
   if (!finite.length) return { color: () => null, gradient, ticks: [] };
-  const lo = domain ? domain[0] : quantile(finite, 0.02);
-  const hi = domain ? domain[1] : quantile(finite, 0.98);
+  const q = cut / 100;
+  const lo = domain ? domain[0] : quantile(finite, q);
+  const hi = domain ? domain[1] : quantile(finite, 1 - q);
 
   if (style.scale === "diverging") {
     const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
@@ -105,8 +110,8 @@ export function rampScale(
   if (style.scale === "log") {
     // Values at or below zero (dry sub-basins) get the lowest colour.
     const positive = finite.filter((v) => v > 0);
-    const a = Math.log10(positive.length ? Math.max(quantile(positive, 0.02), 1e-3) : 1e-3);
-    const b = Math.max(Math.log10(positive.length ? quantile(positive, 0.98) : 1), a + 1);
+    const a = Math.log10(positive.length ? Math.max(quantile(positive, q), 1e-3) : 1e-3);
+    const b = Math.max(Math.log10(positive.length ? quantile(positive, 1 - q) : 1), a + 1);
     const t = (v: number) => (Math.log10(Math.max(v, 10 ** a)) - a) / (b - a);
     // Ticks at 1, 2 and 5 × powers of ten; only the powers of ten if that's too many.
     let values: number[] = [];

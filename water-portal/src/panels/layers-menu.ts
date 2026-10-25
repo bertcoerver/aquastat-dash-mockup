@@ -2,11 +2,26 @@
  * The Layers button and its small menu of on/off switches, the theme and the layout.
  * The markup lives in index.html; each layer checkbox names its layer in data-layer.
  * main.ts puts it among the map's controls.
+ *
+ * Each view keeps its own switches: rivers and lakes start off in the Local view (they'd
+ * cover the WaPOR raster), on in the others.
  */
 import type { ToggleableLayer } from "../map/map";
+import type { View } from "../toolbar/range-rules";
 import { resetLayout } from "./floating";
 
-export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boolean) => void) {
+const DEFAULTS: Record<View, Record<ToggleableLayer, boolean>> = {
+  country: { rivers: true, lakes: true },
+  basin: { rivers: true, lakes: true },
+  local: { rivers: false, lakes: false },
+};
+
+export interface LayersMenu {
+  /** Show a view's switches, and its layers on the map. */
+  setView(view: View): void;
+}
+
+export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boolean) => void): LayersMenu {
   const menu = document.getElementById("layers-menu")!;
   const button = document.getElementById("layers-button")!;
   const panel = document.getElementById("layers-panel")!;
@@ -28,8 +43,27 @@ export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boole
     }
   });
 
-  for (const input of panel.querySelectorAll<HTMLInputElement>("input[data-layer]")) {
-    input.addEventListener("change", () => onToggle(input.dataset.layer as ToggleableLayer, input.checked));
+  const visible = structuredClone(DEFAULTS);
+  let view: View | null = null;
+  const inputs = [...panel.querySelectorAll<HTMLInputElement>("input[data-layer]")];
+  for (const input of inputs) {
+    input.addEventListener("change", () => {
+      const layer = input.dataset.layer as ToggleableLayer;
+      if (view) visible[view][layer] = input.checked;
+      onToggle(layer, input.checked);
+    });
   }
   document.getElementById("reset-layout")!.addEventListener("click", resetLayout);
+
+  return {
+    setView(next) {
+      if (next === view) return;
+      view = next;
+      for (const input of inputs) {
+        const layer = input.dataset.layer as ToggleableLayer;
+        input.checked = visible[next][layer];
+        onToggle(layer, input.checked);
+      }
+    },
+  };
 }

@@ -28,16 +28,20 @@
         <svg class="play-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor" /></svg>
         <svg class="pause-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" fill="currentColor" /></svg>
       </button>
-      <!-- Click a date to pick it from a calendar (src/toolbar/date-picker.ts). -->
+      <!-- Click a date to pick it from a calendar (src/toolbar/date-picker.ts), the arrows to
+           move the range a year, the length to type it or snap to a dekad, month or year (src/toolbar/length-picker.ts). -->
       <div class="range-readout">
+        <button class="range-shift" id="shift-back" type="button" aria-label="One year earlier" title="One year earlier">‹</button>
         <button class="range-date" id="start-label" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
         <span class="arrow" aria-hidden="true">→</span>
         <button class="range-date" id="end-label" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
-        <span class="range-len" id="range-len" aria-hidden="true"></span>
+        <button class="range-shift" id="shift-ahead" type="button" aria-label="One year later" title="One year later">›</button>
+        <button class="range-date range-len" id="range-len" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
       </div>
       <div class="slider" id="slider">
         <div class="slider-track" id="slider-track">
-          <div class="slider-unavailable" id="slider-unavailable" hidden></div>
+          <div class="slider-unavailable" id="slider-unavailable-before" hidden></div>
+          <div class="slider-unavailable slider-unavailable-after" id="slider-unavailable-after" hidden></div>
           <div class="slider-buffered" id="slider-buffered" hidden></div>
           <div class="slider-band" id="slider-band"></div>
         </div>
@@ -85,20 +89,26 @@
     </section>
 
     <aside class="legend" id="wapor-legend" hidden>
+      <!-- The variable shown; a menu of the others (src/panels/title-menu.ts). -->
       <div class="legend-title">
-        Actual evapotranspiration<small>WaPOR v3 · ETIa · 300 m</small>
+        <button class="title-menu" id="wapor-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+        <small id="wapor-source"></small>
       </div>
-      <div class="legend-period"><span id="wapor-period"></span><span>mm/day</span></div>
-      <div class="legend-ramp" id="wapor-ramp"></div>
+      <!-- The unit: a menu of per day, month, year or total, per m² or over a pixel (src/map/wapor-legend.ts). -->
+      <div class="legend-period"><span id="wapor-period"></span><button class="title-menu unit-menu" id="wapor-unit"
+          type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span><span
+            class="title-caret" aria-hidden="true"></span></button></div>
+      <!-- The colour ramp; a menu of how much of the values in view it spans (src/map/wapor-legend.ts). -->
+      <button class="legend-ramp ramp-menu" id="wapor-ramp" type="button" aria-haspopup="listbox" aria-expanded="false"
+        aria-label="Colour range"><span class="title-menu-label" hidden></span></button>
       <div class="legend-ticks" id="wapor-ticks" aria-hidden="true"></div>
-      <!-- How much of the values in view the colours span (src/map/wapor-legend.ts). -->
-      <div class="legend-stretch">Colour range<button type="button" id="wapor-stretch"></button></div>
       <div class="legend-status" id="wapor-status" role="status"></div>
       <div class="legend-note" id="wapor-note"></div>
       <!-- Dekads only: hide pixels with a long NDVI gap (src/map/wapor-legend.ts). -->
       <div class="legend-quality" id="wapor-quality" hidden>
         <label class="legend-quality-head" for="wapor-quality-input"
-          title="WaPOR L1-QUAL-NDVI-D: dekads since the last valid satellite observation of a pixel. AETI is modelled from it, so a longer gap means a less reliable value.">
+          title="WaPOR L1-QUAL-NDVI-D: dekads since the last valid satellite observation of a pixel. The variable is modelled from it, so a longer gap means a less reliable value.">
           NDVI quality filter
         </label>
         <input class="legend-quality-input" id="wapor-quality-input" type="range" min="0" step="1" value="0" />
@@ -110,8 +120,12 @@
 
     <!-- Basin view: the water balance of the selected sub-basin (src/basin/water-balance.ts). -->
     <aside class="legend wb-legend" id="wb-legend" hidden>
-      <div class="wb-vars" id="wb-legend-vars" role="radiogroup" aria-label="Map variable"></div>
-      <div class="legend-title" id="wb-legend-title"></div>
+      <!-- The variable shown; a menu of the others (src/panels/title-menu.ts). -->
+      <div class="legend-title">
+        <button class="title-menu" id="wb-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+        <small id="wb-legend-note"></small>
+      </div>
       <div class="legend-period"><span id="wb-legend-period"></span><span id="wb-legend-unit"></span></div>
       <div class="legend-ramp" id="wb-legend-ramp"></div>
       <div class="legend-ticks" id="wb-legend-ticks" aria-hidden="true"></div>
@@ -121,10 +135,21 @@
     <div class="wb-tooltip" id="wb-tooltip" hidden></div>
 
     <aside class="legend cp-legend" id="bs-legend" hidden>
-      <div class="legend-title" id="bs-legend-title"></div>
-      <div class="legend-period"><span id="bs-legend-period"></span><span id="bs-legend-unit"></span></div>
-      <div class="legend-ramp" id="bs-legend-ramp"></div>
+      <!-- What the map shows; a menu of the other maps of the charts (src/panels/title-menu.ts). -->
+      <div class="legend-title">
+        <button class="title-menu" id="bs-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+        <small id="bs-legend-note"></small>
+      </div>
+      <!-- The unit: a menu of per day, month, year or total, per m² or over the basin (src/basin/basin-stats.ts). -->
+      <div class="legend-period"><span id="bs-legend-period"></span><button class="title-menu unit-menu" id="bs-unit"
+          type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span><span
+            class="title-caret" aria-hidden="true"></span></button></div>
+      <!-- The colour ramp; a menu of how much of the values it spans (src/panels/ramp-menu.ts). -->
+      <button class="legend-ramp ramp-menu" id="bs-legend-ramp" type="button" aria-haspopup="listbox" aria-expanded="false"
+        aria-label="Colour range"><span class="title-menu-label" hidden></span></button>
       <div class="legend-ticks" id="bs-legend-ticks" aria-hidden="true"></div>
+      <div class="legend-status" id="bs-legend-status" role="status"></div>
     </aside>
 
     <div class="wb-tooltip" id="bs-tooltip" hidden></div>
@@ -138,6 +163,10 @@
         <small id="cp-legend-note"></small>
       </div>
       <div class="legend-period"><span id="cp-legend-year"></span><span id="cp-legend-unit"></span></div>
+      <!-- A ramp: a menu of how much of the values it spans (src/panels/ramp-menu.ts); or classes. -->
+      <button class="legend-ramp ramp-menu" id="cp-legend-ramp" type="button" aria-haspopup="listbox" aria-expanded="false"
+        aria-label="Colour range" hidden><span class="title-menu-label" hidden></span></button>
+      <div class="legend-ticks" id="cp-legend-ticks" aria-hidden="true" hidden></div>
       <div id="cp-legend-scale"></div>
       <div class="legend-status" id="cp-legend-status" role="status"></div>
     </aside>
@@ -168,7 +197,7 @@
           </div>
           <p id="cp-subtitle"></p>
         </div>
-        <button class="debug-button debug-collapse" id="cp-collapse" aria-expanded="true" aria-controls="cp-body" title="Collapse">–</button>
+        <button class="panel-collapse" type="button" id="cp-collapse" aria-expanded="true" aria-controls="cp-body" title="Collapse">–</button>
       </header>
       <div class="wb-body" id="cp-body">
         <div class="wb-vars cp-topics" id="cp-topics" role="tablist" aria-label="Topic"></div>
@@ -196,7 +225,7 @@
           </div>
           <p id="wb-subtitle"></p>
         </div>
-        <button class="debug-button debug-collapse" id="wb-collapse" aria-expanded="true" aria-controls="wb-body" title="Collapse">–</button>
+        <button class="panel-collapse" type="button" id="wb-collapse" aria-expanded="true" aria-controls="wb-body" title="Collapse">–</button>
       </header>
       <div class="wb-body" id="wb-body">
         <p class="wb-message" id="wb-message"></p>
@@ -225,7 +254,7 @@
             Precipitation (PCP) and actual evapotranspiration (AETI): WaPOR v3 L1, dekadal means per
             sub-basin. Runoff is routed downstream through the sub-basins as linear reservoirs (retention
             factor 0.1 per month) to estimate discharge (Q) and storage change (ΔS); see Hoogeveen et al.
-            (2015). The model runs in BigQuery when a sub-basin is selected.
+            (2015). The model runs in the browser when a sub-basin is selected.
           </p>
         </div>
 
@@ -240,7 +269,7 @@
     </aside>
 
     <!-- Local view: the point, typed or clicked on the map (src/toolbar/place-picker.ts),
-         and, for now, a placeholder where its charts will go. -->
+         and its charts (src/local/local-panel.ts). -->
     <aside class="wb-panel lp-panel" id="lp-panel" aria-label="Local" hidden>
       <header class="wb-head">
         <div class="wb-heading">
@@ -262,13 +291,22 @@
           </div>
           <p id="lp-subtitle">Click the map, or the title to type coordinates.</p>
         </div>
-        <button class="debug-button debug-collapse" id="lp-collapse" aria-expanded="true" aria-controls="lp-body" title="Collapse">–</button>
+        <button class="panel-collapse" type="button" id="lp-collapse" aria-expanded="true" aria-controls="lp-body" title="Collapse">–</button>
       </header>
       <div class="wb-body" id="lp-body">
-        <p class="wb-message">
-          Charts for the selected point will come here: for example its WaPOR evapotranspiration
-          and precipitation over the date range, and how this period compares with other years.
-        </p>
+        <!-- Charts for the point (src/local/local-panel.ts). -->
+        <p class="wb-message" id="lp-message"></p>
+        <!-- A ratio of totals (water productivity): the same days in every year (src/local/year-bars.ts). -->
+        <section class="wb-section lp-section" id="lp-bars" hidden>
+          <div id="lp-bars-chart"></div>
+          <p id="lp-bars-caption"></p>
+        </section>
+        <section class="wb-section lp-section" id="lp-series" hidden>
+          <h3 id="lp-ts-title">Time series</h3>
+          <p id="lp-ts-caption"></p>
+          <div class="wb-overview" id="lp-overview"></div>
+          <div class="wb-zoom" id="lp-zoom"></div>
+        </section>
       </div>
     </aside>
 

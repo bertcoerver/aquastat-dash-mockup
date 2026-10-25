@@ -1,14 +1,18 @@
 import { initBasinStats } from "./basin/basin-stats";
-import { initWaterBalance } from "./basin/water-balance";
+import { loadModelFiles } from "./basin/model";
+import { MODEL_SHOWN, initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
 import {
-  DEFAULT_RAMP,
+  WAPOR_VARIABLES,
   checkedWaporPeriod,
+  onWaporLevel,
   onWaporTile,
   onWaporTiles,
   waporPeriod,
+  waporShownLevel,
   waporViewRange,
   type CheckedWaporPeriod,
+  type WaporLevel,
   type WaporPeriod,
   type WaporStretch,
   type WaporTiles,
@@ -18,6 +22,8 @@ import { createMap } from "./map/map";
 import { placeAt, type LngLat } from "./map/places";
 import { upstreamFinder, type SubBasin } from "./map/sub-basin-network";
 import { NOTHING, selection, type SelectionSource } from "./selection";
+import { initLocalPanel } from "./local/local-panel";
+import { waporPixelArea } from "./local/point-series";
 import { initWaporLegend } from "./map/wapor-legend";
 import { DEFAULT_PLAYBACK, initWaporPlayer, type PlaybackSettings, type PlaybackStatus } from "./map/wapor-player";
 import { debugNumber, initDebugPanel } from "./panels/debug-panel";
@@ -42,11 +48,12 @@ import "./styles/country.css";
 initLoadingIndicator();
 
 const dark = initThemeSwitch();
-const debug = initDebugPanel(["click", "time", "wapor", "hover"]);
+const debug = initDebugPanel(["click", "time", "wapor", "series", "hover"]);
 const round = (v: number) => Math.round(v * 1e4) / 1e4;
 
-// Hover: what's under the pointer, shown in the debug window; in the Basin view the
-// map also shades the sub-basin there and everything upstream of it. Only the latest
+// Hover: what's under the pointer, shown in the debug window; in the Basin view, with
+// the water balance model shown, the map also shades the sub-basin there and
+// everything upstream of it. Only the latest
 // lookup is shown, as tiles can arrive out of order while the pointer moves.
 let view: View = "country";
 let hovered: LngLat | null = null;
@@ -65,7 +72,7 @@ async function showHover(lngLat: LngLat | null) {
   waterBalance.hover(view === "basin" ? (place.subBasin?.id ?? null) : null);
   countryPanel.hover(view === "country" ? (place.country?.m49 ?? null) : null);
   basinStats.hover(view === "basin" ? place : null);
-  setHoveredSubBasin(view === "basin" && place.subBasin ? { id: place.subBasin.id, upstream: upstream! } : null);
+  setHoveredSubBasin(MODEL_SHOWN && view === "basin" && place.subBasin ? { id: place.subBasin.id, upstream: upstream! } : null);
   debug("hover", {
     lon: round(lngLat[0]),
     lat: round(lngLat[1]),
@@ -74,6 +81,10 @@ async function showHover(lngLat: LngLat | null) {
   });
 }
 
+// Sub-basins can only be selected for the water balance model; without it, picking a
+// sub-basin (by name or on the map) selects its major basin.
+const subBasinOf = <T>(subBasin: T | null): T | null => (MODEL_SHOWN ? subBasin : null);
+
 // Selecting a point (map click or typed coordinates) selects everything it lies in.
 let pointWanted: LngLat | null = null;
 async function selectPoint(lngLat: LngLat | null, source: SelectionSource) {
@@ -81,7 +92,7 @@ async function selectPoint(lngLat: LngLat | null, source: SelectionSource) {
   if (!lngLat) return selection.set(NOTHING);
   const place = await placeAt(lngLat);
   if (pointWanted !== lngLat) return;
-  selection.set({ source, lngLat, ...place });
+  selection.set({ source, lngLat, ...place, subBasin: subBasinOf(place.subBasin) });
 }
 
 const waterMap = createMap(
@@ -90,6 +101,7 @@ const waterMap = createMap(
     dark,
     // A click on the ocean (no country or basin) clears the selection.
     onClick: (lngLat, onArea) => selectPoint(onArea ? lngLat : null, "map"),
+    onMarkerDrop: (lngLat) => selectPoint(lngLat, "map"),
     onHover: showHover,
   },
 );
@@ -147,9 +159,9 @@ const picker = initPlacePicker({
       ...NOTHING,
       source: "basin",
       majorBasin: { id: major.id, name: major.name },
-      subBasin: picked.kind === "sub" ? { id: picked.basin.id, name: picked.basin.name } : null,
+      subBasin: picked.kind === "sub" ? subBasinOf({ id: picked.basin.id, name: picked.basin.name }) : null,
     });
-    showBox(picked.basin.bbox);
+    showBox((picked.kind === "sub" && !MODEL_SHOWN ? picked.majorBasin : picked.basin).bbox);
   },
   onPoint(lngLat) {
     selectPoint(lngLat, "coordinates");
@@ -168,6 +180,7 @@ selection.subscribe((s) => {
   waterBalance.setSelection(s);
   countryPanel.setSelection(s);
   basinStats.setSelection(s);
+  localPanel.setSelection(s);
   debug("click", {
     source: s.source,
     lon: s.lngLat && round(s.lngLat[0]),
@@ -219,18 +232,21 @@ const rangeObserver = new ResizeObserver(fitRange);
 for (const pane of graphPanes) rangeObserver.observe(pane);
 window.addEventListener("resize", fitRange);
 
-initLayersMenu(setLayerVisible);
+const layersMenu = initLayersMenu(setLayerVisible);
 
 /**
- * Local view: WaPOR for the selected range, one raster or a sum of them. Waits until
- * the range stops changing (dragging the slider passes many), then checks the rasters
- * have been published before opening them. A dekad comes with its NDVI quality raster
- * when that has been published too, for the quality slider in the legend.
+ * Local view: a WaPOR variable (picked in the legend) for the selected range, one
+ * raster or a sum of them. Waits until the range stops changing (dragging the slider
+ * passes many), then checks the rasters have been published before opening them. A
+ * dekad comes with its NDVI quality raster when that has been published too, for the
+ * quality slider in the legend.
  */
+let waporVariable = WAPOR_VARIABLES[0];
 let waporMaxGap: number | null = null;
 let waporStretch: WaporStretch = 1;
 let stretchTimer = 0; // (before initWaporLegend, which calls onStretch)
 const waporLegend = initWaporLegend({
+  variable: waporVariable,
   onMaxGap(maxGap) {
     waporMaxGap = maxGap;
     setWaporMaxGap(maxGap);
@@ -241,18 +257,45 @@ const waporLegend = initWaporLegend({
     waporStretch = cut;
     stretchWapor();
   },
+  onVariable(variable) {
+    waporVariable = variable;
+    localPanel.setVariable(variable);
+    showPixelArea();
+    player.stop();
+    hideWapor(); // not the last variable's values in this one's colours
+    // Its own colours until its values in view are known.
+    setWaporRamp(variable.ramp);
+    waporLegend.ramp(variable.ramp);
+    showWapor(view === "local" ? waporRange : null);
+  },
+  onUnits: (units) => localPanel.setUnits(units),
 });
-waporLegend.ramp(DEFAULT_RAMP);
-let waporWanted: string | null = null; // the range, as "start-end" (days)
+waporLegend.ramp(waporVariable.ramp);
+// Local view: the legend's variable at the selected point, over WaPOR's whole record.
+const localPanel = initLocalPanel({
+  variable: waporVariable,
+  setRange: (range) => toolbarApi?.setRange(range),
+  setDays: (days) => toolbarApi?.setDays(days),
+  debug: (value) => debug("series", value),
+  // The chart's y axis title goes through the units, as the legend's menu.
+  onUnits(units) {
+    waporLegend.setUnits(units);
+    localPanel.setUnits(units);
+  },
+});
+let waporWanted: string | null = null; // the variable and range, as "AETI start-end" (days)
 let waporShown: WaporPeriod | null = null;
+let levelShown: WaporLevel = "L1"; // (of waporShown, in the legend)
 let waporTimer = 0;
+const waporKey = (range: DayRange) => `${waporVariable.id} ${range.start}-${range.end}`;
 function showWapor(range: DayRange | null) {
-  const wanted = range && `${range.start}-${range.end}`;
+  const wanted = range && waporKey(range);
+  const variable = waporVariable;
   waporWanted = wanted;
   clearTimeout(waporTimer);
   // Before the checks, as if everything were published (always possible: the range
   // doesn't go past the current dekad).
-  const draft = range && waporPeriod(range);
+  const draft = range && waporPeriod(variable, range);
   waporLegend.show(draft, "checking");
   waporLegend.quality(draft?.qualityUrl ? "checking" : null);
   if (!range || !draft) return hideWapor();
@@ -260,7 +303,7 @@ function showWapor(range: DayRange | null) {
     let checked: CheckedWaporPeriod | null = null;
     let failed = false; // couldn't reach the bucket
     try {
-      checked = await checkedWaporPeriod(range);
+      checked = await checkedWaporPeriod(variable, range);
     } catch {
       failed = true;
     }
@@ -281,6 +324,7 @@ function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boo
   waporLegend.quality(quality);
   waporShown = period;
   setWapor(period, () => waporWanted === wanted && waporLegend.show(period, "ready"), seamless);
+  showWaporLevel();
   stretchWapor();
   showWaporDebug();
 }
@@ -297,11 +341,13 @@ function stretchWapor() {
     if (!waporShown || playback !== "stopped") return;
     const range = waporViewRange(waporShown, waporMaxGap, waporStretch);
     if (!range) return;
-    const lo = range[0];
-    const hi = Math.max(range[1], lo + 0.01);
+    let lo = range[0];
+    let hi = Math.max(range[1], lo + 0.01);
+    // A signed variable's colours are centred on 0, as far either way.
+    if (waporShown.variable.signed) [lo, hi] = [-1, 1].map((s) => s * Math.max(-lo, hi, 0.01));
     const ramp: WaporRamp = {
       quantities: [0, 1, 2, 3, 4].map((i) => lo + ((hi - lo) * i) / 4) as WaporRamp["quantities"],
-      colors: DEFAULT_RAMP.colors,
+      colors: waporShown.variable.ramp.colors,
     };
     setWaporRamp(ramp);
     waporLegend.ramp(ramp);
@@ -310,6 +356,31 @@ function stretchWapor() {
 onWaporTile(stretchWapor);
 map.on("moveend", stretchWapor);
 
+// Values over a pixel in the legend: a pixel's area at the centre of the view (it
+// changes with latitude, and is L2's when zoomed in where it has it). Only the latest
+// lookup counts.
+let areaWanted = "";
+const shownLevel = () => (waporShown ? waporShownLevel(waporShown) : "L1");
+function showPixelArea() {
+  if (view !== "local") return;
+  const lat = map.getCenter().lat;
+  const level = shownLevel();
+  const wanted = (areaWanted = `${waporVariable.id} ${lat} ${level}`);
+  waporPixelArea(waporVariable, lat, level).then((area) => areaWanted === wanted && waporLegend.pixelArea(area, lat));
+}
+map.on("moveend", showPixelArea);
+
+// The legend's pixel size follows the level the map shows.
+function showWaporLevel() {
+  const level = shownLevel();
+  waporLegend.level(level);
+  if (level === levelShown) return;
+  levelShown = level;
+  showPixelArea();
+}
+// (The level changes while deck.gl picks tiles.)
+onWaporLevel(() => queueMicrotask(showWaporLevel));
+
 // Playback: each frame sets the range on the toolbar, and its period, loaded ahead, on
 // the map. Any other change of range or view stops it.
 let waporRange: DayRange | null = null;
@@ -317,12 +388,13 @@ let playing = false; // a frame is being shown
 let playback: PlaybackStatus = "stopped";
 const player = initWaporPlayer({
   getRange: () => waporRange!,
+  getVariable: () => waporVariable,
   show(range, checked) {
     playing = true;
     toolbarApi!.setDays(range);
     playing = false;
     clearTimeout(waporTimer);
-    waporWanted = `${range.start}-${range.end}`;
+    waporWanted = waporKey(range);
     showCheckedWapor(checked, true);
   },
   onState(state) {
@@ -359,6 +431,7 @@ function showWaporDebug() {
   cancelAnimationFrame(waporDebugFrame);
   waporDebugFrame = requestAnimationFrame(() => {
     const value = {
+      variable: period.variable.id,
       equation: period.equation,
       note: period.note,
       rasters: period.terms.length,
@@ -378,6 +451,7 @@ function showWaporDebug() {
 function hideWapor() {
   setWapor(null);
   waporShown = null;
+  showWaporLevel();
   waporTiles = null;
   cancelAnimationFrame(waporDebugFrame);
   waporDebugShown = "";
@@ -389,6 +463,7 @@ function onToolbarChange({ view: newView, range, days }: ToolbarState) {
   if (newView !== view) setHoveredSubBasin(null);
   view = newView;
   setView(view);
+  layersMenu.setView(view);
   picker.setView(view);
   waterBalance.setView(view);
   waterBalance.setRange(range);
@@ -396,6 +471,9 @@ function onToolbarChange({ view: newView, range, days }: ToolbarState) {
   countryPanel.setRange(range);
   basinStats.setView(view);
   basinStats.setRange(range);
+  localPanel.setView(view);
+  localPanel.setRange(days);
+  showPixelArea();
   waporRange = days;
   if (!playing) {
     player.stop();
@@ -413,3 +491,9 @@ selection.set(NOTHING);
 debug("hover", null);
 toolbarApi = initToolbar(onToolbarChange, () => player.toggle());
 onToolbarChange(toolbarApi.state);
+// The Basin view's range ends at the latest dekad of the model output. Without the
+// output (not built yet, or unreachable) it isn't limited; Q and ΔS then say so.
+loadModelFiles().then(
+  (files) => toolbarApi!.setBasinLastDekad(files.last),
+  (err: Error) => console.warn(err.message),
+);

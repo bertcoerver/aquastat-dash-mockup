@@ -9,7 +9,7 @@
  * (with Shift a year), Enter or Space picks.
  */
 import { MAX_DAY, MIN_YEAR, MONTHS, dayDk, dayOf, daysInMonth, fmtDay } from "./dekads";
-import { firstDay, isCountryYear, pickDay, type DayRange, type View } from "./range-rules";
+import { firstDay, isCountryYear, lastDay, pickDay, type DayRange, type View } from "./range-rules";
 
 type End = "start" | "end";
 
@@ -73,7 +73,8 @@ export function initDatePicker(getState: () => PickerState, onPick: (next: DayRa
   /** The day with keyboard focus; its month is the one shown. In Country, 1 Jan of a year. */
   let focusDay = 0;
 
-  const limits = (view: View) => ({ lo: firstDay(view), hi: MAX_DAY });
+  // (Country: the year grid greys out the years without data.)
+  const limits = (view: View) => ({ lo: firstDay(view), hi: view === "country" ? MAX_DAY : lastDay(view) });
 
   function show(end: End) {
     const { view, range } = getState();

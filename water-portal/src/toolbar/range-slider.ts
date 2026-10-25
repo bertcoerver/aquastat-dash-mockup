@@ -1,8 +1,8 @@
 /*
  * The date range slider: a track from 1 Jan 2016 to the end of the current dekad,
- * with a handle for each end of the range. The markup lives in index.html. The part
- * the view can't select is hatched: before WaPOR's data in Basin and Local, after the
- * latest AQUASTAT year in Country.
+ * with a handle for each end of the range. The markup lives in index.html. The parts
+ * the view can't select are hatched: before WaPOR's data in Basin and Local, after the
+ * model's output in Basin, after the latest AQUASTAT year in Country.
  *
  * Positions on the track are day BOUNDARIES: boundary b is the start of day b, so a
  * range { start, end } (in days) runs from boundary `start` to boundary `end + 1`, and
@@ -18,12 +18,14 @@
  * While playing, a lighter part of the track after the range shows how far ahead the
  * map has loaded.
  */
-import { MAX_DAY, MIN_YEAR, dayDk, dayOf, dkY, fmtDay } from "./dekads";
+import { MAX_DAY, MIN_YEAR, dayOf, fmtDay } from "./dekads";
 import {
   changeEnd,
   changeStart,
   firstDay,
+  lastDay,
   moveRange,
+  rangeLength,
   stepBoundary,
   unavailable,
   type DayRange,
@@ -47,8 +49,8 @@ const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v
 const $ = (id: string) => document.getElementById(id)!;
 
 /** The range's length: in years in Country (whole years), else in days. */
-function lengthLabel(view: View, { start, end }: DayRange) {
-  const n = view === "country" ? dkY(dayDk(end)) - dkY(dayDk(start)) + 1 : end - start + 1;
+function lengthLabel(view: View, range: DayRange) {
+  const n = rangeLength(view, range);
   return `${n} ${view === "country" ? "year" : "day"}${n === 1 ? "" : "s"}`;
 }
 
@@ -207,15 +209,20 @@ export function initRangeSlider(
       [handles.end, end, fmtDay(end)],
     ] as const) {
       el.setAttribute("aria-valuemin", String(firstDay(view)));
-      el.setAttribute("aria-valuemax", String(MAX_DAY));
+      el.setAttribute("aria-valuemax", String(lastDay(view)));
       el.setAttribute("aria-valuenow", String(value));
       el.setAttribute("aria-valuetext", text);
     }
 
-    const hatched = $("slider-unavailable");
-    const gap = unavailable(view);
-    hatched.hidden = !gap;
-    if (gap) Object.assign(hatched.style, { left: pct(gap.from), width: pct(gap.to - gap.from) });
+    const gaps = unavailable(view);
+    for (const [id, gap] of [
+      ["slider-unavailable-before", gaps.find((g) => g.from === 0)],
+      ["slider-unavailable-after", gaps.find((g) => g.from > 0)],
+    ] as const) {
+      const hatched = $(id);
+      hatched.hidden = !gap;
+      if (gap) Object.assign(hatched.style, { left: pct(gap.from), width: pct(gap.to - gap.from) });
+    }
 
     $("start-label").textContent = fmtDay(start);
     $("end-label").textContent = fmtDay(end);

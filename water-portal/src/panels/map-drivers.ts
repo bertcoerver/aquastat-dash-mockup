@@ -6,8 +6,8 @@
  *   short delay so crossing it on the way elsewhere doesn't repaint the map;
  * - clicking it pins that map, so it stays while the pointer moves on: while a map
  *   is pinned, hovering only previews the rows and series of the pinned driver itself
- *   (clicking another driver re-pins); clicking the pinned one again, or Escape,
- *   unpins it;
+ *   (clicking another driver re-pins); clicking the pinned one again, Escape, or its
+ *   data-unpin button (shown while pinned) unpins it;
  * - inside a driver, the element under the pointer with data-sub (a chart row, a
  *   legend series) is passed along, so the map can pick out that area or series;
  * - data-tip on a chart mark is shown as a tooltip, data-x (a year or month on a
@@ -97,6 +97,12 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
     const target = e.target as Element;
     const csv = target.closest<HTMLElement>("[data-csv]");
     if (csv && onCsv) return onCsv(csv.dataset.csv!);
+    if (target.closest("[data-unpin]")) {
+      setPinned(null);
+      // The pointer is on the card: preview it, as after unpinning by clicking it.
+      preview = driverAt(target);
+      return onChange();
+    }
     const x = target.closest<HTMLElement>("[data-x]")?.dataset.x;
     if (x !== undefined && onX) onX(Number(x));
     const d = driverAt(target);

@@ -12,6 +12,10 @@
  * - hovering a sub-basin of the network on the map shows its value.
  *
  * The markup lives in index.html.
+ *
+ * For now this is switched off (MODEL_SHOWN): selecting a sub-basin doesn't run the
+ * model and the panel shows only the basin statistics (basin-stats.ts). The code and
+ * the markup stay, to be switched back on.
  */
 import type { WaterMap } from "../map/map";
 import type { SubBasin } from "../map/sub-basin-network";
@@ -20,6 +24,7 @@ import type { Selection } from "../selection";
 import { dkM, dkY, endDay, fmtEnd, fmtStart, startDay } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
 import { VARIABLES, coveredRange, periodMeans, runNetwork, type Means, type NetworkResult, type Variable } from "./model";
+import { initTitleMenu } from "../panels/title-menu";
 import { initSankey, type SankeyData } from "./sankey";
 import { initTimeseries } from "./timeseries";
 import { STYLES, colorScale, fmt } from "./variables";
@@ -46,6 +51,9 @@ type Status = { kind: "idle" } | { kind: "loading"; since: number } | { kind: "e
 
 const $ = (id: string) => document.getElementById(id)!;
 
+/** Whether selecting a sub-basin runs the model and shows its results (off for now). */
+export const MODEL_SHOWN = false;
+
 export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Options): WaterBalance {
   const byId = new Map(subBasins.map((b) => [b.id, b]));
   const state = {
@@ -71,18 +79,21 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     showOutlines();
   });
 
-  // --- Variable switches: in the legend and as the panel's number tiles -----------------
-  $("wb-legend-vars").innerHTML = VARIABLES.map(
-    (v) => `<button role="radio" data-var="${v}" title="${STYLES[v].label}">${STYLES[v].short}</button>`,
-  ).join("");
-  for (const container of [$("wb-legend-vars"), $("wb-stats")]) {
-    container.addEventListener("click", (e) => {
-      const button = (e.target as Element).closest<HTMLElement>("[data-var]");
-      if (!button) return;
-      state.variable = button.dataset.var as Variable;
+  // --- Variable switches: the legend's title menu and the panel's number tiles ---------
+  const variableMenu = initTitleMenu(
+    $("wb-variable") as HTMLButtonElement,
+    () => ({ options: VARIABLES.map((v) => ({ id: v, label: STYLES[v].label })), current: state.variable }),
+    (id) => {
+      state.variable = id as Variable;
       render();
-    });
-  }
+    },
+  );
+  $("wb-stats").addEventListener("click", (e) => {
+    const button = (e.target as Element).closest<HTMLElement>("[data-var]");
+    if (!button) return;
+    state.variable = button.dataset.var as Variable;
+    render();
+  });
 
   // Collapse the panel to its title.
   const collapse = $("wb-collapse");
@@ -135,7 +146,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
 
   /** Load (or forget) the network when the selected sub-basin changes in the Basin view. */
   function sync() {
-    const id = state.view === "basin" ? (state.selection?.subBasin?.id ?? null) : null;
+    const id = MODEL_SHOWN && state.view === "basin" ? (state.selection?.subBasin?.id ?? null) : null;
     if (id === state.selected) return;
     state.selected = id;
     state.sankeyHover = null;
@@ -165,6 +176,16 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     legend.hidden = true;
     current = null;
     if (!basinView) {
+      tooltip.hidden = true;
+      map.setSubBasinFills(null);
+      map.setOutlinedSubBasins([]);
+      return;
+    }
+
+    if (!MODEL_SHOWN) {
+      $("wb-message").hidden = true;
+      $("wb-results").hidden = true;
+      $("wb-subtitle").textContent = subtitle(null);
       tooltip.hidden = true;
       map.setSubBasinFills(null);
       map.setOutlinedSubBasins([]);
@@ -232,8 +253,8 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     }
     map.setSubBasinFills({ key: `${result.outlet}:${state.variable}:${range.start}-${range.end}`, colors });
     legend.hidden = state.override;
-    for (const b of legend.querySelectorAll<HTMLElement>("[data-var]")) b.setAttribute("aria-checked", String(b.dataset.var === state.variable));
-    $("wb-legend-title").innerHTML = `${style.label}<small>${style.scale === "log" ? "Log scale · " : ""}Mean per sub-basin</small>`;
+    variableMenu.setLabel(style.label);
+    $("wb-legend-note").textContent = `${style.scale === "log" ? "Log scale · " : ""}Mean per sub-basin`;
     $("wb-legend-period").textContent = period;
     $("wb-legend-unit").textContent = style.unit;
     $("wb-legend-ramp").style.background = scale.gradient;

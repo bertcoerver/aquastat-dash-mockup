@@ -76,20 +76,90 @@
 .wb-panel.collapsed .wb-body {
   display: none;
 }
+/* The heading's rows (view tabs, title, subtitle) in the first column; the collapse
+   button beside the tabs, centred on them. */
 .wb-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 8px;
   padding: 10px 8px 10px 14px;
   border-bottom: 1px solid var(--line);
 }
 .wb-heading {
-  min-width: 0;
+  display: contents;
 }
-/* Local panel: only as tall as its placeholder for now. */
+.wb-heading > * {
+  grid-column: 1;
+}
+.wb-head > .panel-collapse {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+}
+/* The gap under the tabs goes on the next row, so the tabs' row is only as tall as they are. */
+.wb-heading > .tabs-slot:not(:empty) {
+  margin-bottom: 0;
+}
+.wb-heading > .tabs-slot:not(:empty) + * {
+  margin-top: 10px;
+}
+/* Local panel: only as tall as its charts, but no taller than the window: then its
+   body scrolls. */
 .lp-panel {
   bottom: auto;
+  max-height: calc(100vh - 24px - env(safe-area-inset-bottom, 0px));
+}
+.lp-section {
+  margin-top: 0;
+}
+#lp-body > section:not([hidden]) ~ section:not([hidden]) {
+  margin-top: 20px;
+}
+
+/* A ratio by year (year-bars.ts): the selected days' value as a headline, then bars. */
+.yb-period {
+  font-size: 12px;
+  color: var(--muted);
+}
+.yb-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 6px;
+  margin-top: 2px;
+}
+.yb-number {
+  font: 600 30px/1.15 var(--sans);
+  color: var(--ink);
+}
+.yb-unit {
+  font: 400 13px var(--mono);
+  color: var(--muted);
+}
+.yb-vs {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.yb-parts {
+  margin-bottom: 6px;
+  font: 400 11px/1.5 var(--mono);
+  color: var(--muted);
+}
+.yb-chart svg {
+  display: block;
+}
+.yb-target {
+  fill: transparent;
+  cursor: pointer;
+}
+.yb-base {
+  stroke: var(--muted);
+}
+.ts-label.yb-selected {
+  font-weight: 600;
+  fill: var(--ink);
 }
 /* Its title is a button (title-menu, legend.css) at the panel titles' size; the
    point's fields open below it. */
@@ -318,6 +388,36 @@
   color: var(--ink);
   border-color: var(--accent);
 }
+/* Small square buttons: unpin a card (only on the pinned one), collapse a panel. */
+.cp-unpin,
+.panel-collapse {
+  font: 500 14px/1 var(--sans);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px 3px;
+  cursor: pointer;
+}
+.cp-unpin {
+  display: none;
+}
+.panel-collapse {
+  min-width: 24px;
+}
+.cp-card.pinned .cp-unpin {
+  display: inline-block;
+}
+.cp-unpin:hover,
+.panel-collapse:hover {
+  color: var(--ink);
+  border-color: var(--accent);
+}
+.cp-unpin:focus-visible,
+.panel-collapse:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .wb-about {
   margin: 18px 0 0;
   font-size: 11px;
@@ -336,6 +436,36 @@
   cursor: crosshair;
   touch-action: none;
   user-select: none;
+}
+.wb-zoom {
+  position: relative;
+}
+/* The y axis title as a quiet button (Local panel: it goes through the units), standing up. */
+.ts-axis-button {
+  position: absolute;
+  left: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  padding: 0;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font: 400 10px/1 var(--mono);
+  white-space: nowrap;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.ts-axis-button:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.ts-axis-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .wb-overview svg,
 .wb-zoom svg,
@@ -368,6 +498,11 @@
   stroke-width: 1.2;
   stroke-dasharray: 5 3;
 }
+/* ± one standard deviation around the average. */
+.ts-spread {
+  fill: #d62728;
+  fill-opacity: 0.1;
+}
 .ts-zero {
   stroke: var(--muted);
   stroke-width: 1;
@@ -379,6 +514,10 @@
 .ts-dot {
   stroke: var(--surface);
   stroke-width: 1.5;
+}
+.ts-axis {
+  font: 400 10px var(--sans);
+  fill: var(--muted);
 }
 .ts-readout {
   font: 500 11px var(--mono);

@@ -4,8 +4,14 @@
  * - an overview of the whole record, with the selected period as a band. Drag across
  *   it to choose another period, or drag the band to move it; the date range in the
  *   top bar follows.
- * - the selected period up close, with the long-term mean (dashed) for comparison.
- *   Hover it to read single dekads.
+ * - the selected period up close, with the long-term mean (dashed) for comparison, or
+ *   with `seasonal`, each dekad's average over the years (the same dekad of the year),
+ *   with a band of ± one standard deviation over the years. With `daysIn`, it's the
+ *   total since the start of the period instead, from zero; the average and band are
+ *   then those of the same days' totals in every year. Hover it to read single dekads.
+ *
+ * With `windows`, the overview shows totals too: over the same days of every year (the
+ * period, moved by whole years), each from zero; nothing between them.
  *
  * Plain SVG, redrawn from scratch on every update (a few hundred points at most).
  */
@@ -21,11 +27,28 @@ export interface TimeseriesData {
   range: DekadRange | null;
   color: string;
   unit: string;
+  /** The zoomed chart's y axis title (default: the unit). */
+  yLabel?: string;
+  /** Makes the y axis title a button, which runs this; `yLabelHint` is its tooltip. */
+  onYLabel?: () => void;
+  yLabelHint?: string;
+  /** Compare with each dekad of the year's average over the record, instead of the overall mean. */
+  seasonal?: boolean;
+  /**
+   * Show the total since the start of the period: a value is per day, and counts for
+   * this many of each dekad's days (those in the period; 0 outside it).
+   */
+  daysIn?: (dk: number) => number;
+  /**
+   * The overview as totals over windows (the period in each year): the window a dekad
+   * is in (any id) and how many of its days count; null outside them.
+   */
+  windows?: (dk: number) => { window: number; days: number } | null;
 }
 
 const OVERVIEW_H = 64;
 const ZOOM_H = 190;
-const M = { left: 46, right: 10, top: 10, bottom: 22 }; // zoomed chart margins
+const M = { left: 58, right: 10, top: 10, bottom: 22 }; // zoomed chart margins (left: room for the y axis title)
 
 /**
  * `onBrush` runs while a period is dragged on the overview (`done`: the drag ended).
@@ -38,6 +61,16 @@ export function initTimeseries(
 ): (data: TimeseriesData | null) => void {
   let data: TimeseriesData | null = null;
   let hoverIndex: number | null = null;
+
+  // The zoomed chart is redrawn on every hover, so its y axis title, when it's a button,
+  // lives next to it: it keeps focus when clicked.
+  const plot = document.createElement("div");
+  const yButton = document.createElement("button");
+  yButton.type = "button";
+  yButton.className = "ts-axis-button";
+  yButton.hidden = true;
+  yButton.addEventListener("click", () => data?.onYLabel?.());
+  zoom.append(plot, yButton);
 
   // --- Overview: whole record, brushable ---------------------------------------
   function overviewScale() {
@@ -59,9 +92,32 @@ export function initTimeseries(
     const { w, x } = overviewScale();
     const h = OVERVIEW_H;
     const plotH = h - 16;
-    const [lo, hi] = extent(values, 0);
+    // Each dekad's value at its middle, or its window's total at its end, from zero at
+    // the window's start (a gap leaves the rest of that window's total unknown).
+    const pts: { at: number; v: number }[] = [];
+    if (data.windows) {
+      let total = totaller(values);
+      let current: number | null = null;
+      dekads.forEach((dk, i) => {
+        const w = data!.windows!(dk);
+        if (!w) {
+          current = null;
+          return pts.push({ at: dk + 1, v: Number.NaN });
+        }
+        if (w.window !== current) {
+          if (current !== null) pts.push({ at: dk, v: Number.NaN }); // windows that touch
+          pts.push({ at: dk, v: 0 });
+          current = w.window;
+          total = totaller(values);
+        }
+        pts.push({ at: dk + 1, v: total.add(i, w.days) });
+      });
+    } else {
+      dekads.forEach((dk, i) => pts.push({ at: dk + 0.5, v: values[i] }));
+    }
+    const [lo, hi] = extent(Float64Array.from(pts, (p) => p.v), 0);
     const y = (v: number) => 2 + (1 - (v - lo) / (hi - lo || 1)) * (plotH - 4);
-    const line = path(dekads.map((dk, i) => [x(dk + 0.5), y(values[i])]));
+    const line = path(pts.map((p) => [x(p.at), y(p.v)]));
     const years = [];
     for (let yr = dkY(dekads[0]); yr <= dkY(dekads[dekads.length - 1]); yr++) {
       const b = Math.max((yr - dkY(0)) * 36, dekads[0]);
@@ -120,7 +176,8 @@ export function initTimeseries(
 
   // --- Zoomed: the selected period ----------------------------------------------
   function drawZoom() {
-    if (!data?.range) return void (zoom.innerHTML = "");
+    yButton.hidden = !data?.range || !data.onYLabel;
+    if (!data?.range) return void (plot.innerHTML = "");
     const { dekads, values, range, color, unit } = data;
     const w = zoom.clientWidth;
     const h = ZOOM_H;
@@ -128,13 +185,26 @@ export function initTimeseries(
     let to = dekads.findIndex((dk) => dk > range.end);
     if (to < 0) to = dekads.length;
     const longTerm = mean(values);
-    const [lo, hi] = niceExtent(extent(values.subarray(from, to), 0, longTerm));
+    const { daysIn } = data;
+    // What's drawn for each dekad of the period: its value at its middle, or the total
+    // up to its end (a gap leaves the rest of the total unknown).
+    const at = (dk: number) => (daysIn ? dk + 1 : dk + 0.5);
+    const series = new Float64Array(to - from);
+    const total = totaller(values);
+    for (let i = from; i < to; i++) series[i - from] = daysIn ? total.add(i, daysIn(dekads[i])) : values[i];
+    // A total starts from zero at the start of the period.
+    const fromZero = !!daysIn;
+    // The average over the years and its spread, for each dekad of the period.
+    const stats = daysIn ? yearlyTotals(dekads, values, from, to, daysIn) : data.seasonal ? dekadOfYearStats(dekads, values, from, to) : null;
+    const reference = stats?.mean ?? null;
+    const spread = stats ? Array.from(stats.mean, (m, j) => [m - stats.std[j], m + stats.std[j]]).flat() : [];
+    const [lo, hi] = niceExtent(extent(series, 0, ...(reference ?? [longTerm]), ...spread));
     const x = (boundary: number) => M.left + ((boundary - range.start) / (range.end + 1 - range.start)) * (w - M.left - M.right);
     const y = (v: number) => M.top + (1 - (v - lo) / (hi - lo)) * (h - M.top - M.bottom);
 
     const yTicks = niceTicks(lo, hi, 4)
       .map((v) => `<line class="ts-grid" x1="${M.left}" x2="${w - M.right}" y1="${y(v)}" y2="${y(v)}"/>` +
-        `<text class="ts-label" x="${M.left - 5}" y="${y(v) + 3.5}" text-anchor="end">${fmt(v)}</text>`)
+        `<text class="ts-label" x="${M.left - 5}" y="${y(v) + 3.5}" text-anchor="end">${fmtTick(v)}</text>`)
       .join("");
     const xTicks = dekadTicks(range, (w - M.left - M.right) / 70)
       .map((t) => {
@@ -144,28 +214,54 @@ export function initTimeseries(
           `<text class="ts-label" x="${x(t.dk)}" y="${h - 6}" text-anchor="${anchor}">${t.label}</text>`;
       })
       .join("");
-    const pts: [number, number][] = [];
-    for (let i = from; i < to; i++) pts.push([x(dekads[i] + 0.5), y(values[i])]);
+    // A total starts from zero at the start of the period.
+    const points = (vs: Float64Array) => {
+      const pts: [number, number][] = fromZero ? [[x(range.start), y(0)]] : [];
+      vs.forEach((v, k) => pts.push([x(at(dekads[from + k])), y(v)]));
+      return pts;
+    };
+    const pts = points(series);
     const dots = to - from <= 40 ? pts.filter(([, py]) => Number.isFinite(py)).map(([px, py]) => `<circle cx="${px}" cy="${py}" r="2.2" fill="${color}"/>`).join("") : "";
-    const meanLine = Number.isFinite(longTerm)
-      ? `<line class="ts-mean" x1="${M.left}" x2="${w - M.right}" y1="${y(longTerm)}" y2="${y(longTerm)}"/>`
-      : "";
+    // ± one standard deviation, behind the average (from zero for a total).
+    const bandPts: [number, number, number][] = fromZero ? [[x(range.start), y(0), y(0)]] : [];
+    if (stats) stats.mean.forEach((m, j) => bandPts.push([x(at(dekads[from + j])), y(m - stats.std[j]), y(m + stats.std[j])]));
+    const spreadBand = stats ? `<path class="ts-spread" d="${areaPath(bandPts)}"/>` : "";
+    const meanLine = reference
+      ? `<path class="ts-mean" fill="none" d="${path(points(reference))}"/>`
+      : Number.isFinite(longTerm)
+        ? `<line class="ts-mean" x1="${M.left}" x2="${w - M.right}" y1="${y(longTerm)}" y2="${y(longTerm)}"/>`
+        : "";
     const zero = lo < 0 ? `<line class="ts-zero" x1="${M.left}" x2="${w - M.right}" y1="${y(0)}" y2="${y(0)}"/>` : "";
 
     let hover = "";
     if (hoverIndex !== null && hoverIndex >= from && hoverIndex < to) {
       const dk = dekads[hoverIndex];
-      const v = values[hoverIndex];
-      const hx = x(dk + 0.5);
-      const label = `${fmtStart(dk)} – ${fmtEnd(dk)}: ${fmt(v)} ${unit}`;
+      const v = series[hoverIndex - from];
+      const hx = x(at(dk));
+      const label = `${daysIn ? `Up to ${fmtEnd(dk)}` : `${fmtStart(dk)} – ${fmtEnd(dk)}`}: ${fmt(v)} ${unit}`;
       const right = hx > w / 2;
+      const tx = right ? hx - 6 : hx + 6;
+      // The average on a line of its own.
+      const sd = stats?.std[hoverIndex - from] ?? Number.NaN;
+      const average = reference
+        ? `<tspan x="${tx}" dy="14">average: ${fmt(reference[hoverIndex - from])}${Number.isFinite(sd) ? ` ± ${fmt(sd)}` : ""} ${unit}</tspan>`
+        : "";
       hover = `<line class="ts-cursor" x1="${hx}" x2="${hx}" y1="${M.top}" y2="${h - M.bottom}"/>` +
         (Number.isFinite(v) ? `<circle cx="${hx}" cy="${y(v)}" r="3.5" fill="${color}" class="ts-dot"/>` : "") +
-        `<text class="ts-readout" x="${right ? hx - 6 : hx + 6}" y="${M.top + 10}" text-anchor="${right ? "end" : "start"}">${label}</text>`;
+        `<text class="ts-readout" x="${tx}" y="${M.top + 10}" text-anchor="${right ? "end" : "start"}">${label}${average}</text>`;
     }
 
-    zoom.innerHTML = `<svg width="${w}" height="${h}" class="ts-zoom">
-      ${yTicks}${zero}${meanLine}
+    const yLabel = data.yLabel ?? unit;
+    let yTitle = "";
+    if (data.onYLabel) {
+      yButton.textContent = yLabel;
+      yButton.title = data.yLabelHint ?? "";
+      Object.assign(yButton.style, { top: `${M.top}px`, height: `${h - M.top - M.bottom}px` });
+    } else {
+      yTitle = `<text class="ts-axis" transform="translate(11 ${(M.top + h - M.bottom) / 2}) rotate(-90)" text-anchor="middle">${yLabel}</text>`;
+    }
+    plot.innerHTML = `<svg width="${w}" height="${h}" class="ts-zoom">
+      ${yTitle}${yTicks}${zero}${spreadBand}${meanLine}
       <path d="${path(pts)}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/>
       ${dots}${xTicks}${hover}
     </svg>`;
@@ -197,6 +293,86 @@ export function initTimeseries(
     drawOverview();
     drawZoom();
   };
+}
+
+/** A y axis label: large ones as "3.6M", to fit next to the axis title. */
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 3 });
+const fmtTick = (v: number) => (Math.abs(v) >= 1e5 ? compact.format(v) : fmt(v));
+
+/** Mean and sample standard deviation of the finite values (std NaN with fewer than 2). */
+function meanStd(vs: number[]): [number, number] {
+  const ok = vs.filter(Number.isFinite);
+  if (!ok.length) return [Number.NaN, Number.NaN];
+  const m = ok.reduce((a, b) => a + b, 0) / ok.length;
+  const sd = ok.length < 2 ? Number.NaN : Math.sqrt(ok.reduce((a, v) => a + (v - m) ** 2, 0) / (ok.length - 1));
+  return [m, sd];
+}
+
+/** For dekads[from..to): the same dekad of the year's mean and spread over the years. */
+function dekadOfYearStats(dekads: number[], values: Float64Array, from: number, to: number) {
+  const byDekad: number[][] = Array.from({ length: 36 }, () => []);
+  dekads.forEach((dk, i) => byDekad[dk % 36].push(values[i]));
+  const stats = byDekad.map(meanStd);
+  const mean = new Float64Array(to - from);
+  const std = new Float64Array(to - from);
+  for (let i = from; i < to; i++) [mean[i - from], std[i - from]] = stats[dekads[i] % 36];
+  return { mean, std };
+}
+
+/**
+ * For dekads[from..to): the total up to each dekad's end over the same days of every
+ * year in the record (the period moved by whole years, so by 36 dekads), and the spread
+ * of those totals. A year counts as far as its total can be made (no gaps, in the record).
+ */
+function yearlyTotals(dekads: number[], values: Float64Array, from: number, to: number, daysIn: (dk: number) => number) {
+  const index = new Map(dekads.map((dk, i) => [dk, i]));
+  const n = to - from;
+  const totals: number[][] = Array.from({ length: n }, () => []);
+  const years = Math.ceil(dekads.length / 36) + 1;
+  for (let k = -years; k <= years; k++) {
+    const total = totaller(values);
+    for (let j = 0; j < n; j++) {
+      const i = index.get(dekads[from + j] + 36 * k);
+      if (i === undefined) break;
+      const v = total.add(i, daysIn(dekads[from + j]));
+      if (total.gap) break;
+      totals[j].push(v);
+    }
+  }
+  const mean = new Float64Array(n);
+  const std = new Float64Array(n);
+  totals.forEach((t, j) => ([mean[j], std[j]] = meanStd(t)));
+  return { mean, std };
+}
+
+/** A running total of dekads' values, each for some days. After a gap (no value) it stays unknown: `gap`. */
+function totaller(values: Float64Array) {
+  let sum = 0;
+  return {
+    get gap() {
+      return Number.isNaN(sum);
+    },
+    add: (i: number, days: number) => (sum += values[i] * days),
+  };
+}
+
+/** SVG area between two lines ([x, y1, y2] points); gaps (NaN) break it. */
+function areaPath(points: [number, number, number][]) {
+  let d = "";
+  let run: [number, number, number][] = [];
+  const flush = () => {
+    if (run.length > 1) {
+      d += run.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join("");
+      d += run.reverse().map(([x, , y]) => `L${x.toFixed(1)},${y.toFixed(1)}`).join("") + "Z";
+    }
+    run = [];
+  };
+  for (const p of points) {
+    if (Number.isFinite(p[1]) && Number.isFinite(p[2])) run.push(p);
+    else flush();
+  }
+  flush();
+  return d;
 }
 
 /** SVG path through the points; gaps (NaN) break the line. */

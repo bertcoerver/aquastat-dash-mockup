@@ -10,7 +10,9 @@
  * legend maps that series, and clicking a year on a line chart sets the year in the
  * top bar. For a range of years, every value is the mean of its yearly values. Clicking a row of a region (or country) also flies the map there, keeping
  * the selected country in view where both fit (see flyToArea).
- * Hovering a country on the map shows its value.
+ * Hovering a country on the map shows its value. A colour ramp in the legend is a menu
+ * of how much of the countries' values it spans (panels/ramp-menu.ts), unless the map
+ * has a fixed range (a share, 0–100%).
  *
  * The markup lives in index.html.
  */
@@ -18,12 +20,14 @@ import { facing, type WaterMap } from "../map/map";
 import { mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale, type ColorScale } from "../basin/variables";
+import { DEFAULT_STRETCH, fmtStop, initRampMenu } from "../panels/ramp-menu";
 import { dkY } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
-import { TOPICS, type Card, type Ctx, type MapSpec, type Region, type Tile, type TopicDef } from "./cards";
+import { TOPICS, type Card, type Ctx, type MapClass, type MapSpec, type Region, type Tile, type TopicDef } from "./cards";
 import { WORLD, latestYear, loadTopic, periodLabel, type Period, type Topic } from "./data";
 import { initTitleMenu, type MenuOption } from "../panels/title-menu";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
+import { slideSelection } from "../panels/segmented";
 
 export interface CountryInfo {
   regions: { code: number; name: string }[];
@@ -61,6 +65,11 @@ const $ = (id: string) => document.getElementById(id)!;
 /** The period as the subtitle and the map legend show it: "2023", or "2019–2023 average". */
 const shownPeriod = (ctx: Ctx) => (ctx.period.from < ctx.period.to ? `${ctx.label} average` : ctx.label);
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/** The class a value falls in: the first whose upper bound it is below, else the last. */
+const classIndex = (classes: MapClass[], v: number) => {
+  const i = classes.findIndex((k) => v < k.max);
+  return i < 0 ? classes.length - 1 : i;
+};
 
 export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, onLatestYear }: Options): CountryPanel {
   const regionOf = new Map(Object.entries(info.countries).map(([m49, c]) => [Number(m49), c.region]));
@@ -82,6 +91,10 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     /** The map picked in the legend's menu, per topic (else the topic's first tile). */
     chosen: new Map<Topic, Driver>(),
     mapHover: null as number | null,
+    /** Classes (or categories) switched off in the map legend, for the map with this id. */
+    hiddenClasses: { id: "", set: new Set<number>() },
+    /** How much of the countries' values a colour ramp spans (% cut at either end). */
+    stretch: DEFAULT_STRETCH,
   };
 
   const panel = $("cp-panel");
@@ -92,6 +105,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
 
   // --- Topic tabs ------------------------------------------------------------------
   $("cp-topics").innerHTML = TOPICS.map((t) => `<button role="tab" data-topic="${t.id}">${t.label}</button>`).join("");
+  slideSelection($("cp-topics"));
   $("cp-topics").addEventListener("click", (e) => {
     const button = (e.target as Element).closest<HTMLElement>("[data-topic]");
     if (!button) return;
@@ -144,6 +158,22 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     onX: setYear,
     onCsv: download,
     tooltip,
+  });
+
+  // Clicking a class's swatch in the legend hides that class on the map, or shows it again.
+  $("cp-legend-scale").addEventListener("click", (e) => {
+    const swatch = (e.target as Element).closest<HTMLElement>("[data-class]");
+    if (!swatch) return;
+    const set = state.hiddenClasses.set;
+    const index = Number(swatch.dataset.class);
+    if (!set.delete(index)) set.add(index);
+    drawMap();
+  });
+
+  // How much of the countries' values the colours span: a menu on the ramp.
+  const rampMenu = initRampMenu($("cp-legend-ramp") as HTMLButtonElement, "the countries' values", state.stretch, (cut) => {
+    state.stretch = cut;
+    drawMap();
   });
 
   // --- The legend's indicator menu ---------------------------------------------------------
@@ -278,8 +308,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   function cardHtml(card: Card, ctx: Ctx, chart: string, hasCsv: boolean) {
     return `<section class="cp-card" data-driver="${card.id}" tabindex="0" aria-label="${esc(card.title(ctx))}">` +
       `<h3><span>${esc(card.title(ctx))}</span><span class="cp-card-actions">` +
-      `<span class="cp-pin" aria-hidden="true">Pinned</span>` +
       (hasCsv ? `<button class="wb-csv" data-csv="${card.id}">CSV</button>` : "") +
+      `<button class="cp-unpin" data-unpin title="Remove pin" aria-label="Remove pin">×</button>` +
       `</span></h3><p>${esc(card.caption(ctx))}</p>${chart}</section>`;
   }
 
@@ -313,20 +343,22 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const area = areaOf(drivers.preview()) ?? areaOf(state.pinned.get(state.topic));
     // A row of a regional chart picks out its countries.
     const picked = area === null || area === WORLD ? null : new Set(regions.find((r) => r.code === area)?.members ?? [area]);
-    const key = `${spec.id}:${ctx.label}:${area ?? ""}:${ctx.country?.m49 ?? ""}`;
+    // Classes switched off in the legend stay off only while the same map is shown.
+    if (state.hiddenClasses.id !== spec.id) state.hiddenClasses = { id: spec.id, set: new Set(spec.hidden) };
+    const hidden = state.hiddenClasses.set;
+    const key = `${spec.id}:${state.stretch}:${ctx.label}:${area ?? ""}:${ctx.country?.m49 ?? ""}:${[...hidden].sort().join(",")}`;
     const values = countries.map((m49) => spec.value(m49));
     const theme = map.theme;
-    // The selected country keeps its colour even outside the rows' countries.
+    // Countries outside the rows' countries are hidden (plain land), like a class switched
+    // off in the legend. The selected country keeps its colour, in either case.
     const outside = (m49: number) => !!picked && !picked.has(m49) && m49 !== ctx.country?.m49;
-    const dim = (c: Color, m49: number, v: number): Color => {
-      const out = outside(m49) || (spec.emphasis && !spec.emphasis(v));
-      return out ? mix(c, theme.land, 0.78) : c;
-    };
 
     const style = spec.style;
     let scale: ColorScale | null = null;
     const fills = new Map<number, Color>();
     const symbols: { position: [number, number]; radius: number; fill: Color; line: Color }[] = [];
+    // The classes (or categories) of the countries a picked row leaves on the map.
+    const present = picked ? new Set<number>() : null;
 
     if (style.kind === "circles") {
       // Circle area proportional to the value; the largest gets MAX_R pixels.
@@ -336,31 +368,39 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       countries.forEach((m49, i) => {
         const v = values[i];
         const center = centerOf.get(m49);
-        if (!center || !(v > 0)) return;
-        const faded = outside(m49) || (spec.emphasis && !spec.emphasis(v));
+        if (!center || !(v > 0) || outside(m49)) return;
         symbols.push({
           position: center,
           radius: Math.max(1.5, MAX_R * Math.sqrt(v / max)),
-          fill: [color[0], color[1], color[2], faded ? 40 : 150],
-          line: faded ? [color[0], color[1], color[2], 90] : [255, 255, 255, 220],
+          fill: [color[0], color[1], color[2], 150],
+          line: [255, 255, 255, 220],
         });
       });
       // Small ones on top of big ones.
       symbols.sort((a, b) => b.radius - a.radius);
       if (picked) for (const m49 of picked) fills.set(m49, theme.selected);
     } else {
-      if (style.kind === "ramp") scale = rampScale(style, values, style.domain);
+      if (style.kind === "ramp") scale = rampScale(style, values, style.domain, state.stretch);
       countries.forEach((m49, i) => {
+        if (outside(m49)) return fills.set(m49, theme.land);
         const v = values[i];
         let c: Color | null = null;
         if (style.kind === "ramp") c = scale!.color(v);
-        else if (style.kind === "classes") c = Number.isFinite(v) ? hexToColor((style.classes.find((k) => v < k.max) ?? style.classes[style.classes.length - 1]).color) : null;
-        else if (style.kind === "categories") {
+        else if (style.kind === "classes") {
+          if (Number.isFinite(v)) {
+            const index = classIndex(style.classes, v);
+            present?.add(index);
+            if (hidden.has(index) && m49 !== ctx.country?.m49) return fills.set(m49, theme.land);
+            c = hexToColor(style.classes[index].color);
+          }
+        } else if (style.kind === "categories") {
           const cat = style.category(m49);
+          if (cat) present?.add(cat.index);
+          if (cat && hidden.has(cat.index) && m49 !== ctx.country?.m49) return fills.set(m49, theme.land);
           // A third (a tie of all three) is palest, all of it is the full colour.
           if (cat) c = mix(hexToColor(style.categories[cat.index].color), theme.land, 0.7 * (1 - Math.min(1, (cat.share - 1 / 3) / (2 / 3))));
         }
-        fills.set(m49, dim(c ?? theme.noData, m49, v));
+        fills.set(m49, c ?? theme.noData);
       });
     }
     // Rings around the countries a ranking names (most are too small to see).
@@ -375,11 +415,12 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     }
     map.setCountryFills({ key, colors: fills });
     map.setCountrySymbols(symbols.length ? { key: `${key}:${symbols.length}`, items: symbols } : null);
-    drawLegend(spec, scale, ctx);
+    drawLegend(spec, scale, ctx, present);
     showMapTooltip();
   }
 
-  function drawLegend(spec: MapSpec, scale: ColorScale | null, ctx: Ctx) {
+  /** `present`: with a row picked, the classes its countries fall in; the others show as off. */
+  function drawLegend(spec: MapSpec, scale: ColorScale | null, ctx: Ctx, present: Set<number> | null) {
     legend.hidden = false;
     indicator.setLabel(spec.title);
     $("cp-legend-note").textContent = spec.note ?? "";
@@ -387,22 +428,41 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     $("cp-legend-unit").textContent = spec.unit;
     const style = spec.style;
     const scaleEl = $("cp-legend-scale");
+    const ramp = $("cp-legend-ramp");
+    const ticks = $("cp-legend-ticks");
+    const isRamp = style.kind === "ramp" && !!scale;
+    ramp.hidden = ticks.hidden = !isRamp;
     if (style.kind === "ramp" && scale) {
-      scaleEl.innerHTML = `<div class="legend-ramp" style="background:${scale.gradient}"></div>` +
-        `<div class="legend-ticks">${scale.ticks.map((t) => `<span style="left:${t.at * 100}%">${fmt(t.value)}</span>`).join("")}</div>`;
+      // A fixed range (a share): nothing to pick.
+      rampMenu.setEnabled(!style.domain);
+      ramp.style.background = scale.gradient;
+      const span = Math.max(...scale.ticks.map((t) => t.value)) - Math.min(...scale.ticks.map((t) => t.value));
+      ticks.innerHTML = scale.ticks.map((t) => `<span style="left:${t.at * 100}%">${fmtStop(t.value, span)}</span>`).join("");
+      scaleEl.innerHTML = "";
     } else if (style.kind === "classes") {
       scaleEl.innerHTML = `<ul class="cp-classes">${style.classes
-        .map((k) => `<li${spec.emphasis && !spec.emphasis(k.max - 1e-9) ? ` class="dimmed"` : ""}><i style="background:${k.color}"></i>${esc(k.label)}</li>`)
+        .map((k, i) => classItem(i, k.label, k.color, present))
         .join("")}</ul>`;
     } else if (style.kind === "categories") {
       scaleEl.innerHTML = `<ul class="cp-classes">${style.categories
-        .map((k) => `<li><i style="background:linear-gradient(to right, ${k.color}55, ${k.color})"></i>${esc(k.label)}</li>`)
+        .map((k, i) => classItem(i, k.label, `linear-gradient(to right, ${k.color}55, ${k.color})`, present))
         .join("")}</ul>`;
     } else {
       scaleEl.innerHTML = "";
     }
     const latest = latestYear();
     $("cp-legend-status").textContent = state.period.to > latest ? `AQUASTAT's latest data are for ${latest}.` : "";
+  }
+
+  /** A legend row whose swatch switches its class on and off on the map. */
+  function classItem(index: number, label: string, background: string, present: Set<number> | null) {
+    if (present && !present.has(index)) {
+      return `<li class="off"><button type="button" class="cp-swatch" disabled title="None of the picked countries" ` +
+        `style="background:${background}"></button>${esc(label)}</li>`;
+    }
+    const off = state.hiddenClasses.set.has(index);
+    return `<li${off ? ` class="off"` : ""}><button type="button" class="cp-swatch" data-class="${index}" aria-pressed="${!off}" ` +
+      `title="${off ? "Show" : "Hide"} on the map" style="background:${background}"></button>${esc(label)}</li>`;
   }
 
   function showMapTooltip() {

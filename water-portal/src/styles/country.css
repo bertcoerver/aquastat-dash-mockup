@@ -95,16 +95,6 @@
   gap: 6px;
   flex-shrink: 0;
 }
-.cp-pin {
-  display: none;
-  font: 500 10px/1 var(--sans);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
-.cp-card.pinned .cp-pin {
-  display: inline;
-}
 .cp-card > p {
   margin: 0 0 8px;
   font-size: 12px;
@@ -183,8 +173,9 @@
 .ch-hit {
   fill: transparent;
 }
+/* The selected country's row: as strong as a pinned row, in ink rather than the accent. */
 .ch-hit.em {
-  fill: var(--ground);
+  fill: color-mix(in srgb, var(--ink) 12%, transparent);
 }
 .ch-row:hover .ch-hit {
   fill: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -279,11 +270,29 @@ svg.ch-pin {
   gap: 6px;
   line-height: 1.6;
 }
-.cp-classes li.dimmed {
-  opacity: 0.45;
-}
-.cp-classes i {
+/* A swatch that hides its class on the map. */
+.cp-swatch {
+  flex: none;
   width: 22px;
   height: 10px;
+  padding: 0;
+  border: 0;
   border-radius: 2px;
+  cursor: pointer;
+}
+.cp-swatch:disabled {
+  cursor: default;
+}
+.cp-swatch:not(:disabled):hover {
+  outline: 1px solid currentColor;
+  outline-offset: 1px;
+}
+.cp-classes li.off {
+  color: var(--muted);
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+.cp-classes li.off .cp-swatch {
+  background: none !important;
+  box-shadow: inset 0 0 0 1px currentColor;
 }

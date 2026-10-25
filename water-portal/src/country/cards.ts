@@ -72,8 +72,8 @@ export interface MapSpec {
   note: string;
   value(m49: number): number;
   style: MapStyle;
-  /** Countries whose value fails this are dimmed. */
-  emphasis?: (value: number) => boolean;
+  /** Classes (indices) hidden in the legend when the map is first shown; the reader can show them again. */
+  hidden?: number[];
   /** Countries named in the chart: marked with a ring (many are small). */
   listed?: number[];
 }
@@ -90,11 +90,11 @@ const RAMPS = {
 
 /** Official SDG 6.4.2 water stress levels. */
 const STRESS: MapClass[] = [
-  { max: 25, label: "No stress (< 25 %)", color: "#fde7c7" },
-  { max: 50, label: "Low (25–50 %)", color: "#fbb87a" },
-  { max: 75, label: "Medium (50–75 %)", color: "#f07c4a" },
-  { max: 100, label: "High (75–100 %)", color: "#c8402f" },
-  { max: Infinity, label: "Critical (> 100 %)", color: "#7f1d1d" },
+  { max: 25, label: "No stress (< 25 %)", color: "#abcde3" },
+  { max: 50, label: "Low (25–50 %)", color: "#fff6b0" },
+  { max: 75, label: "Medium (50–75 %)", color: "#fdd84f" },
+  { max: 100, label: "High (75–100 %)", color: "#f28b35" },
+  { max: Infinity, label: "Critical (> 100 %)", color: "#d4342b" },
 ];
 
 /** Renewable water per person: Falkenmark's scarcity thresholds, then plenty. */
@@ -309,13 +309,13 @@ const SDG: TopicDef = {
       title: (c) => `Highest water stress, ${c.label}`,
       caption: (c) => {
         const { count } = ranking(c, "ws", 12, "top");
-        return `The 12 most water-stressed of ${count} countries; most are small, so the map rings them. The map greys out countries below high stress (75 %).`;
+        return `The 12 most water-stressed of ${count} countries; most are small, so the map rings them. The map hides countries below high stress (75 %); click a class in the legend to show it.`;
       },
       render(c) {
         const { rows } = ranking(c, "ws", 12, "top");
         return { html: bars({ series: [{ label: "Water stress", color: C.now }], rows, unit: "%", axis: "Water stress", width: c.width }), csv: rowsCsv(rows, [`ws_${c.label}`]) };
       },
-      map: (c) => stressMap(c, { id: "ws:high", emphasis: (v) => v >= 75, listed: ranking(c, "ws", 12, "top").listed }),
+      map: (c) => stressMap(c, { id: "ws:high", hidden: [0, 1, 2], listed: ranking(c, "ws", 12, "top").listed }),
     },
     {
       id: "sdg-stress-trend",
@@ -434,12 +434,12 @@ const RESOURCES: TopicDef = {
     {
       id: "wr-lowest",
       title: (c) => `Least renewable water per person, ${c.label}`,
-      caption: () => "Below 500 m³ per person a year is absolute scarcity (Falkenmark). The map greys out countries above that.",
+      caption: () => "Below 500 m³ per person a year is absolute scarcity (Falkenmark). The map hides countries above that; click a class in the legend to show it.",
       render(c) {
         const { rows } = ranking(c, "trwrpc", 12, "bottom");
         return { html: bars({ series: [{ label: "m³/inhab/yr", color: C.now }], rows, unit: "m³/inhab/yr", axis: "Renewable water per person", width: c.width }), csv: rowsCsv(rows, [`trwrpc_${c.label}`]) };
       },
-      map: (c) => falkenmarkMap(c, { id: "trwrpc:low", emphasis: (v) => v < 500, listed: ranking(c, "trwrpc", 12, "bottom").listed }),
+      map: (c) => falkenmarkMap(c, { id: "trwrpc:low", hidden: [1, 2, 3, 4, 5], listed: ranking(c, "trwrpc", 12, "bottom").listed }),
     },
     {
       id: "wr-origin",

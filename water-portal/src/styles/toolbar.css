@@ -78,25 +78,29 @@
   white-space: nowrap;
 }
 
-/* View tabs: at the top of the view's pane (toolbar.ts moves them), above its title. */
+/* View tabs: at the top of the view's pane (toolbar.ts moves them), above its title,
+   across the pane's width (a little bigger than the topic tabs below). The selection
+   slides between them (segmented.ts). */
 .tabs-slot:not(:empty) {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .tabs {
-  display: inline-flex;
+  --seg-radius: 6px;
+  display: flex;
   gap: 2px;
-  padding: 2px;
-  border-radius: 7px;
+  padding: 3px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--ground) var(--glass), transparent);
 }
 .tab {
-  font: 500 12px/1 var(--sans);
+  flex: 1;
+  font: 500 13px/1 var(--sans);
   color: var(--muted);
   background: transparent;
   border: 0;
-  padding: 6px 12px;
-  border-radius: 5px;
+  padding: 8px 12px;
+  border-radius: 6px;
   cursor: pointer;
 }
 .tab:hover {
@@ -208,6 +212,33 @@
 .range-date:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* The arrows either side of the dates: the range a year earlier or later. Faint until hovered. */
+.range-shift {
+  margin: -2px -2px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.range-shift:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--ink);
+  opacity: 1;
+}
+.range-shift:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+.range-shift:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  opacity: 1;
 }
 
 /* The calendar (date-picker.ts): under the date clicked, over everything. */
@@ -360,6 +391,65 @@
   text-transform: uppercase;
 }
 
+/* The length's popup (length-picker.ts), styled as the calendar. */
+.length-picker {
+  width: 220px;
+}
+.lp-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.lp-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--ground);
+  color: var(--ink);
+  font: 400 13px/1.2 var(--mono);
+}
+.lp-unit {
+  color: var(--muted);
+}
+.lp-periods {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.lp-apply,
+.lp-period {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+  font: 500 12px/1 var(--sans);
+  cursor: pointer;
+}
+.lp-apply:hover,
+.lp-period:hover:not(:disabled, [aria-pressed="true"]) {
+  background: var(--accent-soft);
+}
+.lp-period[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.lp-period:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.lp-input:focus-visible,
+.lp-apply:focus-visible,
+.lp-period:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* Handles hang half outside the track at either end, hence the side margins. */
 .slider {
   position: relative;
@@ -407,7 +497,8 @@
   background: color-mix(in srgb, var(--accent) 35%, transparent);
   pointer-events: none;
 }
-/* What the view can't select: before WaPOR's data (Basin, Local) or after AQUASTAT's (Country). */
+/* What the view can't select: before WaPOR's data (Basin, Local), after the model's
+   output (Basin) or after AQUASTAT's data (Country). */
 .slider-unavailable {
   border-radius: 3px 0 0 3px;
   background: repeating-linear-gradient(
@@ -418,11 +509,13 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
-.slider[data-view="country"] .slider-unavailable {
+.slider-unavailable-after {
   border-radius: 0 3px 3px 0;
 }
+/* Above the year ticks, which come later in the markup. */
 .slider-handle {
   position: absolute;
+  z-index: 1;
   top: 1px;
   width: 10px;
   height: 20px;

@@ -4,7 +4,7 @@
  *   Basin   — a tree of major basins and their sub-basins (basin-tree.ts), as the title
  *             of the water balance panel
  *   Local   — the point as the Local panel's title, which opens longitude / latitude
- *             fields; until the panel has charts, the picker also looks after it
+ *             fields; the picker also shows and collapses the panel (its charts: local-panel.ts)
  * They show the current selection, whichever way it was made. A title reads as a
  * heading ("World", "Kenya") with a small ▾, and becomes a search field when clicked.
  */

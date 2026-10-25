@@ -20,3 +20,42 @@ body {
   font: 400 14px/1.5 var(--sans);
   overflow: hidden;
 }
+
+/* Segmented switches (src/panels/segmented.ts): the selection is a highlight behind
+   the buttons that slides to the picked one. */
+.segmented {
+  position: relative;
+  isolation: isolate;
+}
+.segmented::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: -1;
+  width: var(--seg-w, 0);
+  height: var(--seg-h, 0);
+  transform: translate(var(--seg-x, 0), var(--seg-y, 0));
+  border-radius: var(--seg-radius, 4px);
+  background: var(--accent);
+  opacity: 0;
+}
+.segmented.placed::before {
+  opacity: 1;
+}
+.segmented.sliding::before {
+  transition: transform 0.22s cubic-bezier(0.3, 0, 0.2, 1), width 0.22s cubic-bezier(0.3, 0, 0.2, 1);
+}
+.segmented.sliding > * {
+  transition: color 0.22s;
+}
+.segmented [aria-selected="true"],
+.segmented [aria-checked="true"] {
+  background: transparent !important; /* the highlight shows through */
+}
+@media (prefers-reduced-motion: reduce) {
+  .segmented.sliding::before,
+  .segmented.sliding > * {
+    transition: none;
+  }
+}

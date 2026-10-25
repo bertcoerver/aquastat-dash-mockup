@@ -11,8 +11,10 @@
  *   dekad the range only partly covers (see src/map/layers/wapor-plan.ts).
  *
  * No range may end after the current dekad (MAX_DK, MAX_DAY). Basin and Local ranges
- * start no earlier than WaPOR's data (1 Jan 2018); Country years run from the start of
- * the timeline to the latest year with AQUASTAT data (see limitCountryYears).
+ * start no earlier than WaPOR's data (1 Jan 2018); Basin ranges end no later than the
+ * latest dekad with water balance model output (see limitBasinDekads). Country years
+ * run from the start of the timeline to the latest year with AQUASTAT data (see
+ * limitCountryYears).
  */
 import {
   COUNTRY_MAX_YEAR,
@@ -27,7 +29,6 @@ import {
   dkFirstDay,
   dkLastDay,
   dkY,
-  mk,
 } from "./dekads";
 
 export type View = "country" | "basin" | "local";
@@ -70,13 +71,29 @@ export function limitCountryYears(last: number) {
 /** Whether the Country view can show year `y`. */
 export const isCountryYear = (y: number) => y >= MIN_YEAR && y <= countryLast;
 
+// Basin: the latest dekad that can be selected, the last with model output (the
+// Basin view's data all come from the same WaPOR tables). Until that is known, the
+// current dekad.
+let basinLast = MAX_DK;
+
+/** Basin view: the latest dekad with data, `last` (at most the current dekad). */
+export function limitBasinDekads(last: number) {
+  basinLast = clamp(last, dayDk(WAPOR_FIRST_DAY), MAX_DK);
+}
+
 /** The first day a view's range may start on. */
 export const firstDay = (view: View) => (view === "country" ? 0 : WAPOR_FIRST_DAY);
 
-/** The part of the track a view can't select, as boundaries [from, to) (null: none). */
-export function unavailable(view: View): { from: number; to: number } | null {
-  const [from, to] = view === "country" ? [dayOf(countryLast + 1, 0, 1), MAX_DAY + 1] : [0, WAPOR_FIRST_DAY];
-  return from < to ? { from, to } : null;
+/** The last day a view's range may end on. */
+export const lastDay = (view: View) =>
+  view === "country" ? dayOf(countryLast + 1, 0, 1) - 1 : view === "basin" ? dkLastDay(basinLast) : MAX_DAY;
+
+/** The parts of the track a view can't select, as boundaries [from, to): before its first day, after its last. */
+export function unavailable(view: View): { from: number; to: number }[] {
+  return [
+    { from: 0, to: firstDay(view) },
+    { from: lastDay(view) + 1, to: MAX_DAY + 1 },
+  ].filter((gap) => gap.from < gap.to);
 }
 
 // --- Boundaries -----------------------------------------------------------------
@@ -84,10 +101,10 @@ export function unavailable(view: View): { from: number; to: number } | null {
 
 /** The nearest boundary to `p` (a position in days) where a range may start or end. */
 function snap(view: View, p: number) {
-  const b = clamp(Math.round(p), firstDay(view), MAX_DAY + 1);
+  const b = clamp(Math.round(p), firstDay(view), lastDay(view) + 1);
   if (view === "local") return b;
   // Basin: the nearer of the boundaries around the dekad it's in.
-  const dk = dayDk(Math.min(b, MAX_DAY));
+  const dk = dayDk(Math.min(b, lastDay(view)));
   const [lo, hi] = [dkFirstDay(dk), dkLastDay(dk) + 1];
   return p - lo <= hi - p ? lo : hi;
 }
@@ -110,9 +127,15 @@ export function enterView(view: View, days: DayRange): DayRange {
   // Basin and Local: a range starting before WaPOR's data moves on by whole years.
   const years = Math.max(0, WAPOR_MIN_YEAR - dkY(dayDk(days.start)));
   if (view === "basin") {
-    // The dekads it lies in.
-    const { start, end } = coveringDekads(days);
-    return daysOfDekads({ start: start + 36 * years, end: Math.min(end + 36 * years, MAX_DK) });
+    // The dekads it lies in. One ending after the model output moves back by whole
+    // years, or if that's too far back for it, ends at the output's last dekad.
+    let { start, end } = coveringDekads(days);
+    start += 36 * years;
+    end += 36 * years;
+    const back = 36 * Math.max(0, Math.ceil((end - basinLast) / 36));
+    const first = dayDk(WAPOR_FIRST_DAY);
+    if (start - back >= first) return daysOfDekads({ start: start - back, end: end - back });
+    return daysOfDekads({ start: Math.min(start, basinLast), end: Math.min(end, basinLast) });
   }
   return { start: addYears(days.start, years), end: Math.min(addYears(days.end, years), MAX_DAY) };
 }
@@ -125,6 +148,10 @@ const countryYears = (a: number, b: number): DayRange => {
 };
 const yearOfDay = (day: number) => dkY(dayDk(day));
 
+/** The range's length: in years in Country (whole years), else in days. */
+export const rangeLength = (view: View, { start, end }: DayRange) =>
+  view === "country" ? yearOfDay(end) - yearOfDay(start) + 1 : end - start + 1;
+
 /** The shortest range from a start: a day in Local, a dekad in Basin. */
 const minEnd = (view: View, start: number) => (view === "local" ? start : dkLastDay(dayDk(start)));
 
@@ -135,7 +162,7 @@ export function changeStart(view: View, prev: DayRange, p: number): DayRange {
     const to = yearOfDay(prev.end);
     return countryYears(Math.min(MIN_YEAR + Math.round(dayDk(clamp(Math.round(p), 0, MAX_DAY)) / 36), to), to);
   }
-  const start = Math.min(snap(view, p), stepBoundary(view, MAX_DAY + 1, -1));
+  const start = Math.min(snap(view, p), stepBoundary(view, lastDay(view) + 1, -1));
   return { start, end: Math.max(prev.end, minEnd(view, start)) };
 }
 
@@ -147,7 +174,7 @@ export function changeEnd(view: View, prev: DayRange, p: number): DayRange {
     const from = yearOfDay(prev.start);
     return countryYears(from, Math.max(MIN_YEAR + Math.round((dk + 1) / 36) - 1, from));
   }
-  return { ...prev, end: clamp(snap(view, p) - 1, minEnd(view, prev.start), MAX_DAY) };
+  return { ...prev, end: clamp(snap(view, p) - 1, minEnd(view, prev.start), lastDay(view)) };
 }
 
 /**
@@ -166,7 +193,7 @@ export function moveRange(view: View, prev: DayRange, p: number): DayRange {
   const wanted = dayDk(clamp(Math.round(p), 0, MAX_DAY));
   const step = view === "country" ? 36 : 1;
   const first = dayDk(firstDay(view));
-  const last = (view === "country" ? mk(countryLast + 1, 0, 0) : MAX_DK + 1) - len;
+  const last = dayDk(lastDay(view)) + 1 - len;
   const start = clamp(Math.round(wanted / step) * step, first, Math.floor(last / step) * step);
   return daysOfDekads({ start, end: start + len - 1 });
 }
@@ -183,11 +210,55 @@ export function pickDay(view: View, prev: DayRange, end: "start" | "end", day: n
       ? countryYears(y, Math.max(y, yearOfDay(prev.end)))
       : countryYears(Math.min(yearOfDay(prev.start), y), y);
   }
-  const d = clamp(day, firstDay(view), MAX_DAY);
+  const d = clamp(day, firstDay(view), lastDay(view));
   const [first, last] = view === "local" ? [d, d] : [dkFirstDay(dayDk(d)), dkLastDay(dayDk(d))];
   return end === "start"
     ? { start: first, end: Math.max(prev.end, last) }
     : { start: Math.min(prev.start, first), end: last };
+}
+
+/**
+ * The range after the user types its length, `n`: in days, or years in Country. The
+ * start stays and the end follows (in Basin, to the nearest dekad boundary). If the
+ * range wouldn't fit after the start, it ends at the latest day and starts earlier.
+ */
+export function setLength(view: View, prev: DayRange, n: number): DayRange {
+  const len = Math.max(1, Math.round(n));
+  if (view === "country") {
+    const from = yearOfDay(prev.start);
+    const shift = Math.max(0, from + len - 1 - countryLast);
+    return countryYears(from - shift, from + len - 1 - shift);
+  }
+  if (prev.start + len <= lastDay(view) + 1) return changeEnd(view, prev, prev.start + len);
+  return { start: snap(view, lastDay(view) + 1 - len), end: lastDay(view) };
+}
+
+/**
+ * The range moved `n` whole years on (or back), keeping its dates: the same days in
+ * Local, the same dekads in Basin, the same years in Country. Null if that doesn't fit.
+ */
+export function shiftYears(view: View, prev: DayRange, n: number): DayRange | null {
+  const next =
+    view === "local"
+      ? { start: addYears(prev.start, n), end: addYears(prev.end, n) }
+      : daysOfDekads({ start: dayDk(prev.start) + 36 * n, end: dayDk(prev.end) + 36 * n });
+  return next.start >= firstDay(view) && next.end <= lastDay(view) ? next : null;
+}
+
+export type Period = "dekad" | "month" | "year";
+const PERIOD_DEKADS: Record<Period, number> = { dekad: 1, month: 3, year: 36 };
+
+/**
+ * The calendar dekad, month or year nearest the range: the one its middle day lies in,
+ * or the nearest one the view can show in full. Country only has years.
+ */
+export function snapToPeriod(view: View, prev: DayRange, period: Period): DayRange {
+  const size = PERIOD_DEKADS[view === "country" ? "year" : period];
+  const mid = dayDk(Math.floor((prev.start + prev.end) / 2));
+  const first = dayDk(firstDay(view)); // 1 Jan, so the start of every period
+  const last = dayDk(lastDay(view)) + 1 - size; // the latest start that fits
+  const start = clamp(Math.floor(mid / size) * size, first, Math.floor(last / size) * size);
+  return daysOfDekads({ start, end: start + size - 1 });
 }
 
 /** Range shown on first load: the latest year the Country view can show. */

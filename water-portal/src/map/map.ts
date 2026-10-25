@@ -13,7 +13,7 @@ import { bordersLayer } from "./layers/borders";
 import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
-import { DEFAULT_RAMP, waporLayer, type WaporPeriod } from "./layers/wapor";
+import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat } from "./places";
@@ -30,12 +30,13 @@ export interface WaterMap {
   /**
    * Show the WaPOR raster for a period (null: none). `onLoad` runs once it's opened.
    * `seamless` (playback): keep showing the current one until the new one has loaded
-   * every tile in view, then switch at once.
+   * every tile in view, then switch at once. Zoomed in where it has L2, that's shown
+   * instead (see wapor.ts).
    */
   setWapor(period: WaporPeriod | null, onLoad?: () => void, seamless?: boolean): void;
   /** Hide WaPOR pixels with a longer NDVI gap than this, in dekads (null: none). */
   setWaporMaxGap(maxGap: number | null): void;
-  /** The colour map for the WaPOR raster, in mm/day. */
+  /** The colour map for the WaPOR raster, in its variable's unit per day. */
   setWaporRamp(ramp: WaporRamp): void;
   /** Show the selection: a marker at the point, and the country and basins filled. */
   setSelection(selection: MapSelection): void;
@@ -75,6 +76,8 @@ interface WaporEntry {
   period: WaporPeriod;
   onLoad?: () => void;
   id: number; // a layer of its own, so a new period doesn't take over the shown one's tiles
+  /** Its L2 layer has loaded every tile in view: its L1 layer, kept until then, can go. */
+  l2Loaded?: boolean;
 }
 
 export interface BasinStatFills {
@@ -100,9 +103,17 @@ interface MapOptions {
   onClick?: (lngLat: LngLat | null, onArea: boolean) => void;
   /** The pointer moved: the point under it, or null off the globe or off the map. */
   onHover?: (lngLat: LngLat | null) => void;
+  /**
+   * The marker was dragged and dropped on a country or basin (whichever is shown).
+   * Dropped on the ocean or off the globe, it goes back to where it was.
+   */
+  onMarkerDrop?: (lngLat: LngLat) => void;
 }
 
-export function createMap(container: HTMLElement, { dark, onClick, onHover }: MapOptions): WaterMap {
+/** How near the marker a press picks it up, in pixels. */
+const MARKER_GRAB = 10;
+
+export function createMap(container: HTMLElement, { dark, onClick, onHover, onMarkerDrop }: MapOptions): WaterMap {
   const theme = dark ? THEMES.dark : THEMES.light;
   const state = {
     view: "country" as View,
@@ -118,6 +129,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
     countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
     basinStats: null as BasinStatFills | null,
+    dragged: null as LngLat | null, // the marker while it is dragged
   };
 
   const map = new maplibregl.Map({
@@ -188,19 +200,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
         visible: !basins,
         fills: state.view === "country" ? state.countryFills : undefined,
       }),
-      ...[state.wapor, state.waporNext].map(
-        (entry) =>
-          entry &&
-          waporLayer({
-            id: `wapor-aeti-${entry.id}`,
-            period: entry.period,
-            ramp: state.waporRamp,
-            maxGap: state.waporMaxGap,
-            onLoad: entry.onLoad,
-            hidden: entry === state.waporNext,
-            onViewportLoad: entry === state.waporNext ? () => showNextWapor(entry) : undefined,
-          }),
-      ),
+      ...[state.wapor, state.waporNext].flatMap((entry) => (entry ? waporLayers(entry) : [])),
       major.areas,
       sub.areas,
       bordersLayer({ color: theme.border, visible: !basins }),
@@ -211,10 +211,11 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
       countryOutlineLayer({
         m49: state.selection.country,
         color: theme.outline,
+        halo: theme.markerRing,
         visible: state.view === "country" && Boolean(state.countryFills),
       }),
       countrySymbolsLayer({ symbols: state.view === "country" ? visibleSymbols() : null }),
-      markerLayer({ position: state.selection.lngLat, fill: theme.marker, ring: theme.markerRing }),
+      markerLayer({ position: state.dragged ?? state.selection.lngLat, fill: theme.marker, ring: theme.markerRing }),
     ];
   }
 
@@ -254,6 +255,103 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
   function render() {
     overlay.setProps({ layers: layers().map(withHorizon) });
   }
+
+  // Dragging the marker: a press on it holds the map still (preventDefault keeps
+  // MapLibre from panning), the marker follows the pointer, and the drop is passed on.
+  const canvas = map.getCanvas();
+  function onMarker(point: maplibregl.Point) {
+    const at = state.selection.lngLat;
+    if (!at) return false;
+    const { lng, lat } = map.getCenter();
+    if (facing(at, [lng, lat]) <= 0) return false; // on the far side of the globe
+    return map.project(at).dist(point) <= MARKER_GRAB;
+  }
+  let grabbed = false;
+  function grab(e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) {
+    if (!onMarker(e.point)) return;
+    e.preventDefault();
+    grabbed = true;
+    canvas.style.cursor = "grabbing";
+  }
+  function drag(e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) {
+    if (!grabbed) {
+      // (mouse only: show that the marker can be picked up)
+      if (e.type === "mousemove") canvas.style.cursor = onMarker(e.point) ? "grab" : "";
+      return;
+    }
+    state.dragged = toLngLat([e.lngLat.lng, e.lngLat.lat]);
+    render();
+  }
+  function drop(e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) {
+    if (!grabbed) return;
+    grabbed = false;
+    canvas.style.cursor = onMarker(e.point) ? "grab" : "";
+    const dropped = state.dragged;
+    state.dragged = null;
+    if (!dropped) return; // pressed without moving: a click
+    const onArea = Boolean(overlay.pickObject({ x: e.point.x, y: e.point.y }));
+    // Keep it where it was dropped until the new selection comes in.
+    if (onArea) state.selection = { ...state.selection, lngLat: dropped };
+    render();
+    if (onArea) onMarkerDrop?.(dropped);
+  }
+  map.on("mousedown", grab);
+  map.on("mousemove", drag);
+  map.on("mouseup", drop);
+  map.on("touchstart", (e) => e.points.length === 1 && grab(e));
+  map.on("touchmove", drag);
+  map.on("touchend", drop);
+  map.on("touchcancel", drop);
+  // Released off the map: the marker goes back.
+  window.addEventListener("mouseup", () => {
+    if (!grabbed) return;
+    grabbed = false;
+    canvas.style.cursor = "";
+    state.dragged = null;
+    render();
+  });
+
+  /**
+   * A period's layers: L1 while the view asks for L1, L2 while it asks for L2 (and
+   * the period has it). Until L2 has loaded every tile in view, L1 keeps showing the
+   * tiles it had, so zooming in doesn't blank the map. A level's rasters are opened
+   * before its layer is made (the layer would open them again, not knowing the
+   * tiles' reader does), and only when it's shown: a period loaded ahead while
+   * playing at L2 never opens its L1 rasters.
+   */
+  function waporLayers(entry: WaporEntry) {
+    const next = entry === state.waporNext;
+    const { period } = entry;
+    const atL2 = waporShownLevel(period) === "L2";
+    const layer = (p: WaporPeriod, id: string, hidden: boolean, onViewportLoad?: () => void) => {
+      if (!waporOpened(p)) {
+        openWapor(p).then(render, () => {});
+        return null;
+      }
+      return waporLayer({ id, period: p, ramp: state.waporRamp, maxGap: state.waporMaxGap, onLoad: entry.onLoad, hidden, onViewportLoad });
+    };
+    const l1 = !atL2
+      ? layer(period, `wapor-aeti-${entry.id}`, next, next ? () => showNextWapor(entry) : undefined)
+      : !next && !entry.l2Loaded && waporOpened(period)
+        ? layer(period, `wapor-aeti-${entry.id}`, false)
+        : null;
+    const l2 = atL2
+      ? layer(period.l2!, `wapor-aeti-${entry.id}-l2`, next, () => {
+          if (!entry.l2Loaded) {
+            entry.l2Loaded = true;
+            queueMicrotask(render); // (called while deck.gl updates its layers)
+          }
+          if (next) showNextWapor(entry);
+        })
+      : null;
+    return [l1, l2];
+  }
+  // The view asks for the other level: add or drop the L2 layers. (Called while
+  // deck.gl picks tiles.)
+  onWaporLevel(() => {
+    for (const entry of [state.wapor, state.waporNext]) if (entry) entry.l2Loaded = false;
+    queueMicrotask(render);
+  });
 
   let waporId = 0;
   function showNextWapor(entry: WaporEntry) {
@@ -363,7 +461,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover }: Ma
       render();
     },
     setWaporRamp(ramp) {
-      if (ramp.quantities.join() === state.waporRamp.quantities.join()) return;
+      const same = (a: WaporRamp, b: WaporRamp) => a.quantities.join() === b.quantities.join() && a.colors.join() === b.colors.join();
+      if (same(ramp, state.waporRamp)) return;
       state.waporRamp = ramp;
       render();
     },

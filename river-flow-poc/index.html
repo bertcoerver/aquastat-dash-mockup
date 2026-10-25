@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>River Wind PoC</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <aside class="panel">
+      <h1>River flow</h1>
+      <p class="lede">
+        Rivers as a wind map: particles blowing through the river network, as deck.gl layers — proof of concept.
+        <a href="./canvas.html">Canvas version</a> · <a href="./lanes.html">Lanes version</a> · <a href="./rain.html">Rain</a>
+      </p>
+
+      <label class="field">
+        <span>Basin</span>
+        <select id="basin"><option value="">World — proxy discharge</option></select>
+      </label>
+      <p id="status" class="note"></p>
+
+      <section>
+        <h2>Discharge</h2>
+        <label class="field">
+          <span>Colours</span>
+          <select id="colors"><option value="off">Off (particles only)</option></select>
+        </label>
+        <label class="field">
+          <span>Particles</span>
+          <select id="particle-colors">
+            <option value="white">White</option>
+            <option value="discharge">By discharge (colour map)</option>
+            <option value="cyan">Cyan</option>
+            <option value="amber">Amber</option>
+          </select>
+        </label>
+        <div id="legend">
+          <div id="ramp" class="ramp" aria-hidden="true"></div>
+          <div class="ramp-ticks"><span>0.1</span><span>1</span><span>10</span><span>100</span><span>1k</span><span>10k</span><span>100k m³/s</span></div>
+        </div>
+        <p class="note">
+          Width grows with discharge, and so does the number of particles a river carries. Particles flow downstream at
+          the same speed everywhere.
+        </p>
+      </section>
+
+      <section class="controls">
+        <label><span>Speed</span><input id="speed" type="range" min="-2" max="2" step="0.25" value="0" /></label>
+        <label><span>Particles</span><input id="count" type="range" min="1000" max="60000" step="1000" value="8000" /></label>
+        <label><span>Trails</span><input id="trail" type="range" min="0.8" max="0.985" step="0.005" value="0.9" /></label>
+        <label title="Velocity = (Q / 1000 m³/s) ^ this: 0 is the same speed everywhere"><span>Speed contrast</span><input id="contrast" type="range" min="0" max="0.6" step="0.05" value="0" /></label>
+        <label><span>Globe</span><input id="globe" type="checkbox" /></label>
+        <p id="stats" class="note"></p>
+      </section>
+
+      <footer>
+        <p class="note">
+          Rivers: FAO rivers_world_47950 (the portal's river tiles). Model: FAO water balance on WaPOR v3 L1 PCP and AETI,
+          per SDG 6 sub-basin and dekad.
+        </p>
+      </footer>
+    </aside>
+
+    <div id="timeline" class="timeline" hidden>
+      <button id="play" type="button" aria-label="Play">▶</button>
+      <input id="dekad" type="range" min="0" max="0" step="1" value="0" aria-label="Dekad" />
+      <output id="date"></output>
+    </div>
+
+    <script type="module" src="/src/wind-main.ts"></script>
+  </body>
+</html>
