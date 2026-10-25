@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AQUASTAT Terrain PoC</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <aside class="panel">
+      <h1>Terrain on the globe</h1>
+      <p class="lede">Vector tiles and a deck.gl-raster COG on 3D relief, MapLibre globe — proof of concept</p>
+
+      <section>
+        <strong>Relief drawn by</strong>
+        <div class="segmented" role="radiogroup" aria-label="Terrain">
+          <label><input type="radio" name="terrain" value="deck" checked /><span>deck.gl</span></label>
+          <label><input type="radio" name="terrain" value="maplibre" /><span>MapLibre</span></label>
+          <label><input type="radio" name="terrain" value="none" /><span>None</span></label>
+        </div>
+        <label class="year">
+          Exaggeration
+          <input type="range" id="exaggeration" min="1" max="5" step="0.5" />
+          <span id="exaggeration-value"></span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="drape" />
+          <span>
+            <strong>Drape with TerrainExtension</strong>
+            <small>Off: deck.gl layers are drawn flat, at sea level, over the relief</small>
+          </span>
+        </label>
+      </section>
+
+      <section>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-raster" />
+          <span>
+            <strong>Actual ET, 2023</strong>
+            <small>WaPOR v3 L1-AETI-A COG, MultiCOGLayer</small>
+          </span>
+        </label>
+        <div class="ramp" aria-hidden="true"></div>
+        <div class="ramp-ticks"><span>0</span><span>375</span><span>750</span><span>1125</span><span>1500 mm/yr</span></div>
+      </section>
+
+      <section>
+        <label class="toggle">
+          <input type="checkbox" id="toggle-rivers" />
+          <span>
+            <strong>Rivers</strong>
+            <small>FAO vector tiles (.pbf), MVTLayer</small>
+          </span>
+        </label>
+        <label class="toggle" style="margin-top: 8px">
+          <input type="checkbox" id="toggle-basins" />
+          <span>
+            <strong>SDG 6 sub-basins</strong>
+            <small>FAO vector tiles (.pbf), MVTLayer — hover for names</small>
+          </span>
+        </label>
+      </section>
+
+      <footer>
+        <p id="status" class="note"></p>
+        <p class="note">Data: FAO WaPOR v3, FAO SDG 6 basins, Mapzen/AWS terrain tiles, Esri World Imagery.</p>
+      </footer>
+    </aside>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
