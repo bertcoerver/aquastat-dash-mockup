@@ -17,7 +17,7 @@
  * Two grids can be given (`precipitation` and `previous`) with `mix` between them, to
  * fade from one dekad to the next.
  */
-import { Layer, project32, type DefaultProps, type LayerContext, type UpdateParameters } from "@deck.gl/core";
+import { Layer, project32, type Viewport, type DefaultProps, type LayerContext, type UpdateParameters } from "@deck.gl/core";
 import type { RenderPass, Texture } from "@luma.gl/core";
 import { Model } from "@luma.gl/engine";
 import type { ShaderModule } from "@luma.gl/shadertools";
@@ -120,6 +120,19 @@ const rainUniforms = {
   },
 } as const satisfies ShaderModule<RainProps>;
 
+// Random numbers (0–1) from integers (PCG): a float hash of the instance's index loses
+// precision for large indices, and lines drops up.
+export const RANDOM_GLSL = `\
+uint pcg(uint v) {
+  uint state = v * 747796405u + 2891336453u;
+  uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
+float random(uint key, uint salt) {
+  return float(pcg(key ^ pcg(salt))) / 4294967296.0;
+}
+`;
+
 /** Share of a drop's period spent splashing (the rest it falls). */
 const SPLASH_SHARE = 0.14;
 
@@ -134,16 +147,7 @@ flat out float vSplash;
 
 const float RAIN_PI = 3.141592653589793;
 
-// Random numbers (0–1) from integers (PCG): a float hash of the drop's index loses
-// precision for large indices, and lines drops up.
-uint pcg(uint v) {
-  uint state = v * 747796405u + 2891336453u;
-  uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-  return (word >> 22u) ^ word;
-}
-float random(uint key, uint salt) {
-  return float(pcg(key ^ pcg(salt))) / 4294967296.0;
-}
+${RANDOM_GLSL}
 
 float rainAtPoint(vec2 lngLat) {
   vec4 b = rain.gridBounds;
@@ -234,7 +238,7 @@ void main() {
   fragColor = vec4(rain.color * a, a); // premultiplied
 }`;
 
-const PREMULTIPLIED = {
+export const PREMULTIPLIED = {
   blend: true,
   blendColorOperation: "add",
   blendColorSrcFactor: "one",
@@ -246,6 +250,28 @@ const PREMULTIPLIED = {
   depthWriteEnabled: false,
   cullMode: "none",
 } as const;
+
+/**
+ * The region of the view within a grid's latitudes, in Web Mercator (0–1, y down) as
+ * [left, top, width, height], snapped to powers of two, so things spread over it stay put
+ * on the ground while the map pans a little.
+ */
+export function viewRegion(viewport: Viewport, [, gs, , gn]: [number, number, number, number]): [number, number, number, number] | null {
+  const [w, s, e, n] = viewport.getBounds();
+  const south = Math.max(s, gs);
+  const north = Math.min(n, gn);
+  if (south >= north) return null;
+  const mx = (lng: number) => (lng + 180) / 360;
+  const my = (lat: number) => (1 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / Math.PI) / 2;
+  const x0 = Math.max(0, mx(w));
+  const x1 = Math.min(1, mx(e));
+  const y0 = my(north);
+  const y1 = my(south);
+  const step = 2 ** Math.ceil(Math.log2(Math.max(x1 - x0, y1 - y0) / 8));
+  const left = Math.floor(x0 / step) * step;
+  const top = Math.floor(y0 / step) * step;
+  return [left, top, Math.ceil(x1 / step) * step - left, Math.ceil(y1 / step) * step - top];
+}
 
 // --- Layer -------------------------------------------------------------------------
 
@@ -319,31 +345,11 @@ export class RainLayer extends Layer<RainLayerProps> {
     for (const texture of this.state.textures?.values() ?? []) texture.destroy();
   }
 
-  /** The region the drops are spread over: the view (within the grid), snapped to powers of two. */
-  private region(): [number, number, number, number] | null {
-    const viewport = this.context.viewport;
-    const [, gs, , gn] = this.props.precipitation.bounds;
-    const [w, s, e, n] = viewport.getBounds();
-    const south = Math.max(s, gs);
-    const north = Math.min(n, gn);
-    if (south >= north) return null;
-    const mx = (lng: number) => (lng + 180) / 360;
-    const my = (lat: number) => (1 - Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) / Math.PI) / 2;
-    const x0 = Math.max(0, mx(w));
-    const x1 = Math.min(1, mx(e));
-    const y0 = my(north);
-    const y1 = my(south);
-    const step = 2 ** Math.ceil(Math.log2(Math.max(x1 - x0, y1 - y0) / 8));
-    const left = Math.floor(x0 / step) * step;
-    const top = Math.floor(y0 / step) * step;
-    return [left, top, Math.ceil(x1 / step) * step - left, Math.ceil(y1 / step) * step - top];
-  }
-
   draw({ renderPass }: { renderPass: RenderPass }) {
     const s = this.state;
     const p = this.props;
     const viewport = this.context.viewport;
-    const region = this.region();
+    const region = viewRegion(viewport, this.props.precipitation.bounds);
     if (!region) return;
     const grid = s.textures.get(p.precipitation);
     if (!grid) return;

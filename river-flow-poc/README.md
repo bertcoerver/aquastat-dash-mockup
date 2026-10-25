@@ -31,6 +31,9 @@ There are two versions:
 - **[rain.html](rain.html): rain in 3D** ([src/rain-main.ts](src/rain-main.ts),
   [src/rain/rain-layer.ts](src/rain/rain-layer.ts)): WaPOR's dekadal precipitation falling
   as rain on a tilted map, with the river particles carrying it away. See "Rain" below.
+- **[et.html](et.html): evapotranspiration in 3D** ([src/et-main.ts](src/et-main.ts),
+  [src/et/](src/et/)): WaPOR's dekadal evapotranspiration rising as vapour off a tilted map,
+  through a heat shimmer. See "Evapotranspiration" below.
 
 ## The wind map
 
@@ -144,6 +147,35 @@ coloured by it, with relief shading and the rivers (proxy discharge) flowing.
   that costs (40 fps here, as on the river page).
 - **Not 3D terrain**: MapLibre's terrain would hide deck.gl layers, which are drawn at sea
   level, so the relief is only shaded. Draping would need deck.gl's own TerrainLayer.
+
+## Evapotranspiration
+
+[et.html](et.html) is the same idea the other way up: a year of WaPOR v3 L1 dekadal
+evapotranspiration rising as vapour, the map shimmering beneath it where water goes up.
+
+- **Data** ([src/et/evapotranspiration.ts](src/et/evapotranspiration.ts)): the AETI and T
+  (transpiration) COGs of each dekad, both at once, from FAO's bucket. They're global 300 m
+  rasters; the seventh overview, 1920 × 960 cells of 0.19° (~20 km), is read whole: ~1 s a
+  dekad. The sea has no data.
+- **The vapour** ([src/et/vapour-layer.ts](src/et/vapour-layer.ts), `VapourLayer`): built
+  like `RainLayer` (no particle state, an instance a puff). A puff rises fast off the
+  ground and slows, sways, drifts with the wind, grows and fades, with a short trail so
+  it reads as rising in a still too. It's shown with a chance of (mm/day ÷ 5)^1.3 (steeper
+  than rain: deserts still give off a few tenths of a mm a day), and is green
+  (transpiration) with a chance of T ÷ AETI, otherwise blue (evaporation, including
+  interception). Puffs are also thinned with distance from the camera, so on a tilted map
+  their density on the screen follows the data, not the squeezed horizon.
+- **The shimmer** ([src/et/haze-layer.ts](src/et/haze-layer.ts), `HazeLayer`): it copies
+  the canvas drawn so far (basemap, relief, ground colour) into a texture with
+  `copyTexSubImage2D` and draws the land in view again from it, each pixel shifted by
+  ripples rising up the screen, in drifting patches, as far as AETI there says (up to 2 px
+  by default). Drawn beneath MapLibre's labels (`beforeId`), so they stay sharp.
+- **Cost**: 54–56 fps at 1400 × 850 whether 20,000 or a million puffs, with the shimmer on
+  or off.
+- **Physics, loosely**: real heat shimmer is strongest over hot, *dry* ground, where the
+  sun's energy heats the air rather than evaporating water. Here it follows the water going
+  up, as a picture of it; a shimmer of the unmet demand (reference ET − AETI) would be the
+  more physical choice.
 
 ## Run
 

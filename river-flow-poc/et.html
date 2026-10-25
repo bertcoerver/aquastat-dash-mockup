@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Evapotranspiration PoC</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <aside class="panel">
+      <h1>Evapotranspiration</h1>
+      <p class="lede">
+        WaPOR's dekadal evapotranspiration as vapour rising off a tilted map, through shimmering air — proof of
+        concept. <a href="./rain.html">Rain</a> · <a href="./">River flow</a>
+      </p>
+
+      <label class="field">
+        <span>Year</span>
+        <select id="year"></select>
+      </label>
+      <p id="status" class="note"></p>
+
+      <section>
+        <h2>Actual evapotranspiration</h2>
+        <div id="legend">
+          <div id="ramp" class="ramp" aria-hidden="true"></div>
+          <div class="ramp-ticks"><span>0</span><span>1</span><span>2.5</span><span>4</span><span>6 mm/day</span></div>
+        </div>
+        <div class="key">
+          <span><i id="key-t" class="dot"></i>Transpiration (plants)</span>
+          <span><i id="key-e" class="dot"></i>Evaporation</span>
+        </div>
+        <p class="note">
+          Dekad means (WaPOR v3 L1 AETI and T, 0.19° overview). More water going up, more vapour and a stronger
+          shimmer. Evaporation includes interception (rain evaporating off leaves). Drag with the right mouse button
+          (or ctrl) to tilt and turn.
+        </p>
+      </section>
+
+      <section class="controls">
+        <label><span>Puffs</span><input id="count" type="range" min="20000" max="1000000" step="20000" value="300000" /></label>
+        <label><span>Rise time</span><input id="period" type="range" min="1" max="8" step="0.5" value="3" /></label>
+        <label><span>Height</span><input id="height" type="range" min="40" max="500" step="20" value="160" /></label>
+        <label><span>Wind</span><input id="wind" type="range" min="0" max="0.8" step="0.02" value="0.15" /></label>
+        <label><span>Shimmer</span><input id="shimmer" type="range" min="0" max="5" step="0.25" value="2" /></label>
+        <label><span>Split T / E</span><input id="split" type="checkbox" checked /></label>
+        <label><span>Ground colour</span><input id="ground" type="checkbox" checked /></label>
+        <p id="stats" class="note"></p>
+      </section>
+
+      <footer>
+        <p class="note">
+          Evapotranspiration: WaPOR v3 L1 AETI and T (dekadal, 300 m), FAO. Relief: Mapzen terrain tiles (AWS open
+          data).
+        </p>
+      </footer>
+    </aside>
+
+    <div id="timeline" class="timeline">
+      <button id="play" type="button" aria-label="Play">▶</button>
+      <input id="dekad" type="range" min="0" max="35" step="1" value="0" aria-label="Dekad" />
+      <output id="date"></output>
+    </div>
+
+    <script type="module" src="/src/et-main.ts"></script>
+  </body>
+</html>
