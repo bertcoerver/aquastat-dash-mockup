@@ -24,8 +24,6 @@ shows FAO AQUASTAT statistics for the selected country (or the World) in four to
 water resources, water use, irrigation): number tiles and charts, each with a map that goes with
 it. Hovering a tile or chart previews its map, clicking pins it (Escape unpins), and hovering a
 row in a regional chart picks out that region's countries. Clicking a country or basin drops a marker; clicking the ocean removes it.
-A debug window (drag it by its title, resize it from the corner) shows what's under
-the last click and the pointer, and the selected time range.
 
 ## Getting started
 
@@ -119,7 +117,6 @@ water-portal/
     │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
     │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
-    │   ├── debug-panel.ts  Draggable window: click, time and hover state as a JSON tree
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
     │   └── load-bar.ts     Load bar under the graph pane's heading while anything loads
     ├── toolbar/
@@ -137,7 +134,7 @@ water-portal/
         ├── base.css        Page-wide defaults
         ├── toolbar.css     Top bar
         ├── map.css         Map container
-        ├── panels.css      Layers menu and debug window
+        ├── panels.css      Layers menu and resizable panes
         ├── basin.css       Water balance panel, its legend and tooltips
         ├── country.css     Country panel, chart cards, chart colours, its legend
         └── legend.css      Map legends: the WaPOR legend, layers, the checklist
@@ -238,8 +235,7 @@ water-portal/
   overviews are averaged separately, so zoomed out it's close but not exact. A range that starts or
   ends within a dekad takes those days' share of the dekad's raster (mm/day × days,
   e.g. 5 Jan – 31 Dec 2025 = `A[2025] − 4·D[2025-01-D1]`): that assumes ET is even
-  within the dekad, as WaPOR v3 has no daily ETIa, and the legend and debug window say
-  so. The debug window's `wapor` entry shows the equation, the number of rasters and the cost.
+  within the dekad, as WaPOR v3 has no daily ETIa, and the legend says so.
 - **The colour range** stretches WaPOR's dekadal colour map over the values on screen:
   the legend's button cycles between 0–100%, 1–99% and 5–95% of them. `waporViewRange`
   in [wapor.ts](src/map/layers/wapor.ts) sums the cached tiles in view again, keeps
@@ -258,8 +254,7 @@ water-portal/
   at most 2 CSS pixels on screen; full resolution from about zoom 8), and only tiles on
   the visible part of the globe. deck.gl-raster's own choice works per tile from the Web
   Mercator scale, which on a globe asks for ever finer tiles towards the poles and keeps
-  the far side: over 16,000 tiles at zoom 9. The debug window's `wapor` entry shows the
-  zoom, overview, pixel size and tile count.
+  the far side: over 16,000 tiles at zoom 9.
 - **Playback** (Local view, [src/map/wapor-player.ts](src/map/wapor-player.ts)) moves
   the range forward by its own unit (a year for whole years, a month for whole months,
   a dekad for whole dekads, else 10 days), 0.7 s a frame, and stops at the last published one (play again there
@@ -299,7 +294,7 @@ water-portal/
   particles streaming down them. The rivers are drawn as a vector field into an offscreen texture
   whenever the view changes, the particles move through it on the GPU and leave fading trails;
   big rivers carry more of them as they're wider. While it shows, the map repaints every frame
-  (map.ts's `animate`). It needs WebGL 2 with float render targets, and isn't draped on the relief.
+  (map.ts's `animate`). It needs WebGL 2 with float render targets.
   For now the legend has sliders for the particles' look (count, speed, trails, size, speed
   contrast, river widths, how many rivers, their opacity) to find the best settings; **Copy
   settings** copies them as JSON. The defaults are `PARTICLES` in `scheme-map.ts`.

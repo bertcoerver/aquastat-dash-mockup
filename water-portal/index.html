@@ -63,24 +63,10 @@
         </div>
         <div class="layers-group">
           <span class="layers-group-label">Layout</span>
-          <label><input type="checkbox" id="debug-toggle" /> Debug window</label>
           <button class="layers-action" id="reset-layout" type="button">Reset layout</button>
         </div>
       </div>
     </div>
-
-    <section class="debug-panel" id="debug-panel" aria-label="Debug">
-      <header class="debug-head" id="debug-head">
-        Debug
-        <span class="debug-actions">
-          <button class="debug-button" id="debug-copy" title="Copy as JSON">Copy</button>
-          <button class="debug-button debug-collapse" id="debug-collapse" aria-expanded="true" aria-controls="debug-body" title="Collapse">–</button>
-          <button class="debug-button debug-collapse" id="debug-close" title="Close (Layers menu brings it back)" aria-label="Close">×</button>
-        </span>
-      </header>
-      <div class="debug-settings" id="debug-settings"></div>
-      <div class="debug-body" id="debug-body"></div>
-    </section>
 
     <aside class="legend" id="wapor-legend" hidden>
       <!-- The variable shown; a menu of the others (src/panels/title-menu.ts). -->

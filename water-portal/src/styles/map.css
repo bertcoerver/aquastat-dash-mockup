@@ -4,7 +4,7 @@
   inset: 0;
 }
 
-/* MapLibre's controls (zoom, compass, 3D, layers, credits) in the theme's colours. */
+/* MapLibre's controls (zoom, compass, layers, credits) in the theme's colours. */
 .maplibregl-ctrl-group,
 .maplibregl-ctrl.maplibregl-ctrl-attrib.maplibregl-compact {
   background: var(--surface);

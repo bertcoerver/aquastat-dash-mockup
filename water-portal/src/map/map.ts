@@ -3,8 +3,7 @@
  * deck.gl uses a GlobeView that moves with MapLibre's camera. There is no basemap:
  * MapLibre only paints the ocean, and all data are deck.gl layers.
  */
-import type { PickingInfo } from "@deck.gl/core";
-import { _TerrainExtension as TerrainExtension } from "@deck.gl/extensions";
+import type { Layer, PickingInfo } from "@deck.gl/core";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -15,7 +14,6 @@ import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
 import { basinSchemeLayers, PARTICLES_ID, type BasinScheme } from "./layers/basin-scheme";
-import { terrainLayer } from "./layers/terrain";
 import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
@@ -140,7 +138,6 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     basinStats: null as BasinStatFills | null,
     scheme: null as BasinScheme | null,
     dragged: null as LngLat | null, // the marker while it is dragged
-    terrain: false, // 3D relief (the button among the map's controls)
   };
 
   const map = new maplibregl.Map({
@@ -160,16 +157,6 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     },
   });
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "bottom-right");
-  // The relief on and off, above zoom. MapLibre's TerrainControl only switches
-  // MapLibre's terrain, which deck.gl layers don't follow; this borrows its icon.
-  const terrainButton = document.createElement("button");
-  terrainButton.type = "button";
-  terrainButton.innerHTML = '<span class="maplibregl-ctrl-icon" aria-hidden="true"></span>';
-  terrainButton.addEventListener("click", () => setTerrain(!state.terrain));
-  const terrainBox = document.createElement("div");
-  terrainBox.className = "maplibregl-ctrl maplibregl-ctrl-group";
-  terrainBox.append(terrainButton);
-  map.addControl({ onAdd: () => terrainBox, onRemove: () => terrainBox.remove() }, "bottom-right");
   // MapLibre spells the credits out at first, until the map is moved; keep them to the
   // ⓘ from the start (they show on a click).
   const attrib = container.querySelector(".maplibregl-ctrl-attrib")!;
@@ -283,23 +270,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     onHover: (info) => onHover?.(toLngLat(info.coordinate)),
   });
   map.addControl(overlay);
-  // MapLibre draws the globe's sphere into the depth buffer before its first 3D
-  // custom layer, which would hide the relief's lowlands and coasts (wherever the
-  // mesh dips to sea level). Clear it again for deck.gl: a 3D custom layer of its own,
-  // so the sphere goes in before it (deck.gl's layers are kept last).
-  map.on("load", () => {
-    map.addLayer({
-      id: "clear-depth",
-      type: "custom",
-      renderingMode: "3d",
-      render(gl) {
-        if (!state.terrain) return;
-        gl.depthMask(true);
-        gl.clear(gl.DEPTH_BUFFER_BIT);
-      },
-    });
-    render();
-  });
+  map.on("load", () => render());
   map.getCanvasContainer().addEventListener("pointerleave", () => onHover?.(null));
   function render() {
     overlay.setProps({ layers: drawn() });
@@ -318,61 +289,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     frame();
   }
 
-  /**
-   * The layers as drawn: with the relief, the terrain first (it has to exist before
-   * the others sample it) and the others draped on it, the marker and the symbols
-   * lifted to its height. Left out rather than hidden without it, as a hidden
-   * TileLayer still loads its tiles.
-   */
+  /** The layers as drawn: each hides the far side of the globe. */
   function drawn() {
     // (The particles are drawn off screen and pasted on, flat: no extensions.)
-    const plain = (layer: ReturnType<typeof layers>[number]) => !layer || layer.id.startsWith(PARTICLES_ID);
-    if (!state.terrain) return layers().map((layer) => (plain(layer) ? layer : layer.clone({ extensions: [...layer.props.extensions, HORIZON] })));
-    const draped = layers().map(
-      (layer) =>
-        plain(layer) ? layer :
-        layer.clone({
-          // Layers of their own: TerrainExtension leaves its draw mode in the layer's
-          // state, and a layer it had draped wouldn't be drawn once flat again.
-          id: `${layer.id}-draped`,
-          extensions: [...layer.props.extensions, HORIZON, TERRAIN],
-          // (tile layers: see redrawDrape)
-          ...("onTileLoad" in layer.props && { onTileLoad: redrawDrape }),
-        }),
+    return layers().map((layer: Layer | null) =>
+      !layer || layer.id.startsWith(PARTICLES_ID) ? layer : layer.clone({ extensions: [...layer.props.extensions, HORIZON] }),
     );
-    return [terrainLayer({ color: hexColor(theme.ocean) }), ...draped];
-  }
-
-  function setTerrain(on: boolean) {
-    state.terrain = on;
-    showTerrainButton();
-    // Tilted to show the relief; flat again without it.
-    if (on && map.getPitch() < 30) map.easeTo({ pitch: 55, duration: 800 });
-    if (!on) map.easeTo({ pitch: 0, duration: 800 });
-    render();
-  }
-  function showTerrainButton() {
-    const on = state.terrain;
-    terrainButton.className = on ? "maplibregl-ctrl-terrain-enabled" : "maplibregl-ctrl-terrain";
-    terrainButton.title = on ? "Flat map" : "3D terrain";
-    terrainButton.setAttribute("aria-pressed", String(on));
-  }
-  showTerrainButton();
-
-  /**
-   * TerrainExtension renders the draped layers into a texture per terrain tile and
-   * only re-renders it when a draped layer changes. A TileLayer shows a tile that has
-   * loaded by filtering its sub-layers at draw time, which changes no layer, so a
-   * tile wouldn't show until the camera moves. Mark the textures stale by hand
-   * (deck.gl internals: TerrainEffect; see terrain-poc).
-   */
-  function redrawDrape() {
-    type TerrainEffect = { terrainCovers?: Map<string, { isDirty: boolean }> };
-    const deck = (overlay as unknown as { _deck?: { effectManager?: { getEffects(): TerrainEffect[] } } })._deck;
-    for (const effect of deck?.effectManager?.getEffects() ?? []) {
-      effect.terrainCovers?.forEach((cover) => (cover.isDirty = true));
-    }
-    map.triggerRepaint();
   }
 
   // Dragging the marker: a press on it holds the map still (preventDefault keeps
@@ -447,11 +369,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         openWapor(p).then(render, () => {});
         return null;
       }
-      const shown = waporLayer({ id, period: p, ramp: state.waporRamp, maxGap: state.waporMaxGap, onLoad: entry.onLoad, hidden, onViewportLoad });
-      // On the relief: deck.gl-raster draws its tiles as an instanced mesh, which
-      // TerrainExtension takes for 3D objects and lifts to the terrain's height, where
-      // they fight the terrain mesh. Drape them like the areas instead.
-      return state.terrain ? shown?.clone({ terrainDrawMode: "drape", onTileLoad: redrawDrape } as object) : shown;
+      return waporLayer({ id, period: p, ramp: state.waporRamp, maxGap: state.waporMaxGap, onLoad: entry.onLoad, hidden, onViewportLoad });
     };
     const l1 = !atL2
       ? layer(period, `wapor-aeti-${entry.id}`, next, next ? () => showNextWapor(entry) : undefined)
@@ -601,12 +519,6 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 
 // Every layer hides the far side of the globe (tile layers pass it on to their tiles).
 const HORIZON = new HorizonExtension();
-const TERRAIN = new TerrainExtension();
-
-/** A CSS hex colour ("#rrggbb"), opaque. */
-function hexColor(hex: string): Color {
-  return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).concat(255) as Color;
-}
 
 /** The side panels: when one is open (not folded, foldable.ts), the camera frames what it shows beside it. */
 const SIDE_PANELS = ".wb-panel:not([hidden]):not(.folding)";
@@ -615,7 +527,7 @@ const MIN_UNCOVERED = 320;
 
 /**
  * How far in from the map's left and right edges the open side panels reach, in
- * pixels. Small floating boxes (legends, the layers menu, the debug window) don't count.
+ * pixels. Small floating boxes (legends, the layers menu) don't count.
  */
 function coveredSides(container: HTMLElement) {
   const box = container.getBoundingClientRect();

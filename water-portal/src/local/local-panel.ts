@@ -12,7 +12,6 @@ import type { Selection } from "../selection";
 import { MAX_DAY, MAX_DK, WAPOR_MIN_YEAR, addYears, dayDk, dkFirstDay, dkLastDay, dkY, fmtDay, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
 import { coveringDekads, type DayRange, type DekadRange, type View } from "../toolbar/range-rules";
 import { setProgress } from "../panels/load-bar";
-import { cogStats } from "./cog-pixel";
 import { loadPointSeries, waporPixelArea, type PointSeries } from "./point-series";
 import { initYearBars, type YearBar } from "./year-bars";
 
@@ -22,8 +21,6 @@ interface LocalPanelOptions {
   setRange(range: DekadRange): void;
   /** The same, in days (a bar of the year chart: the same days in another year). */
   setDays(days: DayRange): void;
-  /** What loading the series took, for the debug window. */
-  debug(value: unknown): void;
   /** Other units picked on the chart (its y axis title goes through them). */
   onUnits(units: WaporUnits): void;
 }
@@ -39,7 +36,7 @@ export interface LocalPanel {
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
 
-export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: LocalPanelOptions): LocalPanel {
+export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPanelOptions): LocalPanel {
   const $ = (id: string) => document.getElementById(id)!;
   const message = $("lp-message");
   const section = $("lp-series");
@@ -84,20 +81,6 @@ export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: 
       pixelArea = area;
       render();
     });
-    const started = performance.now();
-    const before = { ...cogStats };
-    const report = (done: boolean) =>
-      debug({
-        variable: variable.id,
-        lon: lngLat[0],
-        lat: lngLat[1],
-        dekads: series && `${series.loaded} of ${series.dekads.length}`,
-        done,
-        requests: cogStats.requests - before.requests,
-        MB: Math.round((cogStats.bytes - before.bytes) / 1e4) / 100,
-        retries: cogStats.retries - before.retries,
-        seconds: Math.round(performance.now() - started) / 1000,
-      });
     loadPointSeries(
       variable,
       lngLat,
@@ -111,14 +94,12 @@ export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: 
       () => {
         status = { kind: "ready" };
         render();
-        report(true);
       },
       (err: Error) => {
         if (controller.signal.aborted) return;
         controller.abort(); // the other dekads still being read
         status = { kind: "error", message: `Couldn't read ${variable.label.toLowerCase()} at this point: ${err.message}` };
         render();
-        report(false);
       },
     );
   }

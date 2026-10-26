@@ -73,9 +73,6 @@ interface Image {
   metadata: DecoderMetadata;
 }
 
-/** Bytes read, requests made and tried again, for the debug window. */
-export const cogStats = { requests: 0, bytes: 0, retries: 0 };
-
 class Missing extends Error {}
 
 /** A request that hangs would hold up the whole series: it's given up on, and tried again. */
@@ -90,18 +87,15 @@ async function readRange(url: string, start: number, length: number, signal?: Ab
       return await readRangeOnce(url, start, length, signal ? AbortSignal.any([signal, timeout]) : timeout);
     } catch (err) {
       if (signal?.aborted || err instanceof Missing || attempt === ATTEMPTS) throw err;
-      cogStats.retries++;
     }
   }
 }
 
 async function readRangeOnce(url: string, start: number, length: number, signal: AbortSignal) {
-  cogStats.requests++;
   const res = await fetch(url, { headers: { Range: `bytes=${start}-${start + length - 1}` }, signal });
   if (res.status >= 400 && res.status < 500) throw new Missing(`${res.status} ${url}`);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}: ${url}`);
   const buffer = await res.arrayBuffer();
-  cogStats.bytes += buffer.byteLength;
   // A server that ignores the range sends the whole file.
   return res.status === 206 ? buffer : buffer.slice(start, start + length);
 }

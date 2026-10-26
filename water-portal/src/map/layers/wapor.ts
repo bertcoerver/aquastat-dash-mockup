@@ -925,28 +925,6 @@ const L1_PER_L2 = 3;
  */
 const L2_FROM = 2 / L1_PER_L2; // L1's pixel size, times this, is L2's first overview's
 
-/** Which overview the raster covers the view with, for the debug window. */
-export interface WaporTiles {
-  zoom: number;
-  level: WaporLevel;
-  overview: string;
-  pixelSize: string;
-  /** How big one raster pixel is on screen, at the centre of the view. */
-  pixelOnScreen: string;
-  tiles: number;
-  /** The visible part of the globe, in degrees. */
-  area: string;
-}
-
-let reportTiles: ((tiles: WaporTiles) => void) | null = null;
-
-/** Run `callback` whenever the raster picks tiles for a new view. */
-export function onWaporTiles(callback: (tiles: WaporTiles) => void) {
-  reportTiles = callback;
-}
-
-const fmtMeters = (m: number) => (m < 1000 ? `${Math.round(m)} m` : `${+(m / 1000).toFixed(1)} km`);
-
 /** Great-circle distance in metres. */
 function metersBetween([lon1, lat1]: number[], [lon2, lat2]: number[]) {
   const rad = Math.PI / 180;
@@ -1099,7 +1077,7 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
         // A lon/lat grid: every tile spans the same degrees, from the top left one's
         // corner (not every variable's grid reaches the poles).
         const level = levels[z];
-        const { matrixWidth, matrixHeight, metersPerPixel } = level;
+        const { matrixWidth, matrixHeight } = level;
         const { topLeft: [west, north], bottomRight: [east, south] } = level.projectedTileCorners(0, 0);
         const [degX, degY] = [east - west, north - south];
         const around = Math.round(360 / degX); // tiles around the globe, if the grid went all the way
@@ -1118,17 +1096,6 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
         // has loaded, to show until L2's are in (see map.ts).
         const shown = period.level === "L2" ? wanted === "L2" : wanted === "L1" || !period.l2;
         if (!shown) return period.level === "L1" ? indices.filter((index) => loadedTile(period, true, cachedAt(index))) : [];
-
-        const round = (v: number) => Math.round(v);
-        reportTiles?.({
-          zoom: viewport.zoom,
-          level: period.level,
-          overview: z === last ? "full resolution" : `overview ${last - z} of ${last}`,
-          pixelSize: fmtMeters(metersPerPixel),
-          pixelOnScreen: `${+(metersPerPixel / metersPerCssPixel).toFixed(2)} CSS px`,
-          tiles: indices.length,
-          area: `lon ${round(box.west)}…${round(box.east)}, lat ${round(box.south)}…${round(box.north)}`,
-        });
         return indices;
       }
     }

@@ -6,8 +6,6 @@
  */
 
 const STORAGE_KEY = "water-portal:widths";
-/** Other layouts that "Reset layout" forgets (debug-panel.ts keeps its own). */
-const OTHER_KEYS = ["water-portal:debug-panel", "water-portal:debug-closed"];
 
 const panes = new Map<string, HTMLElement[]>();
 const widths: Record<string, number> = load();
@@ -31,7 +29,7 @@ export function makeResizable(pane: HTMLElement, key: string) {
 /** Forget every pane's width and lay the page out afresh. */
 export function resetLayout() {
   try {
-    for (const k of [STORAGE_KEY, ...OTHER_KEYS]) localStorage.removeItem(k);
+    localStorage.removeItem(STORAGE_KEY);
   } catch {
     // Nothing was kept, then.
   }

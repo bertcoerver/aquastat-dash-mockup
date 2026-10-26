@@ -1,24 +1,23 @@
 /*
- * Playback in the Local view: the range moves forward a step at a time (a day, unless
- * tuned), keeping its length, and the map shows WaPOR for each. Steps shorter than a
- * dekad mostly weigh the same rasters differently, so their tiles are cached already:
+ * Playback in the Local view: the range moves forward a step at a time (a day),
+ * keeping its length, and the map shows WaPOR for each. Steps shorter than a dekad
+ * mostly weigh the same rasters differently, so their tiles are cached already:
  * only a frame that reaches a new dekad loads more.
  *
  * Each frame is loaded ahead: its rasters checked and opened, and the tiles the map
  * shows fetched into the tile cache (see bufferWapor), up to `ahead` frames, `loaders`
  * at a time. Playback starts, and after a stall goes on, once a few frames are in.
- * The timings can be tuned in the debug window. Moving the map changes
- * the tiles, so the frames ahead are loaded again for the new view.
+ * Moving the map changes the tiles, so the frames ahead are loaded again for the new view.
  */
 import { MAX_DAY } from "../toolbar/dekads";
 import type { DayRange } from "../toolbar/range-rules";
 import { bufferWapor, checkedWaporPeriod, onWaporView, waporBuffered, type CheckedWaporPeriod, type WaporVariable } from "./layers/wapor";
 
 export interface PlaybackSettings {
-  stepDays: number; // how far each frame moves the range (from the next play)
+  stepDays: number; // how far each frame moves the range
   frameMs: number; // how long each frame shows
   ahead: number; // frames loaded ahead
-  loaders: number; // frames loading at once (from the next play)
+  loaders: number; // frames loading at once
   startAhead: number; // frames in before playing (or all that are left)
 }
 
@@ -52,8 +51,6 @@ export interface WaporPlayer {
   /** Play from the current range (from the first one if it's the last), or stop. */
   toggle(): void;
   stop(): void;
-  /** Change the timings; they apply straight away (`stepDays` and `loaders` from the next play). */
-  tune(changes: Partial<PlaybackSettings>): void;
 }
 
 /**
@@ -72,7 +69,7 @@ export function initWaporPlayer({
   show: (range: DayRange, checked: CheckedWaporPeriod) => void;
   onState: (state: PlaybackState) => void;
 }): WaporPlayer {
-  const settings = { ...DEFAULT_PLAYBACK };
+  const settings = DEFAULT_PLAYBACK;
   let run: {
     variable: WaporVariable;
     frames: Frame[]; // from the next one to show
@@ -244,11 +241,5 @@ export function initWaporPlayer({
   return {
     toggle: () => (run ? stop() : play()),
     stop,
-    tune(changes) {
-      Object.assign(settings, changes);
-      if (!run) return;
-      wake(run); // more frames ahead, maybe
-      advance(); // fewer needed to start, maybe
-    },
   };
 }

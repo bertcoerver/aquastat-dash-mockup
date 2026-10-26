@@ -8,7 +8,6 @@ import {
   checkedWaporPeriod,
   onWaporLevel,
   onWaporTile,
-  onWaporTiles,
   waporPeriod,
   waporShownLevel,
   waporViewRange,
@@ -16,7 +15,6 @@ import {
   type WaporLevel,
   type WaporPeriod,
   type WaporStretch,
-  type WaporTiles,
 } from "./map/layers/wapor";
 import type { WaporRamp } from "./map/layers/wapor-shader";
 import { createMap } from "./map/map";
@@ -26,14 +24,13 @@ import { NOTHING, selection, type SelectionSource } from "./selection";
 import { initLocalPanel } from "./local/local-panel";
 import { waporPixelArea } from "./local/point-series";
 import { initWaporLegend } from "./map/wapor-legend";
-import { DEFAULT_PLAYBACK, initWaporPlayer, type PlaybackSettings, type PlaybackStatus } from "./map/wapor-player";
-import { debugNumber, initDebugPanel } from "./panels/debug-panel";
+import { initWaporPlayer, type PlaybackStatus } from "./map/wapor-player";
 import { makeResizable } from "./panels/floating";
 import { makeFoldable } from "./panels/foldable";
 import { initLayersMenu } from "./panels/layers-menu";
 import { initLoadBar } from "./panels/load-bar";
 import { initThemeSwitch } from "./panels/theme-switch";
-import { fmtDay, mk } from "./toolbar/dekads";
+import { mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
 import { initToolbar, type Toolbar, type ToolbarState } from "./toolbar/toolbar";
 import { isCountryYear, type DayRange, type View } from "./toolbar/range-rules";
@@ -50,10 +47,8 @@ import "./styles/country.css";
 initLoadBar();
 
 const dark = initThemeSwitch();
-const debug = initDebugPanel(["click", "time", "wapor", "series", "hover"]);
-const round = (v: number) => Math.round(v * 1e4) / 1e4;
 
-// Hover: what's under the pointer, shown in the debug window; in the Basin view, with
+// Hover: what's under the pointer is passed to the panels; in the Basin view, with
 // the water balance model shown, the map also shades the sub-basin there and
 // everything upstream of it. Only the latest
 // lookup is shown, as tiles can arrive out of order while the pointer moves.
@@ -66,7 +61,7 @@ async function showHover(lngLat: LngLat | null) {
     waterBalance.hover(null);
     countryPanel.hover(null);
     basinStats.hover(null);
-    return debug("hover", null);
+    return;
   }
   const place = await placeAt(lngLat);
   if (hovered !== lngLat) return;
@@ -75,12 +70,6 @@ async function showHover(lngLat: LngLat | null) {
   countryPanel.hover(view === "country" ? (place.country?.m49 ?? null) : null);
   basinStats.hover(view === "basin" ? place : null);
   setHoveredSubBasin(MODEL_SHOWN && view === "basin" && place.subBasin ? { id: place.subBasin.id, upstream: upstream! } : null);
-  debug("hover", {
-    lon: round(lngLat[0]),
-    lat: round(lngLat[1]),
-    ...place,
-    upstream: upstream && { count: upstream.size, ids: [...upstream] },
-  });
 }
 
 // Sub-basins can only be selected for the water balance model; without it, picking a
@@ -186,14 +175,6 @@ selection.subscribe((s) => {
   countryPanel.setSelection(s);
   basinStats.setSelection(s);
   localPanel.setSelection(s);
-  debug("click", {
-    source: s.source,
-    lon: s.lngLat && round(s.lngLat[0]),
-    lat: s.lngLat && round(s.lngLat[1]),
-    country: s.country,
-    majorBasin: s.majorBasin,
-    subBasin: s.subBasin,
-  });
 });
 
 function loadList<T>(name: string): Promise<T[]> {
@@ -268,7 +249,6 @@ const waporLegend = initWaporLegend({
     waporMaxGap = maxGap;
     setWaporMaxGap(maxGap);
     stretchWapor();
-    showWaporDebug();
   },
   onStretch(cut) {
     waporStretch = cut;
@@ -293,7 +273,6 @@ const localPanel = initLocalPanel({
   variable: waporVariable,
   setRange: (range) => toolbarApi?.setRange(range),
   setDays: (days) => toolbarApi?.setDays(days),
-  debug: (value) => debug("series", value),
   // The chart's y axis title goes through the units, as the legend's menu.
   onUnits(units) {
     waporLegend.setUnits(units);
@@ -343,7 +322,6 @@ function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boo
   setWapor(period, () => waporWanted === wanted && waporLegend.show(period, "ready"), seamless);
   showWaporLevel();
   stretchWapor();
-  showWaporDebug();
 }
 
 /**
@@ -420,59 +398,11 @@ const player = initWaporPlayer({
     toolbarApi?.setPlayback(state);
   },
 });
-const playbackTuning: { key: keyof PlaybackSettings; label: string; min: number; max: number; step?: number }[] = [
-  { key: "stepDays", label: "Step (days, next play)", min: 1, max: 366 },
-  { key: "frameMs", label: "Frame (ms)", min: 16, max: 5000, step: 10 },
-  { key: "ahead", label: "Frames ahead", min: 1, max: 200 },
-  { key: "loaders", label: "Loaders (next play)", min: 1, max: 12 },
-  { key: "startAhead", label: "Frames to start", min: 1, max: 50 },
-];
-for (const { key, ...input } of playbackTuning) {
-  debugNumber({ key: `playback.${key}`, value: DEFAULT_PLAYBACK[key], ...input }, (value) => player.tune({ [key]: value }));
-}
-
-// Debug: how the value is made, the map zoom and which overview the rasters cover the
-// view with. Tiles are picked on every frame while the map moves, so this redraws at
-// most once a frame.
-let waporDebugFrame = 0;
-let waporDebugShown = "";
-let waporTiles: WaporTiles | null = null;
-onWaporTiles((tiles) => {
-  waporTiles = tiles;
-  showWaporDebug();
-});
-function showWaporDebug() {
-  const period = waporShown;
-  if (!period) return;
-  const tiles = waporTiles;
-  cancelAnimationFrame(waporDebugFrame);
-  waporDebugFrame = requestAnimationFrame(() => {
-    const value = {
-      variable: period.variable.id,
-      equation: period.equation,
-      note: period.note,
-      rasters: period.terms.length,
-      cost: Math.round(period.cost * 10) / 10,
-      unpublished: period.unpublished.length ? period.unpublished : null,
-      quality: period.qualityUrl?.split("/").pop() ?? null,
-      maxGap: period.qualityUrl ? waporMaxGap : null,
-      ...tiles,
-      zoom: tiles && Math.round(tiles.zoom * 100) / 100,
-    };
-    const json = JSON.stringify(value);
-    if (json !== waporDebugShown) debug("wapor", value);
-    waporDebugShown = json;
-  });
-}
 
 function hideWapor() {
   setWapor(null);
   waporShown = null;
   showWaporLevel();
-  waporTiles = null;
-  cancelAnimationFrame(waporDebugFrame);
-  waporDebugShown = "";
-  debug("wapor", null);
 }
 
 // The map follows the view tab, and in the Local view the date range.
@@ -496,16 +426,8 @@ function onToolbarChange({ view: newView, range, days }: ToolbarState) {
     player.stop();
     showWapor(view === "local" ? days : null);
   }
-  debug("time", {
-    view,
-    start: fmtDay(days.start),
-    end: fmtDay(days.end),
-    days: { start: days.start, end: days.end, count: days.end - days.start + 1 },
-    dekads: { start: range.start, end: range.end, count: range.end - range.start + 1 },
-  });
 }
 selection.set(NOTHING);
-debug("hover", null);
 toolbarApi = initToolbar(onToolbarChange, () => player.toggle());
 onToolbarChange(toolbarApi.state);
 // The Basin view's range ends at the latest dekad of the model output. Without the
