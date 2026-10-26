@@ -47,7 +47,7 @@ export interface WaterBalance {
   setMapOverride(override: boolean): void;
 }
 
-type Status = { kind: "idle" } | { kind: "loading"; since: number } | { kind: "error"; message: string } | { kind: "ready"; result: NetworkResult };
+type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; result: NetworkResult };
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -95,14 +95,6 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     render();
   });
 
-  // Collapse the panel to its title.
-  const collapse = $("wb-collapse");
-  collapse.addEventListener("click", () => {
-    const collapsed = panel.classList.toggle("collapsed");
-    collapse.setAttribute("aria-expanded", String(!collapsed));
-    collapse.textContent = collapsed ? "+" : "–";
-  });
-
   for (const button of panel.querySelectorAll<HTMLButtonElement>("[data-csv]")) {
     button.addEventListener("click", () => download(button.dataset.csv as "map" | "timeseries" | "flows"));
   }
@@ -123,7 +115,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       return render();
     }
     const upstream = [...upstreamOf(id)].map((u) => byId.get(u)!).filter(Boolean);
-    state.status = { kind: "loading", since: performance.now() };
+    state.status = { kind: "loading" };
     render();
     networkSeries(outlet, upstream).then(
       (result) => {
@@ -138,11 +130,6 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       },
     );
   }
-
-  // While loading, the elapsed time ticks along.
-  setInterval(() => {
-    if (state.view === "basin" && state.status.kind === "loading") renderMessage();
-  }, 1000);
 
   /** Load (or forget) the network when the selected sub-basin changes in the Basin view. */
   function sync() {
@@ -299,10 +286,6 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       text = state.selection?.majorBasin
         ? "Pick one of its sub-basins (above, or click it on the map) to model the water balance of that sub-basin and everything upstream of it."
         : "Click a sub-basin on the map, or pick one above, to model the water balance of that sub-basin and everything upstream of it.";
-    } else if (status.kind === "loading") {
-      const n = upstreamOf(state.selection.subBasin.id).size + 1;
-      const s = Math.round((performance.now() - status.since) / 1000);
-      text = `Loading the model's output for ${n} sub-basin${n === 1 ? "" : "s"}… ${s} s`;
     } else if (status.kind === "error") {
       text = status.message;
     } else if (status.kind === "ready" && !coveredRange(status.result, state.range)) {

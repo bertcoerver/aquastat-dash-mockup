@@ -114,13 +114,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     render();
   });
 
-  const collapse = $("cp-collapse");
-  collapse.addEventListener("click", () => {
-    const collapsed = panel.classList.toggle("collapsed");
-    collapse.setAttribute("aria-expanded", String(!collapsed));
-    collapse.textContent = collapsed ? "+" : "–";
-  });
-
   function load() {
     const topic = state.topic;
     if (state.status.get(topic)?.kind === "ready") return;
@@ -264,8 +257,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     message.classList.toggle("error", status.kind === "error");
     if (!ctx) {
       $("cp-subtitle").textContent = "";
-      message.textContent = status.kind === "error" ? status.message : "Loading AQUASTAT data…";
-      message.hidden = false;
+      message.textContent = status.kind === "error" ? status.message : "";
+      message.hidden = status.kind !== "error";
       $("cp-stats").innerHTML = "";
       cardsEl.innerHTML = "";
       legend.hidden = true;

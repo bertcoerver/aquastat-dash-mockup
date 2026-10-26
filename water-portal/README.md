@@ -118,7 +118,8 @@ water-portal/
     │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
     │   ├── debug-panel.ts  Draggable window: click, time and hover state as a JSON tree
-    │   └── loading-indicator.ts  Spinner in the top bar while any data request is running
+    │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
+    │   └── load-bar.ts     Load bar under the graph pane's heading while anything loads
     ├── toolbar/
     │   ├── dekads.ts       Dates as dekad numbers (3 per month, 36 per year), and as day numbers
     │   ├── place-picker.ts Country / basin search or coordinates, per view

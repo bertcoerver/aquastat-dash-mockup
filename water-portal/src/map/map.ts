@@ -586,8 +586,8 @@ function hexColor(hex: string): Color {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).concat(255) as Color;
 }
 
-/** The side panels: when one is open, the camera frames what it shows beside it. */
-const SIDE_PANELS = ".wb-panel:not([hidden]):not(.collapsed)";
+/** The side panels: when one is open (not folded, foldable.ts), the camera frames what it shows beside it. */
+const SIDE_PANELS = ".wb-panel:not([hidden]):not(.folding)";
 /** Leave a panel out where it would leave less than this much of the map, in pixels. */
 const MIN_UNCOVERED = 320;
 

@@ -33,15 +33,16 @@ export type WaporStatus = "checking" | "loading" | "ready" | "missing" | "error"
 export type QualityStatus = "checking" | "ready" | "missing";
 
 const STATUS_TEXT: Record<WaporStatus, string> = {
-  checking: "Looking for the map…",
-  loading: "Loading…",
+  // (the load bar says these)
+  checking: "",
+  loading: "",
   ready: "",
   missing: "Not published yet for this period.",
   error: "Couldn't reach WaPOR's storage.",
 };
 
 const QUALITY_TEXT: Record<Exclude<QualityStatus, "ready">, string> = {
-  checking: "Looking for the quality layer…",
+  checking: "", // (the load bar says it)
   missing: "Quality layer not published yet for this dekad.",
 };
 

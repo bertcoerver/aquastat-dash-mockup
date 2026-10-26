@@ -4,7 +4,7 @@
  *   Basin   — a tree of major basins and their sub-basins (basin-tree.ts), as the title
  *             of the water balance panel
  *   Local   — the point as the Local panel's title, which opens longitude / latitude
- *             fields; the picker also shows and collapses the panel (its charts: local-panel.ts)
+ *             fields; the picker also shows the panel (its charts: local-panel.ts)
  * They show the current selection, whichever way it was made. A title reads as a
  * heading ("World", "Kenya") with a small ▾, and becomes a search field when clicked.
  */
@@ -91,12 +91,6 @@ export function initPlacePicker({ countries, basins, subBasins, onCountry, onBas
   clearPoint.addEventListener("click", () => onPoint(null));
 
   const localPanel = document.getElementById("lp-panel")!;
-  const collapse = document.getElementById("lp-collapse")!;
-  collapse.addEventListener("click", () => {
-    const collapsed = localPanel.classList.toggle("collapsed");
-    collapse.setAttribute("aria-expanded", String(!collapsed));
-    collapse.textContent = collapsed ? "+" : "–";
-  });
   const titles = [...document.querySelectorAll<HTMLElement>(".title-field")].map(titleField);
   const fitTitles = () => titles.forEach((fit) => fit());
 

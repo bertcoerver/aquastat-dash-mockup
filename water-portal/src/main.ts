@@ -29,8 +29,9 @@ import { initWaporLegend } from "./map/wapor-legend";
 import { DEFAULT_PLAYBACK, initWaporPlayer, type PlaybackSettings, type PlaybackStatus } from "./map/wapor-player";
 import { debugNumber, initDebugPanel } from "./panels/debug-panel";
 import { makeResizable } from "./panels/floating";
+import { makeFoldable } from "./panels/foldable";
 import { initLayersMenu } from "./panels/layers-menu";
-import { initLoadingIndicator } from "./panels/loading-indicator";
+import { initLoadBar } from "./panels/load-bar";
 import { initThemeSwitch } from "./panels/theme-switch";
 import { fmtDay, mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
@@ -46,7 +47,7 @@ import "./styles/basin.css";
 import "./styles/country.css";
 
 // First, so it counts every request from here on.
-initLoadingIndicator();
+initLoadBar();
 
 const dark = initThemeSwitch();
 const debug = initDebugPanel(["click", "time", "wapor", "series", "hover"]);
@@ -204,36 +205,48 @@ async function loadData<T>(name: string): Promise<T> {
   return response.json();
 }
 
-// The graph panes (one per view, one shows at a time) share a width that can be changed.
+// The graph panes (one per view, one shows at a time) share a width that can be changed,
+// and fold away when the pointer isn't over them.
 const $ = (id: string) => document.getElementById(id)!;
-for (const id of ["cp-panel", "wb-panel", "lp-panel"]) makeResizable($(id), "side-panel");
-
-// The loading spinner and the Layers button go with the map's controls, above zoom
-// (MapLibre stacks later bottom controls on top).
-for (const id of ["layers-menu", "map-loading"]) {
-  const box = document.createElement("div");
-  box.className = "maplibregl-ctrl maplibregl-ctrl-group";
-  box.append($(id));
-  waterMap.map.addControl({ onAdd: () => box, onRemove: () => box.remove() }, "bottom-right");
+for (const id of ["cp-panel", "wb-panel", "lp-panel"]) {
+  makeResizable($(id), "side-panel");
+  makeFoldable($(id));
 }
+
+// The Layers button goes with the map's controls, above zoom (MapLibre stacks later
+// bottom controls on top).
+const layersBox = document.createElement("div");
+layersBox.className = "maplibregl-ctrl maplibregl-ctrl-group";
+layersBox.append($("layers-menu"));
+waterMap.map.addControl({ onAdd: () => layersBox, onRemove: () => layersBox.remove() }, "bottom-right");
 
 // The date range goes in the middle of the strip along the bottom between the graph
-// pane (when it reaches down there) and the map's controls. (Not the credits: the
-// pane would move each time they're opened or closed; it goes over them instead.)
+// pane (when it reaches down there, folded) and the map's controls. (Not the credits:
+// the pane would move each time they're opened or closed; it goes over them instead.
+// Nor the unfolded pane, which would push it aside on every hover.) Where the range is
+// under the pane, the unfolded pane stops above it (--pane-bottom).
 const controls = document.querySelector<HTMLElement>(".maplibregl-ctrl-bottom-right .maplibregl-ctrl-group")!;
 const graphPanes = ["cp-panel", "wb-panel", "lp-panel"].map($);
+const rangePane = $("pane-range");
 function fitRange() {
-  let left = 0;
-  for (const pane of graphPanes) {
-    const r = pane.getBoundingClientRect();
-    if (r.width > 0 && r.bottom > window.innerHeight - 120) left = Math.max(left, r.right);
+  const root = document.documentElement.style;
+  if (graphPanes.every((pane) => pane.classList.contains("resting"))) {
+    let left = 0;
+    for (const pane of graphPanes) {
+      const r = pane.getBoundingClientRect();
+      if (r.width > 0 && r.bottom > window.innerHeight - 120) left = Math.max(left, r.right);
+    }
+    const right = window.innerWidth - controls.getBoundingClientRect().left;
+    root.setProperty("--range-left", `${Math.round(left)}px`);
+    root.setProperty("--range-right", `${Math.round(right)}px`);
   }
-  const right = window.innerWidth - controls.getBoundingClientRect().left;
-  document.documentElement.style.setProperty("--range-left", `${Math.round(left)}px`);
-  document.documentElement.style.setProperty("--range-right", `${Math.round(right)}px`);
+  const range = rangePane.getBoundingClientRect();
+  const paneRight = Math.max(...graphPanes.map((pane) => pane.getBoundingClientRect().right));
+  if (range.height > 0 && paneRight > range.left) root.setProperty("--pane-bottom", `${Math.round(window.innerHeight - range.top + 12)}px`);
+  else root.removeProperty("--pane-bottom");
 }
 const rangeObserver = new ResizeObserver(fitRange);
-for (const pane of graphPanes) rangeObserver.observe(pane);
+for (const el of [...graphPanes, rangePane]) rangeObserver.observe(el);
 window.addEventListener("resize", fitRange);
 
 const layersMenu = initLayersMenu(setLayerVisible);

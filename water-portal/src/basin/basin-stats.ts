@@ -25,6 +25,7 @@ import { flyTo, type Extent } from "../map/fly-to";
 import type { Place } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
 import { mixColor, type Color } from "../map/theme";
+import { unlessLoading } from "../panels/load-bar";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { DEFAULT_STRETCH, fmtStop, initRampMenu } from "../panels/ramp-menu";
 import { initTitleMenu, type MenuOption } from "../panels/title-menu";
@@ -282,14 +283,14 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const range = state.range;
     const stats = status.kind === "ready" && range ? periodFor(`${range.start}-${range.end}`, () => periodStats(status.series, range)) : null;
     if (!stats?.covered) {
-      message.hidden = false;
       message.classList.toggle("error", status.kind === "error");
       message.textContent =
         status.kind === "error"
           ? status.message
           : status.kind === "ready"
             ? "There are no WaPOR data for the selected period (they run from 2018 to the end of 2025)."
-            : "Loading basin statistics…";
+            : "";
+      message.hidden = !message.textContent;
       tilesEl.innerHTML = "";
       cardsEl.innerHTML = "";
       return clear();
@@ -482,7 +483,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     $("bs-legend-period").parentElement!.hidden = scheme ? !!status : empty;
     $("bs-legend-ramp").hidden = empty;
     $("bs-legend-ticks").hidden = empty;
-    $("bs-legend-status").textContent = status ?? "";
+    $("bs-legend-status").textContent = unlessLoading(status ?? "");
     $("bs-legend-period").textContent = period;
     showUnit(spec);
     $("bs-legend-ramp").style.background = scale.gradient;

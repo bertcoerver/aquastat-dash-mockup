@@ -18,6 +18,7 @@ import type { SchemeArrow, SchemeDot, SchemeLineStyle } from "../map/layers/basi
 import type { WaterMap } from "../map/map";
 import type { SubBasin } from "../map/sub-basin-network";
 import type { Color } from "../map/theme";
+import { LOADING } from "../panels/load-bar";
 import { fmtStop } from "../panels/ramp-menu";
 import { slideSelection } from "../panels/segmented";
 import { loadMiddles, loadRivers } from "./rivers";
@@ -163,7 +164,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       const s = status(major);
       if (s.kind !== "ready") {
         prepared = null;
-        return { status: s.kind === "loading" ? "Loading the rivers…" : s.message };
+        return { status: s.kind === "loading" ? LOADING : s.message };
       }
       prepared = { key: `${major}:${k}:${valueKey}`, kind: k, scheme: s.scheme, value };
       return { status: "" };

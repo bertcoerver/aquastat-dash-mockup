@@ -24,6 +24,7 @@
  */
 import { bars, lines, type BarRow, type LineSeries } from "../country/charts";
 import { perDays, waporVariable, type WaporPer } from "../map/layers/wapor";
+import { LOADING, unlessLoading } from "../panels/load-bar";
 import { MONTHS, MIN_YEAR, dkM, dkY, startDay, endDay } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
 import { GROUPINGS, climateYears, groupById, groupOf, groupsOf, inGroup, type Grouping } from "./groups";
@@ -339,14 +340,14 @@ function othersStatus(c: BasinCtx, m: MeasureKey): string {
     return `The record (${dkY(c.windows.first)}–${dkY(c.windows.last)}) has too few other ${spanYears(c) > 1 ? `${spanYears(c)}-year spans` : "years"} to compare this period with.`;
   }
   if (MEASURES[m].flux) return fluxMessage(c, m) ?? "";
-  return c.ratesError ?? (c.rates ? "" : "Loading the other years…");
+  return c.ratesError ?? (c.rates ? "" : LOADING);
 }
 
 /** Why the model's output isn't there (null: it is). */
 function fluxMessage(c: BasinCtx, m: MeasureKey, level: "major" | "sub" = "major"): string | null {
   if (!MEASURES[m].flux) return null;
   const status = level === "sub" ? c.flux.sub : c.flux.majors;
-  if (!status || status.kind === "loading") return "Loading discharge and storage change…";
+  if (!status || status.kind === "loading") return LOADING;
   return status.kind === "error" ? status.message : null;
 }
 
@@ -452,7 +453,7 @@ export function tileValue(c: BasinCtx, t: BasinTile) {
 
 export const tileMap = (c: BasinCtx, t: BasinTile) => measureMap(c, t.measure, levelOf(c));
 
-const empty = (text: string) => ({ html: `<p class="ch-empty">${text}</p>`, csv: [] as (string | number)[][] });
+const empty = (text: string) => ({ html: `<p class="ch-empty">${unlessLoading(text)}</p>`, csv: [] as (string | number)[][] });
 const csvOf = (rows: BarRow[], columns: string[]) => [
   ["area", ...columns],
   ...rows.filter((r) => !r.gap).map((r) => [r.label.replace(/^\d+\. /, ""), ...r.values]),
@@ -491,7 +492,7 @@ function groupCard(m: MeasureKey, grouping = GROUPING[m]): BasinCard {
     title: (c) => `${def.label} by ${GROUPINGS[grouping].label}, ${c.period}`,
     caption: (c) => {
       const status = othersStatus(c, m);
-      return (status ? `${status} ` : `Against the average of the same days in ${others(c).length} other years (${othersLabel(c)}). `) +
+      return (status === LOADING ? "" : status ? `${status} ` : `Against the average of the same days in ${others(c).length} other years (${othersLabel(c)}). `) +
         groupingNote(grouping) +
         (MEASURES[m].flux ? "Groups and the World: summed over their major basins. " : "") + "Hover a row to pick out its basins on the map.";
     },
@@ -585,7 +586,7 @@ function yearsCard(m: MeasureKey): BasinCard {
       series.push({ label: areaName(c, focus(c)), color: def.color, values: at(focus(c)), emphasis: true });
       const label = (w: number) => windowLabel(ranges[w] ?? ranges[0]);
       const html = lines({ series, from: 0, to: ranges.length - 1, selected: current, unit: unitOf(c, m), axis: def.label, width: c.width, clickable: (w) => w !== current, label }) +
-        (c.rates || def.flux ? "" : `<p class="ch-empty">${c.ratesError ?? "Loading the other years…"}</p>`);
+        (c.rates || def.flux || !c.ratesError ? "" : `<p class="ch-empty">${c.ratesError}</p>`);
       const csv: (string | number)[][] = [["years", ...series.map((s) => `${s.label} ${column(c, m)}`)]];
       ranges.forEach((_, w) => csv.push([label(w), ...series.map((s) => s.values.get(w) ?? NaN)]));
       return { html, csv };
@@ -661,7 +662,7 @@ const monthlyCard: BasinCard = {
   caption: (c) => `${c.units.basin ? "Summed, in km³" : "Averaged over the area, in mm"} per month (months at the ends of the range only count the days in it). Hover a series to map it.`,
   render(c) {
     const m = c.monthly;
-    if (!m) return empty("Loading the monthly cycle…");
+    if (!m) return empty(LOADING);
     if (!m.months.length) return empty("No data");
     const units = { per: "month", basin: c.units.basin } as const;
     const k = units.basin ? monthlyArea(c) * 1e-6 : 1;

@@ -15,12 +15,6 @@
   <body>
     <div id="map"></div>
 
-    <!-- Turns while data loads (src/panels/loading-indicator.ts); main.ts puts it with
-         the map's controls, as it does the Layers button. -->
-    <div class="map-loading" id="map-loading" title="Loading indicator">
-      <span class="loading" id="loading" role="status"><span class="loading-spinner" aria-hidden="true"></span><span class="loading-text" id="loading-text"></span></span>
-    </div>
-
     <!-- The date range, at the bottom of the map. -->
     <div class="range-pane range" id="pane-range" role="group" aria-label="Date range">
       <!-- Local view: play the range forward (see src/map/wapor-player.ts). -->
@@ -209,7 +203,6 @@
           </div>
           <p id="cp-subtitle"></p>
         </div>
-        <button class="panel-collapse" type="button" id="cp-collapse" aria-expanded="true" aria-controls="cp-body" title="Collapse">–</button>
       </header>
       <div class="wb-body" id="cp-body">
         <div class="wb-vars cp-topics" id="cp-topics" role="tablist" aria-label="Topic"></div>
@@ -237,7 +230,6 @@
           </div>
           <p id="wb-subtitle"></p>
         </div>
-        <button class="panel-collapse" type="button" id="wb-collapse" aria-expanded="true" aria-controls="wb-body" title="Collapse">–</button>
       </header>
       <div class="wb-body" id="wb-body">
         <p class="wb-message" id="wb-message"></p>
@@ -304,7 +296,6 @@
           </div>
           <p id="lp-subtitle">Click the map, or the title to type coordinates.</p>
         </div>
-        <button class="panel-collapse" type="button" id="lp-collapse" aria-expanded="true" aria-controls="lp-body" title="Collapse">–</button>
       </header>
       <div class="wb-body" id="lp-body">
         <!-- Charts for the point (src/local/local-panel.ts). -->
