@@ -34,8 +34,7 @@ export interface ToolbarState {
 }
 
 /** Briefly highlight an element that the system (not the user) changed. */
-function flash(id: string) {
-  const el = document.getElementById(id)!;
+export function flash(el: HTMLElement) {
   el.classList.remove("flash");
   void el.offsetWidth; // restart the animation
   el.classList.add("flash");
@@ -69,8 +68,8 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     render();
     for (const end of ["start", "end"] as const) {
       if (!adjusted[end]) continue;
-      flash(`${end}-handle`);
-      flash(`${end}-label`);
+      flash(document.getElementById(`${end}-handle`)!);
+      flash(document.getElementById(`${end}-label`)!);
     }
     onChange(current());
   }

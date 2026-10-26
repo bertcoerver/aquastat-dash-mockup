@@ -45,13 +45,14 @@
 }
 
 /* --- Panel --------------------------------------------------------------------------- */
-/* Left, full height; only its width can be changed (floating.ts). At least wide enough
+/* Left, full height (down to the date range where that is below it: main.ts sets
+   --pane-bottom); only its width can be changed (floating.ts). At least wide enough
    for the country view's topic tabs on one line. */
 .wb-panel {
   position: fixed;
   top: 12px;
   left: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  bottom: var(--pane-bottom, calc(12px + env(safe-area-inset-bottom, 0px)));
   z-index: 5;
   width: min(var(--side-w), calc(100vw - 24px));
   min-width: min(360px, calc(100vw - 24px));
@@ -67,35 +68,100 @@
   border-radius: 8px;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
 }
-.wb-panel.collapsed {
+/* Folded (foldable.ts): only the heading, and the pinned chart if any, which the body
+   is scrolled to; the rest fades out (--rest: 0 open … 1 folded) but keeps its layout. */
+.wb-panel.folding {
   bottom: auto;
-  overflow: visible; /* the title's dropdown hangs below */
-  height: auto !important;
   min-height: 0;
 }
-.wb-panel.collapsed .wb-body {
-  display: none;
+.wb-panel.folding > .wb-body {
+  overflow: hidden;
 }
-/* The heading's rows (view tabs, title, subtitle) in the first column; the collapse
-   button beside the tabs, centred on them. */
+.wb-panel.folding:not(.has-kept) > .wb-body,
+.wb-panel.folding.has-kept > .wb-body > :not(.keep-path, .kept),
+.wb-panel.folding.has-kept .keep-path > :not(.keep-path, .kept) {
+  opacity: calc(1 - var(--rest, 0));
+}
+/* With a pinned chart, the pane around it goes, leaving the heading and the chart as
+   boxes of their own. */
+.wb-panel.folding.has-kept {
+  background: color-mix(in srgb, var(--surface) calc(94% * (1 - var(--rest, 0))), transparent);
+  border-color: color-mix(in srgb, var(--line) calc(100% * (1 - var(--rest, 0))), transparent);
+  box-shadow: 0 4px 16px rgb(0 0 0 / calc(0.12 * (1 - var(--rest, 0))));
+  -webkit-backdrop-filter: blur(calc(12px * (1 - var(--rest, 0))));
+  backdrop-filter: blur(calc(12px * (1 - var(--rest, 0))));
+}
+.wb-panel.folding.has-kept > .wb-head {
+  --edge: color-mix(in srgb, var(--line) calc(100% * var(--rest, 0)), transparent);
+  background: color-mix(in srgb, var(--surface) calc(94% * var(--rest, 0)), transparent);
+  border-radius: 7px 7px calc(7px * var(--rest, 0)) calc(7px * var(--rest, 0));
+  box-shadow: inset 0 1px 0 var(--edge), inset 1px 0 0 var(--edge), inset -1px 0 0 var(--edge);
+}
+.wb-panel.resting:not(.has-kept) > .wb-body,
+.wb-panel.resting.has-kept > .wb-body > :not(.keep-path, .kept),
+.wb-panel.resting.has-kept .keep-path > :not(.keep-path, .kept) {
+  visibility: hidden;
+}
+/* The heading's rows: view tabs, title, subtitle. */
 .wb-head {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  column-gap: 8px;
-  padding: 10px 8px 10px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--line);
 }
 .wb-heading {
   display: contents;
 }
-.wb-heading > * {
-  grid-column: 1;
+/* The load bar (load-bar.ts), on the line under the heading: filled as far as the
+   loading has got, or, not knowing, a stretch of it sweeping left and right. */
+.wb-head::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 100%;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+  opacity: 0;
+  transform-origin: left;
+  transition: opacity 0.3s;
 }
-.wb-head > .panel-collapse {
-  grid-column: 2;
-  grid-row: 1;
-  align-self: center;
+.loading .wb-head::after {
+  opacity: 1;
+}
+.load-known .wb-head::after {
+  transform: scaleX(var(--load, 0));
+  transition: opacity 0.3s, transform 0.3s ease-out;
+}
+:root:not(.load-known) .wb-head::after {
+  width: 30%;
+  animation: load-sweep 0.9s ease-in-out infinite alternate paused;
+}
+.loading:not(.load-known) .wb-head::after {
+  animation-play-state: running;
+}
+@keyframes load-sweep {
+  to {
+    transform: translateX(233.33%); /* (its own width: 30% of the line, to the far end) */
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not(.load-known) .wb-head::after {
+    width: 100%;
+    animation: none;
+  }
+  .loading:not(.load-known) .wb-head::after {
+    animation: load-pulse 0.8s ease-in-out infinite alternate;
+  }
+}
+@keyframes load-pulse {
+  to {
+    opacity: 0.3;
+  }
 }
 /* The gap under the tabs goes on the next row, so the tabs' row is only as tall as they are. */
 .wb-heading > .tabs-slot:not(:empty) {
@@ -108,7 +174,7 @@
    body scrolls. */
 .lp-panel {
   bottom: auto;
-  max-height: calc(100vh - 24px - env(safe-area-inset-bottom, 0px));
+  max-height: calc(100vh - 12px - var(--pane-bottom, calc(12px + env(safe-area-inset-bottom, 0px))));
 }
 .lp-section {
   margin-top: 0;
@@ -388,9 +454,8 @@
   color: var(--ink);
   border-color: var(--accent);
 }
-/* Small square buttons: unpin a card (only on the pinned one), collapse a panel. */
-.cp-unpin,
-.panel-collapse {
+/* A small square button to unpin a card (only on the pinned one). */
+.cp-unpin {
   font: 500 14px/1 var(--sans);
   color: var(--muted);
   background: transparent;
@@ -402,19 +467,14 @@
 .cp-unpin {
   display: none;
 }
-.panel-collapse {
-  min-width: 24px;
-}
 .cp-card.pinned .cp-unpin {
   display: inline-block;
 }
-.cp-unpin:hover,
-.panel-collapse:hover {
+.cp-unpin:hover {
   color: var(--ink);
   border-color: var(--accent);
 }
-.cp-unpin:focus-visible,
-.panel-collapse:focus-visible {
+.cp-unpin:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

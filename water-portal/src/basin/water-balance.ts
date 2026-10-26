@@ -1,7 +1,7 @@
 /*
  * Basin view: the water balance of the selected sub-basin and everything upstream of
- * it, after FAO's WaPOR Discharge app. Selecting a sub-basin runs the model (model.ts)
- * for that network; then
+ * it, after FAO's WaPOR Discharge app. Selecting a sub-basin loads the model's output
+ * for that network (precomputed: model.ts); then
  *
  * - the map colours each sub-basin of the network by the chosen variable (PCP, AETI,
  *   Q or ΔS), averaged over the date range in the top bar, with a legend that also
@@ -13,8 +13,8 @@
  *
  * The markup lives in index.html.
  *
- * For now this is switched off (MODEL_SHOWN): selecting a sub-basin doesn't run the
- * model and the panel shows only the basin statistics (basin-stats.ts). The code and
+ * For now this is switched off (MODEL_SHOWN): selecting a sub-basin doesn't load the
+ * network and the panel shows only the basin statistics (basin-stats.ts). The code and
  * the markup stay, to be switched back on.
  */
 import type { WaterMap } from "../map/map";
@@ -23,7 +23,7 @@ import type { Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { dkM, dkY, endDay, fmtEnd, fmtStart, startDay } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
-import { VARIABLES, coveredRange, periodMeans, runNetwork, type Means, type NetworkResult, type Variable } from "./model";
+import { VARIABLES, coveredRange, networkSeries, periodMeans, type Means, type NetworkResult, type Variable } from "./model";
 import { initTitleMenu } from "../panels/title-menu";
 import { initSankey, type SankeyData } from "./sankey";
 import { initTimeseries } from "./timeseries";
@@ -47,11 +47,11 @@ export interface WaterBalance {
   setMapOverride(override: boolean): void;
 }
 
-type Status = { kind: "idle" } | { kind: "loading"; since: number } | { kind: "error"; message: string } | { kind: "ready"; result: NetworkResult };
+type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; result: NetworkResult };
 
 const $ = (id: string) => document.getElementById(id)!;
 
-/** Whether selecting a sub-basin runs the model and shows its results (off for now). */
+/** Whether selecting a sub-basin shows the model's results for its network (off for now). */
 export const MODEL_SHOWN = false;
 
 export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Options): WaterBalance {
@@ -95,14 +95,6 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     render();
   });
 
-  // Collapse the panel to its title.
-  const collapse = $("wb-collapse");
-  collapse.addEventListener("click", () => {
-    const collapsed = panel.classList.toggle("collapsed");
-    collapse.setAttribute("aria-expanded", String(!collapsed));
-    collapse.textContent = collapsed ? "+" : "–";
-  });
-
   for (const button of panel.querySelectorAll<HTMLButtonElement>("[data-csv]")) {
     button.addEventListener("click", () => download(button.dataset.csv as "map" | "timeseries" | "flows"));
   }
@@ -123,9 +115,9 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       return render();
     }
     const upstream = [...upstreamOf(id)].map((u) => byId.get(u)!).filter(Boolean);
-    state.status = { kind: "loading", since: performance.now() };
+    state.status = { kind: "loading" };
     render();
-    runNetwork(outlet, upstream).then(
+    networkSeries(outlet, upstream).then(
       (result) => {
         if (state.selected !== id) return;
         state.status = { kind: "ready", result };
@@ -138,11 +130,6 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       },
     );
   }
-
-  // While loading, the elapsed time ticks along.
-  setInterval(() => {
-    if (state.view === "basin" && state.status.kind === "loading") renderMessage();
-  }, 1000);
 
   /** Load (or forget) the network when the selected sub-basin changes in the Basin view. */
   function sync() {
@@ -199,7 +186,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     if (status.kind !== "ready") {
       $("wb-results").hidden = true;
       $("wb-subtitle").textContent = subtitle(null);
-      // While the model runs, shade the network the way hovering does.
+      // While the network loads, shade the network the way hovering does.
       if (status.kind === "loading" && state.selected !== null) {
         const colors = new Map<number, Color>([...upstreamOf(state.selected)].map((id) => [id, map.theme.upstream]));
         colors.set(state.selected, map.theme.hovered);
@@ -299,17 +286,13 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       text = state.selection?.majorBasin
         ? "Pick one of its sub-basins (above, or click it on the map) to model the water balance of that sub-basin and everything upstream of it."
         : "Click a sub-basin on the map, or pick one above, to model the water balance of that sub-basin and everything upstream of it.";
-    } else if (status.kind === "loading") {
-      const n = upstreamOf(state.selection.subBasin.id).size + 1;
-      const s = Math.round((performance.now() - status.since) / 1000);
-      text = `Running the model for ${n} sub-basin${n === 1 ? "" : "s"}… ${s} s (large networks take up to half a minute)`;
     } else if (status.kind === "error") {
       text = status.message;
     } else if (status.kind === "ready" && !coveredRange(status.result, state.range)) {
       const { dekads } = status.result;
       text = dekads.length
         ? `There is no model output for the selected period. It runs from ${fmtStart(dekads[0])} to ${fmtEnd(dekads[dekads.length - 1])}.`
-        : "The model returned no output for this sub-basin.";
+        : "The model has no output for this sub-basin.";
     }
     message.textContent = text;
     message.hidden = !text;

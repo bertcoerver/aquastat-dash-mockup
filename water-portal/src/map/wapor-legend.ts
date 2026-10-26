@@ -11,6 +11,7 @@ import { ticksHtml } from "../panels/legend";
 import { DEFAULT_STRETCH, initRampMenu } from "../panels/ramp-menu";
 import { initTitleMenu } from "../panels/title-menu";
 import { fmtDay } from "../toolbar/dekads";
+import { flash } from "../toolbar/toolbar";
 import {
   PER_DAYS,
   WAPOR_UNITS,
@@ -34,15 +35,16 @@ export type WaporStatus = "checking" | "loading" | "ready" | "missing" | "error"
 export type QualityStatus = "checking" | "ready" | "missing";
 
 const STATUS_TEXT: Record<WaporStatus, string> = {
-  checking: "Looking for the map…",
-  loading: "Loading…",
+  // (the load bar says these)
+  checking: "",
+  loading: "",
   ready: "",
   missing: "Not published yet for this period.",
   error: "Couldn't reach WaPOR's storage.",
 };
 
 const QUALITY_TEXT: Record<Exclude<QualityStatus, "ready">, string> = {
-  checking: "Looking for the quality layer…",
+  checking: "", // (the load bar says it)
   missing: "Quality layer not published yet for this dekad.",
 };
 
@@ -124,7 +126,11 @@ export function initWaporLegend({
   function showVariable(v: WaporVariable) {
     variable = v;
     menu.setLabel(v.label);
-    $("wapor-source").textContent = `WaPOR v3 · ${v.short} · ${waporPixel(v, level)}`;
+    // The pixel size in its own span, so it alone lights up when the level changes.
+    const pixel = document.createElement("span");
+    pixel.id = "wapor-pixel";
+    pixel.textContent = waporPixel(v, level);
+    $("wapor-source").replaceChildren(`WaPOR v3 · ${v.short} · `, pixel);
     showPer();
   }
 
@@ -239,6 +245,8 @@ export function initWaporLegend({
       if (shown === level) return;
       level = shown;
       showVariable(variable);
+      // The system, not the user, changed the resolution (zooming in or out): show it.
+      if (waporPixel(variable, "L1") !== waporPixel(variable, "L2")) flash($("wapor-pixel"));
     },
     pixelArea(m2, lat) {
       area = { m2, lat };

@@ -25,6 +25,7 @@ import { flyTo, type Extent } from "../map/fly-to";
 import type { Place } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
 import { mixColor, type Color } from "../map/theme";
+import { unlessLoading } from "../panels/load-bar";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { SLOT_HINTS, initLayerLegend, onePerSlot, toggled, type LegendKey, type LegendLayer } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
@@ -305,14 +306,14 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const range = state.range;
     const stats = status.kind === "ready" && range ? periodFor(`${range.start}-${range.end}`, () => periodStats(status.series, range)) : null;
     if (!stats?.covered) {
-      message.hidden = false;
       message.classList.toggle("error", status.kind === "error");
       message.textContent =
         status.kind === "error"
           ? status.message
           : status.kind === "ready"
             ? "There are no WaPOR data for the selected period (they run from 2018 to the end of 2025)."
-            : "Loading basin statistics…";
+            : "";
+      message.hidden = !message.textContent;
       tilesEl.innerHTML = "";
       cardsEl.innerHTML = "";
       return clear();
@@ -528,14 +529,14 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
         if (slot === "fill") {
           const key: LegendKey | null = scale?.ticks.length ? { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks } : null;
           const note = `${spec.note}${spec.scale === "log" ? " · Log scale" : ""}`;
-          return { ...common, note, period: key ? ctx.period : "", key, status: spec.status };
+          return { ...common, note, period: key ? ctx.period : "", key, status: unlessLoading(spec.status ?? "") };
         }
         // The scheme has a key of sizes instead.
         const drawn = keys.get(spec.scheme!);
         const status = spec.status || drawn?.status || "";
         const key = status ? null : drawn?.key ?? null;
         const note = spec.note.replace(/per sub-basin$/, spec.scheme === "Q" ? "along the rivers" : "per sub-basin, on its river");
-        return { ...common, note, period: key ? ctx.period : "", key, status };
+        return { ...common, note, period: key ? ctx.period : "", key, status: unlessLoading(status) };
       }),
     );
     showMapTooltip();

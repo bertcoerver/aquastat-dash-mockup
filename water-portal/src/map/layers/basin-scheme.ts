@@ -1,5 +1,6 @@
 import { IconLayer, PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { Color } from "../theme";
+import { RiverParticlesLayer, type ParticleNetwork } from "./river-particles";
 
 /** A line of the Basin view's discharge network (basin/scheme.ts), styled by its discharge. */
 export interface SchemeLineStyle {
@@ -34,12 +35,31 @@ export interface SchemeDot {
   value: number;
 }
 
+/** Discharge as particles streaming down the rivers (RiverParticlesLayer). */
+export interface SchemeParticles {
+  /** Names the network: a new one gets new layers. */
+  id: string;
+  network: ParticleNetwork;
+  /** Per arc: width (CSS px, 0: not drawn), the particles' spawn weight and speed (0–1), spare; their colour (0–1), spare. */
+  arcs: Float32Array;
+  /** Per arc: the river's colour under the particles, and its discharge and sub-basin (for the tooltip). */
+  colors: Color[];
+  q: Float32Array;
+  subBasin: Int32Array;
+  /** Particles alive at once; CSS px per frame on the fastest river; share of a trail kept each frame; particle size (CSS px). */
+  count: number;
+  speed: number;
+  fade: number;
+  pointSize: number;
+}
+
 export interface BasinScheme {
   /** Names the drawing: the map only rebuilds the layers when it changes. */
   key: string;
   lines: SchemeLineStyle[];
   arrows: SchemeArrow[];
   dots: SchemeDot[];
+  particles?: SchemeParticles;
   /** The lines' colour, and the edge around lines and dots (so they read over any fill). */
   color: Color;
   casing: Color;
@@ -66,12 +86,14 @@ const HIT_WIDTH = 8;
 /**
  * The discharge network (lines as wide as their discharge, arrows at the mouths) and the
  * storage change dots, in pixels so they read the same at any zoom. Hovering the lines
- * uses a wider, invisible copy underneath, as the thin ones are hard to hit.
+ * uses a wider, invisible copy underneath, as the thin ones are hard to hit. Or, with
+ * particles, the rivers they stream down in place of the lines (the dots still on top).
  */
 export function basinSchemeLayers(scheme: BasinScheme | null) {
   if (!scheme) return [];
   const hover = (info: { object?: { subBasin: number; value: number } | null }) =>
     void scheme.onHover?.(info.object ? { subBasin: info.object.subBasin, value: info.object.value } : null);
+  if (scheme.particles) return [...particleLayers(scheme, scheme.particles), dotsLayer(scheme, hover)];
   const common = {
     data: scheme.lines,
     getPath: (d: SchemeLineStyle) => d.path,
@@ -109,20 +131,71 @@ export function basinSchemeLayers(scheme: BasinScheme | null) {
       onHover: hover,
       parameters: { depthCompare: "always" },
     }),
-    new ScatterplotLayer<SchemeDot>({
-      id: "scheme-dots",
-      data: scheme.dots,
-      getPosition: (d) => d.position,
-      getRadius: (d) => d.radius,
-      getFillColor: (d) => d.color,
-      getLineColor: scheme.casing,
-      radiusUnits: "pixels",
-      stroked: true,
-      lineWidthUnits: "pixels",
-      getLineWidth: 1,
+    dotsLayer(scheme, hover),
+  ];
+}
+
+function dotsLayer(scheme: BasinScheme, hover: (info: { object?: { subBasin: number; value: number } | null }) => void) {
+  return new ScatterplotLayer<SchemeDot>({
+    id: "scheme-dots",
+    data: scheme.dots,
+    getPosition: (d) => d.position,
+    getRadius: (d) => d.radius,
+    getFillColor: (d) => d.color,
+    getLineColor: scheme.casing,
+    radiusUnits: "pixels",
+    stroked: true,
+    lineWidthUnits: "pixels",
+    getLineWidth: 1,
+    pickable: Boolean(scheme.onHover),
+    onHover: hover,
+    parameters: { depthCompare: "always" },
+  });
+}
+
+const pathData = new WeakMap<ParticleNetwork, object>();
+
+/** Id of the particle layer (map.ts leaves it out of its extensions). */
+export const PARTICLES_ID = "scheme-particles";
+
+/**
+ * The rivers, as wide as their discharge, with particles streaming down them. Hovering
+ * picks the rivers (the particles are drawn off screen and then pasted on).
+ */
+function particleLayers(scheme: BasinScheme, p: SchemeParticles) {
+  const { network: net, arcs } = p;
+  // One object per network, so deck.gl tessellates the rivers once.
+  let data = pathData.get(net);
+  if (!data) {
+    data = { length: net.n, startIndices: net.starts.subarray(0, net.n), attributes: { getPath: { value: net.coords, size: 2 } } };
+    pathData.set(net, data);
+  }
+  return [
+    new PathLayer({
+      id: `scheme-rivers-${p.id}`,
+      data: data as never,
+      _pathType: "open",
+      positionFormat: "XY",
+      getColor: (_: unknown, { index }: { index: number }) => p.colors[index],
+      getWidth: (_: unknown, { index }: { index: number }) => arcs[index * 8],
+      widthUnits: "pixels",
+      widthMinPixels: 0,
+      jointRounded: true,
+      capRounded: true,
       pickable: Boolean(scheme.onHover),
-      onHover: hover,
+      onHover: ({ index }: { index: number }) =>
+        void scheme.onHover?.(index >= 0 && arcs[index * 8] > 0 ? { subBasin: p.subBasin[index], value: p.q[index] } : null),
+      updateTriggers: { getColor: scheme.key, getWidth: scheme.key },
       parameters: { depthCompare: "always" },
+    }),
+    new RiverParticlesLayer({
+      id: `${PARTICLES_ID}-${p.id}`,
+      network: net,
+      arcs,
+      count: p.count,
+      speed: p.speed,
+      fade: p.fade,
+      pointSize: p.pointSize,
     }),
   ];
 }

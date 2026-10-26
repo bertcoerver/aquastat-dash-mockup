@@ -4,9 +4,9 @@
  * the selected date range, from the same WaPOR v3 L1 dekadal zonal statistics the
  * water balance model reads.
  *
- * Every sub-basin's dekadal series are loaded once, from a static file
- * (public/data/wapor-series.bin, scripts/build-wapor-series.mjs: ~9 MB), and summed
- * here, so a new date range needs no query and shows at once:
+ * Every sub-basin's dekadal series are loaded once, from the precomputed files
+ * (subbasins.bin, ~9 MB: see model.ts), and summed here, so a new date range needs no
+ * query and shows at once:
  *
  * - periodStats: every sub-basin's PCP and AETI over the range (~7,600 sub-basins).
  *   Totals over the range are the mean rate × days, so a sub-basin missing a dekad
@@ -20,9 +20,7 @@
  */
 import { MIN_YEAR, dkM, dkY, endDay, startDay } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
-
-const FILE = `${import.meta.env.BASE_URL}data/wapor-series.bin`;
-const FORMAT_VERSION = 1; // of the file
+import { loadFile } from "./model";
 
 export interface SubBasinStat {
   majorBasin: number;
@@ -69,40 +67,17 @@ export interface WaporSeries {
   days: Uint8Array;
 }
 
-let series: Promise<WaporSeries> | null = null;
-
 export function loadSeries(): Promise<WaporSeries> {
-  if (!series) {
-    series = fetch(FILE).then(async (response) => {
-      if (!response.ok) throw new Error(`The basin statistics failed to load (${response.status}).`);
-      return parseSeries(await response.arrayBuffer());
-    });
-    series.catch(() => (series = null));
-  }
-  return series;
-}
-
-function parseSeries(buf: ArrayBuffer): WaporSeries {
-  const length = new DataView(buf).getUint32(0, true);
-  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, length)));
-  if (header.version !== FORMAT_VERSION) throw new Error(`The basin statistics are in an unknown format (version ${header.version}).`);
-  const { n, dekads, scale, none } = header;
-  let offset = 4 + length;
-  const take = <T extends Int32Array | Float32Array | Uint16Array>(Type: { new (b: ArrayBuffer, o: number, l: number): T }, count: number) => {
-    const array = new Type(buf, offset, count);
-    offset += array.byteLength;
-    return array;
-  };
-  const ids = take(Int32Array, n);
-  const majorBasins = take(Int32Array, n);
-  const areas = take(Float32Array, n);
-  const values = (raw: Uint16Array, k: number) => Float32Array.from(raw, (x) => (x === none ? NaN : x / k));
-  const pcp = values(take(Uint16Array, n * dekads), scale.pcp);
-  const aeti = values(take(Uint16Array, n * dekads), scale.aeti);
-  const [y, m, d] = (header.first as string).split("-").map(Number);
-  const first = (y - MIN_YEAR) * 36 + (m - 1) * 3 + Math.floor((d - 1) / 10);
-  const days = Uint8Array.from({ length: dekads }, (_, i) => endDay(first + i) - startDay(first + i) + 1);
-  return { first, dekads, ids, majorBasins, areas, pcp, aeti, days };
+  return loadFile("subbasins.bin").then(({ first, dekads, ids, columns, series }) => ({
+    first,
+    dekads,
+    ids,
+    majorBasins: columns.majorBasin as Int32Array,
+    areas: columns.area as Float32Array,
+    pcp: series.PCP,
+    aeti: series.AETI,
+    days: Uint8Array.from({ length: dekads }, (_, i) => endDay(first + i) - startDay(first + i) + 1),
+  }));
 }
 
 /** Range `r` as indices into the series (to exclusive), clipped to them. */

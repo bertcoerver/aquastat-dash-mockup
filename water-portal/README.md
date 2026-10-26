@@ -47,7 +47,6 @@ Other commands:
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
 | `npm run groups` | Rebuild the major basins' groups for the Basin view: where their water goes and their climate (`public/data/basin-groups.json`; needs GDAL, downloads ~400 MB the first time, takes ~6 min) |
 | `npm run rivers` | Rebuild the river network per major basin and the sub-basins' middles for the Basin view's water balance scheme (`public/data/rivers/`, `public/data/sub-basin-middles.json`; from `../river-flow-poc`'s `rivers.bin` and `nodes.json`) |
-| `npm run wapor-series` | Rebuild every sub-basin's dekadal WaPOR PCP and AETI for the Basin view's statistics (`public/data/wapor-series.bin`; from FAO's BigQuery proxy, takes ~2 min; again when WaPOR has new dekads) |
 | `npm run tiles` | Rebuild the country and border tiles (needs `tippecanoe`; downloads ~220 MB the first time) |
 
 ## Project layout
@@ -95,15 +94,15 @@ water-portal/
     │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
-    │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, storage change dots
+    │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, storage change dots, particles
+    │       ├── river-particles.ts  Particles streaming down the rivers (river-flow-poc's wind map)
     │       └── marker.ts     The click marker
     ├── basin/              Basin view: the water balance of the selected sub-basin
-    │   ├── calc_runoff.js  The model (copy of fao-wapor-discharge's js/calc_runoff.js)
-    │   ├── model.ts        Loads the precomputed Q and ΔS; for the panel, fetches a network's PCP/AETI (BigQuery) and runs the model
+    │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; fao_wapor_discharge.portal), and a network's series for the panel
     │   ├── variables.ts    PCP / AETI / Q / ΔS: labels, units, colour scales
     │   ├── timeseries.ts   Time series charts (drag to choose the period)
     │   ├── sankey.ts       Sankey diagram of the network's water balance
-    │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, the same days in other years, and per month (from wapor-series.bin)
+    │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, the same days in other years, and per month (summed from subbasins.bin)
     │   ├── stats-cards.ts  The statistics topics: tiles, charts and each one's map
     │   ├── groups.ts       The major basins' groups: by where the water goes, by climate
     │   ├── rivers.ts       Loads a major basin's river network and the sub-basins' middles
@@ -121,7 +120,8 @@ water-portal/
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
     │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
     │   ├── debug-panel.ts  Draggable window: click, time and hover state as a JSON tree
-    │   └── loading-indicator.ts  Spinner in the top bar while any data request is running
+    │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
+    │   └── load-bar.ts     Load bar under the graph pane's heading while anything loads
     ├── toolbar/
     │   ├── dekads.ts       Dates as dekad numbers (3 per month, 36 per year), and as day numbers
     │   ├── place-picker.ts Country / basin search or coordinates, per view
@@ -157,8 +157,8 @@ water-portal/
   regions with some split into sub-regions), from UNSD's M49 table.
 - **Basin statistics** read the same WaPOR v3 L1 dekadal zonal statistics as the model
   (`fao-maps-review.zonal_stats_openEO.L1-PCP-D_…` and `L1-AETI-D_…`, 2018 to Dec 2025), every
-  sub-basin's dekadal series at once from a static file (`public/data/wapor-series.bin`, ~9 MB,
-  `npm run wapor-series`), loaded when the Basin view first opens. The period, the same days in
+  sub-basin's dekadal series at once from the model's files (`subbasins.bin`, ~9 MB: see below),
+  loaded when the Basin view first opens. The period, the same days in
   every other year of the record and the monthly cycle are summed from it in the browser (a few ms),
   so changing the range shows at once. Totals are each sub-basin's mean daily rate × the days covered; major basins, groups and
   the World are area-weighted (or, over the basin, summed) over their sub-basins, and their
@@ -275,7 +275,7 @@ water-portal/
 - **The water balance scheme** ([src/basin/scheme.ts](src/basin/scheme.ts), from
   river-flow-poc's `scheme.html`): with a major basin selected, the discharge and storage change
   maps of its sub-basins have a switch in the legend. Discharge: **Network** (lines along the
-  rivers, as wide as the discharge they carry) or **Sub-basins** (fills). Storage change:
+  rivers, as wide as the discharge they carry), **Particles** (see below) or **Sub-basins** (fills). Storage change:
   **Dots** (a dot on each sub-basin's river near its middle, its area the change, green rising,
   red falling) or **Sub-basins**. In a sub-basin, the line runs from each upstream sub-basin's
   outlet down the network to where the river leaves it; a piece carries the outflow of the
@@ -292,34 +292,43 @@ water-portal/
   simplified to ~500 m from FAO's `rivers_world_47950`. The river network
   (`public/data/rivers/<id>.bin`, 8.3 MB in all, up to ~490 kB a basin (the Amazon)) and the middles
   (200 kB) load on the first such map.
-- **The water balance model's maps** (Q and ΔS in the Basin view's legend) read files
+- **Discharge as particles** ([src/map/layers/river-particles.ts](src/map/layers/river-particles.ts),
+  from river-flow-poc's wind map, `index.html`): the major basin's real rivers (every arc, not
+  simplified), each with its sub-basin's outflow × its share of the sub-basin's largest upstream
+  area, as wide as log(Q) (1–7 px over 2.5 powers of ten; smaller rivers left out), and 3,500
+  particles streaming down them. The rivers are drawn as a vector field into an offscreen texture
+  whenever the view changes, the particles move through it on the GPU and leave fading trails;
+  big rivers carry more of them as they're wider. While it shows, the map repaints every frame
+  (map.ts's `animate`). It needs WebGL 2 with float render targets, and isn't draped on the relief.
+  For now the legend has sliders for the particles' look (count, speed, trails, size, speed
+  contrast, river widths, how many rivers, their opacity) to find the best settings; **Copy
+  settings** copies them as JSON. The defaults are `PARTICLES` in `scheme-map.ts`.
+- **The Basin view's data** (PCP, AETI, and the water balance model's Q and ΔS) are files
   precomputed by [fao-wapor-discharge](../../fao-wapor-discharge)'s
-  `python -m fao_wapor_discharge.portal --sub-basins public/data/sub-basins.json --out-dir …`,
-  which downloads all PCP and AETI, runs the model for every outlet network (as its
-  pipeline does) and writes `latest.json` (the dekads covered), `majors.json` (per major
-  basin: Q at its outlets, ΔS summed) and `major/<id>.json` (per sub-basin). Meant to run
+  `python -m fao_wapor_discharge.portal --sub-basins public/data/sub-basins.json --out-dir public/data/model`
+  (about 15 min), which downloads all PCP and AETI from FAO's BigQuery proxy, runs the model
+  for every outlet network (as its pipeline does) and writes `latest.json` (the dekads
+  covered), `subbasins.bin` (per sub-basin: PCP and AETI), `majors.bin` (per major basin: Q
+  at its outlets, ΔS summed) and `major/<id>.bin` (per sub-basin: Q and ΔS), all over the
+  same dekads; the format is in `portal.py` and `src/basin/model.ts`. The app queries
+  nothing itself (only the Country view's AQUASTAT data is read live). Known issue: the model uses
+  Web-Mercator sub-basin areas, so Q and ΔS are too high by 1/cos²(latitude) (~2× at 45°):
+  see [AREA_BUG.md](../../fao-wapor-discharge/AREA_BUG.md). Meant to run
   after each new dekad (a scheduled job, not set up yet); a full run, not an append,
   since a new calendar year moves the model's warmup and changes earlier dekads. The
-  files are looked for in `public/data/model/` (not in git: ~80 MB), or at
+  files are looked for in `public/data/model/` (not in git: 26 MB; `subbasins.bin` 8.8 MB, `majors.bin` 0.5 MB, `major/<id>.bin` up to 1.8 MB), or at
   `VITE_MODEL_FILES` (a URL ending in `/`, e.g. a bucket) when set at build time.
   `latest.json` is fetched afresh each time; the others carry its `updated` time in their
   URL, so browsers don't keep old copies. The Basin view's range can't go past the last
   dekad in `latest.json` (hatched on the slider), so a failed or late update shows as a
   shorter range rather than gaps; without the files the range isn't limited and Q and ΔS
   say they couldn't be loaded.
-- **The water balance panel** (switched off for now) runs the model itself:
-  [fao-wapor-discharge](../../fao-wapor-discharge)'s `js/calc_runoff.js`, a JavaScript port
-  of its Python `calc_runoff` that gives identical numbers (checked bit for bit by its
-  `examples/verify_js_runoff.py`), copied with its `.d.ts` to
-  [src/basin/calc_runoff.js](src/basin/calc_runoff.js) (copy them again when they change).
-  [src/basin/model.ts](src/basin/model.ts) fetches the network's dekadal PCP and AETI from
-  FAO's read-only BigQuery proxy (`data.apps.fao.org/api/v2/bigquery`, which sends CORS
-  headers), one row per sub-basin with arrays (the proxy returns at most 50,000 rows), and
-  runs the model in the browser. That takes about 3 s for a small network and 8 s for the
-  biggest (Lower Mississippi, 766 sub-basins, ~11 MB; the model itself ~0.2 s); results are
-  kept for the session. The network is the selected sub-basin and everything upstream of it, as in FAO's
+- **The water balance panel** (switched off for now) shows the selected sub-basin and
+  everything upstream of it, as in FAO's
   [WaPOR Discharge](https://storage.googleapis.com/fao-wapor-accounter/wapor-discharge/main.html)
-  app, which this view replicates.
+  app, which this view replicates. It reads the same precomputed files as the maps
+  (`subbasins.bin`, and `major/<id>.bin` of each major basin the network reaches into), so it
+  shows the same numbers; a sub-basin's Q depends only on what is upstream of it.
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
 - The URL keeps the map position (`#zoom/lat/lon`), so a view can be shared as a link.

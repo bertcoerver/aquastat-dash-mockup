@@ -14,7 +14,7 @@ import { bordersLayer } from "./layers/borders";
 import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
-import { basinSchemeLayers, type BasinScheme } from "./layers/basin-scheme";
+import { basinSchemeLayers, PARTICLES_ID, type BasinScheme } from "./layers/basin-scheme";
 import { terrainLayer } from "./layers/terrain";
 import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
@@ -41,7 +41,7 @@ export interface WaterMap {
   setWaporMaxGap(maxGap: number | null): void;
   /** The colour map for the WaPOR raster, in its variable's unit per day. */
   setWaporRamp(ramp: WaporRamp): void;
-  /** Show the selection: a marker at the point, and the country and basins filled. */
+  /** Show the selection: a marker at the point (Local view), and the country and basins filled. */
   setSelection(selection: MapSelection): void;
   /** Move the camera to show a box: [west, south, east, north], west > east across 180°. */
   showBox(bbox: [number, number, number, number]): void;
@@ -242,7 +242,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         visible: state.view === "country" && Boolean(state.countryFills),
       }),
       countrySymbolsLayer({ symbols: state.view === "country" ? visibleSymbols() : null }),
-      markerLayer({ position: state.dragged ?? state.selection.lngLat, fill: theme.marker, ring: theme.markerRing }),
+      // The clicked point: only the Local view is about a point.
+      markerLayer({
+        position: state.view === "local" ? (state.dragged ?? state.selection.lngLat) : null,
+        fill: theme.marker,
+        ring: theme.markerRing,
+      }),
     ];
   }
 
@@ -300,6 +305,19 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     overlay.setProps({ layers: drawn() });
   }
 
+  // The scheme's particles move every frame (deck.gl draws on each of MapLibre's repaints).
+  let animating = false;
+  function animate() {
+    if (animating) return;
+    const frame = () => {
+      animating = Boolean(state.scheme?.particles) && state.view === "basin";
+      if (!animating) return;
+      map.triggerRepaint();
+      requestAnimationFrame(frame);
+    };
+    frame();
+  }
+
   /**
    * The layers as drawn: with the relief, the terrain first (it has to exist before
    * the others sample it) and the others draped on it, the marker and the symbols
@@ -307,10 +325,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
    * TileLayer still loads its tiles.
    */
   function drawn() {
-    if (!state.terrain) return layers().map((layer) => layer && layer.clone({ extensions: [...layer.props.extensions, HORIZON] }));
+    // (The particles are drawn off screen and pasted on, flat: no extensions.)
+    const plain = (layer: ReturnType<typeof layers>[number]) => !layer || layer.id.startsWith(PARTICLES_ID);
+    if (!state.terrain) return layers().map((layer) => (plain(layer) ? layer : layer.clone({ extensions: [...layer.props.extensions, HORIZON] })));
     const draped = layers().map(
       (layer) =>
-        layer &&
+        plain(layer) ? layer :
         layer.clone({
           // Layers of their own: TerrainExtension leaves its draw mode in the layer's
           // state, and a layer it had draped wouldn't be drawn once flat again.
@@ -360,7 +380,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   const canvas = map.getCanvas();
   function onMarker(point: maplibregl.Point) {
     const at = state.selection.lngLat;
-    if (!at) return false;
+    if (!at || state.view !== "local") return false; // (only shown in the Local view)
     const { lng, lat } = map.getCenter();
     if (facing(at, [lng, lat]) <= 0) return false; // on the far side of the globe
     return map.project(at).dist(point) <= MARKER_GRAB;
@@ -472,6 +492,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (view === state.view) return;
       state.view = view;
       render();
+      animate();
     },
     setLayerVisible(layer, visible) {
       state.visible[layer] = visible;
@@ -537,6 +558,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (scheme?.key === state.scheme?.key) return;
       state.scheme = scheme;
       render();
+      animate();
     },
     setCountryFills(fills) {
       if (fills?.key === state.countryFills?.key) return;
@@ -586,8 +608,8 @@ function hexColor(hex: string): Color {
   return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).concat(255) as Color;
 }
 
-/** The side panels: when one is open, the camera frames what it shows beside it. */
-const SIDE_PANELS = ".wb-panel:not([hidden]):not(.collapsed)";
+/** The side panels: when one is open (not folded, foldable.ts), the camera frames what it shows beside it. */
+const SIDE_PANELS = ".wb-panel:not([hidden]):not(.folding)";
 /** Leave a panel out where it would leave less than this much of the map, in pixels. */
 const MIN_UNCOVERED = 320;
 

@@ -11,6 +11,7 @@ import type { LngLat } from "../map/places";
 import type { Selection } from "../selection";
 import { MAX_DAY, MAX_DK, WAPOR_MIN_YEAR, addYears, dayDk, dkFirstDay, dkLastDay, dkY, fmtDay, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
 import { coveringDekads, type DayRange, type DekadRange, type View } from "../toolbar/range-rules";
+import { setProgress } from "../panels/load-bar";
 import { cogStats } from "./cog-pixel";
 import { loadPointSeries, waporPixelArea, type PointSeries } from "./point-series";
 import { initYearBars, type YearBar } from "./year-bars";
@@ -136,13 +137,12 @@ export function initLocalPanel({ variable, setRange, setDays, debug, onUnits }: 
     message.textContent =
       status.kind === "error"
         ? status.message
-        : status.kind === "loading"
-          ? `Reading ${variable.label.toLowerCase()} at this point from WaPOR's dekadal rasters` +
-            (series ? `: ${series.loaded} of ${series.dekads.length}…` : "…")
-          : status.kind === "idle"
+        : status.kind === "idle"
             ? "Click the map to see the time series at that point of the variable picked in the legend."
             : "";
     message.hidden = !message.textContent;
+    // How many of the dekads have been read, on the load bar.
+    setProgress("local-series", status.kind === "loading" && series ? series.loaded / series.dekads.length : null);
 
     section.hidden = !series;
     const ratio = series?.ratio && state.days ? yearBars(series, state.days) : null;
