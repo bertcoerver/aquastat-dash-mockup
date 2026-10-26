@@ -6,9 +6,10 @@
  *   when they're there (VITE_MODEL_FILES, see vite.config.ts);
  * - otherwise the model run here, in the browser, as the portal's water balance panel
  *   runs it: once per outlet network the basin's sub-basins drain to (one BigQuery
- *   query each), whole, so sub-basins upstream in other major basins are included.
+ *   query each), whole, so sub-basins upstream in other major basins are included
+ *   (basinBalance, which the water balance scheme uses for all four variables).
  */
-import { loadSubBasinFluxes, runNetwork } from "@portal/basin/model";
+import { VARIABLES, loadSubBasinFluxes, runNetwork, type ModelSeries, type Series } from "@portal/basin/model";
 import type { SubBasin } from "@portal/map/sub-basin-network";
 
 export interface BasinDischarge {
@@ -32,6 +33,16 @@ export async function basinDischarge(major: number, subBasins: SubBasin[]): Prom
 }
 
 async function runInBrowser(major: number, subBasins: SubBasin[]): Promise<BasinDischarge> {
+  const { dekads, series } = await basinBalance(major, subBasins);
+  return { dekads, q: new Map([...series].map(([id, s]) => [id, s.Q])), source: "browser" };
+}
+
+/**
+ * The whole water balance (PCP, AETI, Q, ΔS) per sub-basin and dekad for a major basin,
+ * run here in the browser: once per outlet network its sub-basins drain to, on one
+ * dekad axis. The precomputed files only have Q and ΔS, so the scheme always runs it.
+ */
+export async function basinBalance(major: number, subBasins: SubBasin[]): Promise<ModelSeries> {
   const byId = new Map(subBasins.map((b) => [b.id, b]));
   const outletOf = (id: number) => {
     const seen = new Set<number>();
@@ -64,13 +75,18 @@ async function runInBrowser(major: number, subBasins: SubBasin[]): Promise<Basin
   // One dekad axis for all the networks.
   const dekads = [...new Set(results.flatMap((r) => r.dekads))].sort((a, b) => a - b);
   const index = new Map(dekads.map((dk, i) => [dk, i]));
-  const q = new Map<number, Float64Array>();
+  const series = new Map<number, Series>();
   for (const r of results) {
     for (const [id, s] of r.series) {
-      const values = new Float64Array(dekads.length).fill(NaN);
-      r.dekads.forEach((dk, i) => (values[index.get(dk)!] = s.Q[i]));
-      q.set(id, values);
+      const out = Object.fromEntries(
+        VARIABLES.map((v) => {
+          const values = new Float64Array(dekads.length).fill(NaN);
+          r.dekads.forEach((dk, i) => (values[index.get(dk)!] = s[v][i]));
+          return [v, values];
+        }),
+      ) as Series;
+      series.set(id, out);
     }
   }
-  return { dekads, q, source: "browser" };
+  return { dekads, series };
 }

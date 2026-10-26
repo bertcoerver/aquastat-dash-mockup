@@ -250,3 +250,37 @@ footer {
   border-radius: 50%;
   vertical-align: 0;
 }
+
+/* The water balance scheme's keys and tooltip. */
+.scheme-key {
+  display: block;
+  margin-top: 4px;
+  overflow: visible;
+}
+
+.scheme-key text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tooltip table.balance {
+  margin-top: 4px;
+  border-collapse: collapse;
+}
+
+.balance td {
+  padding: 0 4px 0 0;
+}
+
+.balance td.num {
+  padding-right: 8px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.balance tr.total td {
+  padding-top: 2px;
+  border-top: 1px solid var(--border);
+  font-weight: 600;
+}

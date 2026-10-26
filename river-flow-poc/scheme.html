@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Water Balance Scheme PoC</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <aside class="panel">
+      <h1>Water balance scheme</h1>
+      <p class="lede">
+        A major basin's water balance as a scheme on the map: each sub-basin's outflow to the next, its storage change
+        and its rain and evapotranspiration — proof of concept.
+        <a href="./">River flow</a> · <a href="./rain.html">Rain</a> · <a href="./et.html">Evapotranspiration</a>
+      </p>
+
+      <label class="field">
+        <span>Basin</span>
+        <select id="basin"><option value="">Pick a major basin…</option></select>
+      </label>
+      <p id="status" class="note"></p>
+
+      <section>
+        <label class="field">
+          <span>Period</span>
+          <select id="aggregation">
+            <option value="dekad">Dekad</option>
+            <option value="month">Month</option>
+            <option value="year" selected>Year</option>
+            <option value="all">Whole record</option>
+          </select>
+        </label>
+      </section>
+
+      <section>
+        <h2>Discharge Q</h2>
+        <svg id="q-key" class="scheme-key" width="268" height="44" aria-hidden="true"></svg>
+        <p class="note">
+          From each sub-basin's outlet to the next one's: the line's width is the mean outflow, so widths add up where
+          rivers join. An arrow marks where the basin drains to the sea or a sink.
+        </p>
+      </section>
+
+      <section>
+        <h2>Storage change ΔS</h2>
+        <svg id="ds-key" class="scheme-key" width="268" height="44" aria-hidden="true"></svg>
+        <p class="note">At each sub-basin's outlet: the dot's area is the mean change, green as storage rises, red as it falls.</p>
+      </section>
+
+      <section>
+        <h2>Precipitation and evapotranspiration</h2>
+        <label class="field">
+          <span>Sub-basins coloured by</span>
+          <select id="fill">
+            <option value="PmE" selected>P − ET</option>
+            <option value="PCP">Precipitation P</option>
+            <option value="AETI">Evapotranspiration ET</option>
+            <option value="none">Nothing</option>
+          </select>
+        </label>
+        <div id="fill-legend">
+          <div id="fill-ramp" class="ramp" aria-hidden="true"></div>
+          <div id="fill-ticks" class="ramp-ticks"></div>
+        </div>
+      </section>
+
+      <footer>
+        <p class="note">
+          Hover a sub-basin, line or dot for its balance: Q out = Q in + P − ET − ΔS. Model: FAO water balance on WaPOR v3
+          L1 PCP and AETI, per SDG 6 sub-basin and dekad, run in the browser. Outlets: the end of each sub-basin's biggest
+          river (FAO rivers_world_47950).
+        </p>
+      </footer>
+    </aside>
+
+    <div id="timeline" class="timeline" hidden>
+      <button id="play" type="button" aria-label="Play">▶</button>
+      <input id="period" type="range" min="0" max="0" step="1" value="0" aria-label="Period" />
+      <output id="date"></output>
+    </div>
+
+    <script type="module" src="/src/scheme-main.ts"></script>
+  </body>
+</html>
