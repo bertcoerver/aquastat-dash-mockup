@@ -1,19 +1,25 @@
 /*
- * The river network per major basin, for the Basin view's river discharge map:
+ * The river network per major basin, for the Basin view's discharge network:
  *   public/data/rivers/<major basin id>.bin
+ * and where each sub-basin's dot goes on the storage change and discharge maps:
+ *   public/data/sub-basin-middles.json
  *
  * Cut from river-flow-poc's connected network (../river-flow-poc/public/data/rivers.bin,
  * built there by `npm run network` from FAO's rivers_world_47950: topology rebuilt from
  * the end points, artefacts dropped, simplified to ~500 m). The vector tiles can't be
- * used for this: they carry no upstream area. Each arc goes to the major
- * basin of its SDG 6 sub-basin; arcs in sub-basins that aren't in public/data/sub-basins.json
- * are dropped. Run with `npm run rivers` (after `npm run lists`).
+ * used for this: they carry no upstream area and drop the topology. Each arc goes to the
+ * major basin of its SDG 6 sub-basin; arcs in sub-basins that aren't in
+ * public/data/sub-basins.json are dropped. Run with `npm run rivers` (after `npm run lists`).
+ *
+ * The middles come from river-flow-poc's public/data/nodes.json (its `npm run nodes`: a
+ * point inside each sub-basin, near its centroid): { "<sub-basin id>": [lon, lat] }.
  *
  * <id>.bin (little-endian), arcs in the network's order:
  *   Uint32 nArcs, Uint32 nVerts
  *   Uint32[nArcs + 1] first vertex of each arc
  *   Float32[nArcs]    upstream area, km²
  *   Int32[nArcs]      sub-basin (SDG 6 SBM id)
+ *   Int32[nArcs]      the arc it flows into (index in this file), -1 for none or another major basin
  *   Float32[nVerts*2] lon, lat
  */
 import fs from "node:fs/promises";
@@ -41,8 +47,7 @@ const coords = take(Float32Array, nVerts * 2);
 
 // Some short arcs (often where a river crosses into the next sub-basin) have an upstream
 // area of 0 or 1 km²: give every arc at least the upstream area of any arc flowing into
-// it. (The arcs come before those they flow into.) The topology isn't kept: see
-// src/basin/rivers.ts.
+// it. (The arcs come before those they flow into.)
 let raised = 0;
 for (let a = 0; a < nArcs; a++) {
   const b = next[a];
@@ -74,7 +79,8 @@ let total = 0;
 for (const [major, arcs] of arcsOf) {
   const n = arcs.length;
   const verts = arcs.reduce((s, a) => s + starts[a + 1] - starts[a], 0);
-  const out = new ArrayBuffer(8 + 4 * (n + 1) + 8 * n + 8 * verts);
+  const local = new Map(arcs.map((a, i) => [a, i]));
+  const out = new ArrayBuffer(8 + 4 * (n + 1) + 12 * n + 8 * verts);
   let o = 0;
   const put = (Type, length) => {
     const array = new Type(out, o, length);
@@ -85,12 +91,14 @@ for (const [major, arcs] of arcsOf) {
   const s = put(Uint32Array, n + 1);
   const ac = put(Float32Array, n);
   const sb = put(Int32Array, n);
+  const nx = put(Int32Array, n);
   const xy = put(Float32Array, verts * 2);
   let v = 0;
   arcs.forEach((a, i) => {
     s[i] = v;
     ac[i] = acc[a] / 100;
     sb[i] = subBasin[a];
+    nx[i] = local.get(next[a]) ?? -1;
     xy.set(coords.subarray(starts[a] * 2, starts[a + 1] * 2), v * 2);
     v += starts[a + 1] - starts[a];
   });
@@ -103,3 +111,9 @@ console.log(
     `${raised} given their upstream arc's area) → ` +
     `${path.relative(ROOT, OUT)}/ (${(total / 1e6).toFixed(1)} MB)`,
 );
+
+// --- Middles ----------------------------------------------------------------------------
+const nodes = JSON.parse(await fs.readFile(path.join(ROOT, "../river-flow-poc/public/data/nodes.json"), "utf8"));
+const middles = Object.fromEntries(Object.entries(nodes).map(([id, n]) => [id, n.slice(0, 2)]));
+await fs.writeFile(path.join(ROOT, "public/data/sub-basin-middles.json"), JSON.stringify(middles));
+console.log(`${Object.keys(middles).length} sub-basin middles → public/data/sub-basin-middles.json`);

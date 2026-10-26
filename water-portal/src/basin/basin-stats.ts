@@ -1,20 +1,20 @@
 /*
  * Basin view: the statistics in the water balance panel, after the Country panel
- * (country/country-panel.ts): one tab per topic (stats-cards.ts), each with number
- * tiles and chart cards, about the selected major basin or, with none selected, the
- * World. All over the top bar's date range, compared with the same days in the other
+ * (country/country-panel.ts): the topics' number tiles and chart cards
+ * (stats-cards.ts), all in one column, about the selected major basin or, with none
+ * selected, the World. All over the top bar's date range, compared with the same days in the other
  * years of the record.
  *
  * Every tile and card has a map: hovering previews it, clicking pins it
  * (map-drivers.ts); unpinned, the map shows the one picked in the legend, else the
- * topic's first tile. Unless a sub-basin is selected and the water balance model is
+ * first tile. Unless a sub-basin is selected and the water balance model is
  * shown (water-balance.ts, MODEL_SHOWN): then it shows the model's, which this hands
  * the map back to. Within a card, hovering a row picks out its basins on the map (a
  * group's, a basin, a sub-basin outlined), hovering a series in a legend maps that
  * series, and clicking a year on a chart of the same days every year selects that year.
  * Hovering a basin on the map shows its value.
  *
- * The legend's title is a menu of the topic's maps. Its unit is a menu too, as the WaPOR
+ * The legend's title is a menu of all the maps. Its unit is a menu too, as the WaPOR
  * legend's: per day, month or year, or in total over the period; per m² or over the
  * basin. The map and the charts follow it (the model's discharge and storage change keep
  * theirs, m³/s). And the ramp is a menu of how much of the basins' values the colours
@@ -27,7 +27,6 @@ import type { SubBasin } from "../map/sub-basin-network";
 import { mixColor, type Color } from "../map/theme";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { DEFAULT_STRETCH, fmtStop, initRampMenu } from "../panels/ramp-menu";
-import { slideSelection } from "../panels/segmented";
 import { initTitleMenu, type MenuOption } from "../panels/title-menu";
 import type { Selection } from "../selection";
 import type { MajorBasin } from "../toolbar/place-picker";
@@ -36,7 +35,7 @@ import { basinLastDekad, type DekadRange, type View } from "../toolbar/range-rul
 import { inGroup, setBasinGroups, type BasinGroups } from "./groups";
 import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { MODEL_SHOWN } from "./water-balance";
-import { initRiverMap } from "./river-map";
+import { initSchemeMap } from "./scheme-map";
 import {
   BASIN_UNITS,
   TOPICS,
@@ -52,10 +51,9 @@ import {
   type BasinTile,
   type BasinUnits,
   type FluxStatus,
-  type SameDays,
   type TopicDef,
 } from "./stats-cards";
-import { loadMonthly, loadPeriod, loadWindows, type Monthly, type PeriodStats, type WindowRates } from "./stats-data";
+import { loadSeries, monthlyStats, periodStats, windowRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
 import { fmt, rampScale } from "./variables";
 
 interface Options {
@@ -78,12 +76,10 @@ export interface BasinStats {
   hover(place: Place | null): void;
 }
 
-type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; stats: PeriodStats };
-type RatesStatus = { key: string; rates: WindowRates | null; error: string | null };
+type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; series: WaporSeries };
 
 const $ = (id: string) => document.getElementById(id)!;
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const LOAD_DELAY = 400; // ms: wait for the range to rest (dragging the slider passes many)
 /** The first dekad of the WaPOR record. */
 const FIRST_DK = mk(WAPOR_MIN_YEAR, 0, 0);
 
@@ -98,12 +94,9 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     view: "country" as View,
     range: null as DekadRange | null,
     selection: null as Selection | null,
-    topic: TOPICS[0].id,
+    /** The WaPOR series, loaded once: every range is summed from them. */
     status: { kind: "idle" } as Status,
-    rates: { key: "", rates: null, error: null } as RatesStatus,
-    monthly: null as Monthly | null,
-    monthlyKey: "",
-    /** Pins and the legend's picks, per topic and scope ("rain:world", "rain:major"). */
+    /** Pins and the legend's picks, per scope ("world", "major"). */
     pinned: new Map<string, Driver>(),
     chosen: new Map<string, Driver>(),
     hover: null as Place | null,
@@ -120,23 +113,20 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   const legend = $("bs-legend");
   const tooltip = $("bs-tooltip");
   let current: { ctx: BasinCtx; spec: BasinMapSpec | null; csv: Map<string, (string | number)[][]> } | null = null;
-  // Discharge maps of a basin's sub-basins: along its rivers, or (the legend's switch) as fills.
-  const riverMap = initRiverMap({ map, subBasins, legend, ramp: $("bs-legend-ramp"), onChange: () => drawMap(), onHover: () => showMapTooltip() });
+  // Discharge and storage change maps of a basin's sub-basins: as the water balance scheme
+  // (a network of lines, dots), or (the legend's switch) as fills.
+  const schemeMap = initSchemeMap({ map, subBasins, legend, onChange: () => drawMap(), onHover: () => showMapTooltip() });
 
-  const topicDef = (): TopicDef => TOPICS.find((t) => t.id === state.topic)!;
-  const scope = () => `${state.topic}:${state.selection?.majorBasin ? "major" : "world"}`;
-
-  // --- Topic tabs ------------------------------------------------------------------------
-  const topicsEl = $("bs-topics");
-  topicsEl.innerHTML = TOPICS.map((t) => `<button role="tab" data-topic="${t.id}">${t.label}</button>`).join("");
-  slideSelection(topicsEl);
-  topicsEl.addEventListener("click", (e) => {
-    const button = (e.target as Element).closest<HTMLElement>("[data-topic]");
-    if (!button) return;
-    state.topic = button.dataset.topic!;
-    drivers.clearPreview();
-    render();
-  });
+  // All the topics' tiles and cards together, in one column.
+  const allTopics: TopicDef = {
+    id: "all",
+    label: "All",
+    tiles: TOPICS.flatMap((t) => t.tiles),
+    cards: TOPICS.flatMap((t) => t.cards),
+    about: TOPICS.map((t) => t.about).join(" "),
+  };
+  const topicDef = (): TopicDef => allTopics;
+  const scope = () => (state.selection?.majorBasin ? "major" : "world");
 
   const drivers = initDrivers(section, {
     enabled: () => state.view === "basin",
@@ -159,7 +149,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     tooltip,
   });
 
-  // The legend's title: the topic's maps, each once, in the order of the tiles and cards.
+  // The legend's title: all the maps, each once, in the order of the tiles and cards.
   const variable = initTitleMenu(
     $("bs-variable") as HTMLButtonElement,
     () => {
@@ -229,75 +219,29 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   mapEl.addEventListener("pointerleave", () => (tooltip.hidden = true));
 
   // --- Loading -------------------------------------------------------------------------------
-  let loadTimer = 0;
-  let wanted = "";
   function load() {
-    const range = state.range;
-    if (state.view !== "basin" || !range) return;
-    const key = `${range.start}-${range.end}`;
-    if (key === wanted) return; // loading or loaded
-    clearTimeout(loadTimer);
-    wanted = key;
+    if (state.view !== "basin" || state.status.kind !== "idle") return;
     state.status = { kind: "loading" };
-    render();
-    loadTimer = window.setTimeout(() => {
-      loadPeriod(range).then(
-        (stats) => {
-          if (wanted !== key) return;
-          state.status = { kind: "ready", stats };
-          render();
-        },
-        (err: Error) => {
-          if (wanted !== key) return;
-          state.status = { kind: "error", message: err.message };
-          wanted = "";
-          render();
-        },
-      );
-    }, LOAD_DELAY);
-  }
-
-  /** PCP and AETI over the other years' ranges (with the period's), once the period is in. */
-  function loadRatesFor(windows: SameDays) {
-    const key = windows.ranges.map((r) => `${r.start}-${r.end}`).join(",");
-    if (key === state.rates.key) return;
-    state.rates = { key, rates: null, error: null };
-    if (windows.ranges.length < 2) return;
-    loadWindows(windows.ranges).then(
-      (rates) => {
-        if (state.rates.key !== key) return;
-        state.rates = { key, rates, error: null };
+    loadSeries().then(
+      (series) => {
+        state.status = { kind: "ready", series };
         render();
       },
       (err: Error) => {
-        if (state.rates.key !== key) return;
-        // Tried again when the range changes.
-        state.rates = { key, rates: null, error: err.message };
+        state.status = { kind: "error", message: err.message };
         render();
       },
     );
   }
 
-  /** The monthly cycle for the selected major basin (or all basins), once the period is in. */
-  function loadMonthlyFor(stats: PeriodStats) {
-    const major = state.selection?.majorBasin?.id ?? null;
-    const key = stats.covered ? `${stats.covered.start}-${stats.covered.end}:${major}` : "";
-    if (key === state.monthlyKey) return;
-    state.monthlyKey = key;
-    state.monthly = null;
-    if (!stats.covered) return;
-    loadMonthly(stats.covered, major).then(
-      (monthly) => {
-        if (state.monthlyKey !== key) return;
-        state.monthly = monthly;
-        render();
-      },
-      () => {
-        if (state.monthlyKey === key) state.monthly = { months: [], pcp: [], aeti: [] };
-        render();
-      },
-    );
+  /** The last result, kept while its key stays the same (draw also runs on loads, selections, resizes). */
+  function memo<T>() {
+    let last: { key: string; value: T } | null = null;
+    return (key: string, compute: () => T) => (last?.key === key ? last.value : (last = { key, value: compute() }).value);
   }
+  const periodFor = memo<PeriodStats>();
+  const ratesFor = memo<WindowRates | null>();
+  const monthlyFor = memo<Monthly>();
 
   /**
    * The model's output for `key` (see state.fluxes), loading it the first time it's asked
@@ -331,14 +275,13 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     section.hidden = !shown;
     const message = $("bs-message");
     if (!shown) return clear();
-    for (const b of topicsEl.querySelectorAll<HTMLElement>("[data-topic]")) {
-      b.setAttribute("aria-selected", String(b.dataset.topic === state.topic));
-    }
 
     const status = state.status;
     const major = state.selection?.majorBasin ?? null;
     $("bs-heading").textContent = major ? `${majorNames.get(major.id) ?? major.name}: basin statistics` : "Basins of the world";
-    if (status.kind !== "ready" || !status.stats.covered) {
+    const range = state.range;
+    const stats = status.kind === "ready" && range ? periodFor(`${range.start}-${range.end}`, () => periodStats(status.series, range)) : null;
+    if (!stats?.covered) {
       message.hidden = false;
       message.classList.toggle("error", status.kind === "error");
       message.textContent =
@@ -352,19 +295,20 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       return clear();
     }
 
-    const stats = status.stats;
-    const covered = stats.covered!;
+    const covered = stats.covered;
     const topic = topicDef();
-    if (topic.cards.some((c) => c.id === "monthly")) loadMonthlyFor(stats);
     const windows = sameDays(covered, FIRST_DK, basinLastDekad());
-    const windowsKey = windows.ranges.map((r) => `${r.start}-${r.end}`).join(",");
-    // PCP and AETI in the other years, for the topics that show them.
-    if (topic.id !== "discharge") loadRatesFor(windows);
-    const rates = state.rates.key === windowsKey ? state.rates : { rates: null, error: null };
-    // The model's output, for the topics that show it.
-    const usesFlux = topic.id !== "rain";
-    const majorFlux: FluxStatus = usesFlux ? fluxes("majors", loadMajorFluxes) : { kind: "loading" };
-    const subFlux: FluxStatus | null = usesFlux && major ? fluxes(String(major.id), () => loadSubBasinFluxes(major.id)) : null;
+    // PCP and AETI in the other years, and per month.
+    const { series } = status as { series: WaporSeries };
+    const rates = ratesFor(windows.ranges.map((r) => `${r.start}-${r.end}`).join(","), () =>
+      windows.ranges.length < 2 ? null : windowRates(series, windows.ranges),
+    );
+    const monthly = topic.cards.some((c) => c.id === "monthly")
+      ? monthlyFor(`${covered.start}-${covered.end}:${major?.id ?? "all"}`, () => monthlyStats(series, covered, major?.id ?? null))
+      : null;
+    // The model's output.
+    const majorFlux: FluxStatus = fluxes("majors", loadMajorFluxes);
+    const subFlux: FluxStatus | null = major ? fluxes(String(major.id), () => loadSubBasinFluxes(major.id)) : null;
 
     const ctx: BasinCtx = {
       period: `${fmtStart(covered.start)} – ${fmtEnd(covered.end)}`,
@@ -372,10 +316,10 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       days: stats.days,
       stats,
       windows,
-      rates: rates.rates,
-      ratesError: rates.error,
+      rates,
+      ratesError: null,
       flux: { majors: majorFlux, sub: subFlux },
-      monthly: state.monthly,
+      monthly,
       major: major && { id: major.id, name: majorNames.get(major.id) ?? major.name },
       majors: majorIds,
       majorName: (id) => majorNames.get(id) ?? String(id),
@@ -443,7 +387,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     legend.hidden = true;
     tooltip.hidden = true;
     map.setBasinStatFills(null);
-    riverMap.draw(null);
+    schemeMap.draw(false);
     setMapOverride(false);
   }
 
@@ -482,7 +426,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       current.spec = null;
       legend.hidden = true;
       map.setBasinStatFills(null);
-      riverMap.draw(null);
+      schemeMap.draw(false);
       setMapOverride(false);
       return;
     }
@@ -495,10 +439,10 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const picked = parseArea(d.sub);
     const ids = spec.level === "major" ? ctx.majors : [...(spec.only ?? ctx.stats.sub.keys())];
     const theme = map.theme;
-    // Or the discharge along the rivers, coloured over the rivers' values.
-    const rivers = spec.status ? null : riverMap.prepare(spec.rivers, ctx.major?.id ?? null, spec.value, `${spec.id}:${ctx.period}`);
-    const values = rivers ? rivers.values : ids.map((id) => spec.value(id));
-    const scale = rampScale(rivers ? { ...spec, ramp: theme.discharge } : spec, values, undefined, state.stretch);
+    // Or as the water balance scheme: lines or dots, sized rather than coloured.
+    const scheme = spec.status ? null : schemeMap.prepare(spec.scheme, ctx.major?.id ?? null, spec.value, `${spec.id}:${ctx.period}`);
+    const values = scheme ? [] : ids.map((id) => spec.value(id));
+    const scale = rampScale(spec, values, undefined, state.stretch);
     const majorOf = (id: number) => (spec.level === "major" ? id : ctx.stats.sub.get(id)?.majorBasin ?? NaN);
     const shown = (id: number) => {
       if (picked?.kind === "major") return majorOf(id) === picked.id;
@@ -506,8 +450,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       return !spec.listed || spec.listed.has(id);
     };
     const colors = new Map<number, Color>();
-    if (rivers) {
-      // Plain land under the rivers; the other major basins greyed.
+    if (scheme) {
+      // Plain land under the scheme; the other major basins greyed.
       for (const id of ctx.majors) colors.set(id, id === ctx.major?.id ? theme.land : theme.noData);
     } else {
       ids.forEach((id, i) => {
@@ -516,25 +460,26 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       });
     }
     const outlined = picked?.kind === "sub" ? [picked.id] : [];
-    const status = rivers?.status || spec.status;
+    const status = scheme?.status || spec.status;
     const period = status ? "" : ctx.period;
     map.setBasinStatFills({
-      level: rivers ? "major" : spec.level,
-      key: `${spec.id}:${rivers ? "rivers" : ""}:${state.stretch}:${period}:${d.sub ?? ""}:${outlined.join()}`,
+      level: scheme ? "major" : spec.level,
+      key: `${spec.id}:${scheme ? "scheme" : ""}:${state.stretch}:${period}:${d.sub ?? ""}:${outlined.join()}`,
       colors,
       outlined,
     });
-    riverMap.draw(rivers ? scale : null);
+    schemeMap.draw(!!scheme && !scheme.status);
     setMapOverride(true);
 
     // Legend
     legend.hidden = false;
     variable.setLabel(spec.title);
-    const note = rivers ? spec.note.replace(/per sub-basin$/, "along the rivers") : spec.note;
-    $("bs-legend-note").textContent = `${note}${spec.scale === "log" ? " · Log scale" : ""}`;
+    const note = !scheme ? spec.note : spec.scheme === "Q" ? spec.note.replace(/per sub-basin$/, "along the rivers") : spec.note.replace(/per sub-basin$/, "per sub-basin, on its river");
+    $("bs-legend-note").textContent = `${note}${spec.scale === "log" && !scheme ? " · Log scale" : ""}`;
     // Without values (the model's output, still loading), no colour ramp: only the status.
+    // The scheme has a key of sizes instead.
     const empty = !scale.ticks.length;
-    $("bs-legend-period").parentElement!.hidden = empty;
+    $("bs-legend-period").parentElement!.hidden = scheme ? !!status : empty;
     $("bs-legend-ramp").hidden = empty;
     $("bs-legend-ticks").hidden = empty;
     $("bs-legend-status").textContent = status ?? "";
@@ -549,10 +494,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   function showMapTooltip() {
     const place = state.hover;
     const spec = current?.spec;
-    const river = spec?.rivers ? riverMap.hovered() : null;
-    if (spec && river && Number.isFinite(river.q)) {
-      const name = subNames.get(river.subBasin) ?? String(river.subBasin);
-      tooltip.innerHTML = `<b>${esc(name)}</b><br>${esc(spec.title)} in the river: ${fmt(river.q)} ${esc(spec.unit)}`;
+    const item = spec?.scheme ? schemeMap.hovered() : null;
+    if (spec && item && Number.isFinite(item.value)) {
+      const name = subNames.get(item.subBasin) ?? String(item.subBasin);
+      const what = item.kind === "Q" ? `${spec.title} in the river` : spec.title;
+      tooltip.innerHTML = `<b>${esc(name)}</b><br>${esc(what)}: ${fmt(item.value)} ${esc(spec.unit)}`;
       tooltip.hidden = false;
       return;
     }
@@ -588,7 +534,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     },
     setRange(range) {
       state.range = range;
-      load();
+      render();
     },
     setSelection(selection) {
       const majorBefore = state.selection?.majorBasin?.id;

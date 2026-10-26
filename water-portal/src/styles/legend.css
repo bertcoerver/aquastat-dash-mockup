@@ -229,3 +229,16 @@
   cursor: default;
   outline: none;
 }
+/* Basin view: the water balance scheme's key (line widths, dot sizes) in place of the ramp. */
+.scheme-key {
+  display: block;
+  margin-top: 6px;
+  overflow: visible;
+}
+.scheme-key[hidden] {
+  display: none;
+}
+.scheme-key text {
+  fill: var(--muted);
+  font: 400 10px/1 var(--mono);
+}

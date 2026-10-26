@@ -125,7 +125,7 @@ const unitSlug = (u: BasinUnits) => basinUnit(u).replace("³", "3").replace("/",
 
 // --- Measures ------------------------------------------------------------------------------
 
-export type MeasureKey = "pcp" | "aeti" | "ratio" | "balance" | "Q" | "Qmax" | "Qmin" | "dS";
+export type MeasureKey = "pcp" | "aeti" | "ratio" | "balance" | "Q" | "dS";
 
 interface Measure {
   label: string;
@@ -135,7 +135,7 @@ interface Measure {
   ramp: string[];
   scale: "linear" | "log" | "diverging";
   /** The model's (precomputed), or WaPOR's. */
-  flux?: { v: Flux; stat: "mean" | "max" | "min" };
+  flux?: { v: Flux };
   /** How this period is compared with the average: as a % of it, or the difference. */
   anomaly: "relative" | "absolute";
 }
@@ -152,10 +152,8 @@ const MEASURES: Record<MeasureKey, Measure> = {
   aeti: { label: V.aeti.label, short: "AETI", color: C.aeti, ramp: STYLES.AETI.ramp, scale: "linear", anomaly: "relative" },
   ratio: { label: "Share of precipitation evaporated", short: "AETI/PCP", color: "#d94801", ramp: RATIO_RAMP, scale: "linear", anomaly: "absolute" },
   balance: { label: V.balance.label, short: V.balance.short, color: C.balance, ramp: BALANCE_RAMP, scale: "diverging", anomaly: "absolute" },
-  Q: { label: STYLES.Q.label, short: "Q", color: STYLES.Q.color, ramp: STYLES.Q.ramp, scale: "log", flux: { v: "Q", stat: "mean" }, anomaly: "relative" },
-  Qmax: { label: "Highest dekad of discharge", short: "Q max", color: STYLES.Q.color, ramp: STYLES.Q.ramp, scale: "log", flux: { v: "Q", stat: "max" }, anomaly: "relative" },
-  Qmin: { label: "Lowest dekad of discharge", short: "Q min", color: STYLES.Q.color, ramp: STYLES.Q.ramp, scale: "log", flux: { v: "Q", stat: "min" }, anomaly: "relative" },
-  dS: { label: STYLES.dS.label, short: "ΔS", color: STYLES.dS.color, ramp: STYLES.dS.ramp, scale: "diverging", flux: { v: "dS", stat: "mean" }, anomaly: "absolute" },
+  Q: { label: STYLES.Q.label, short: "Q", color: STYLES.Q.color, ramp: STYLES.Q.ramp, scale: "log", flux: { v: "Q" }, anomaly: "relative" },
+  dS: { label: STYLES.dS.label, short: "ΔS", color: STYLES.dS.color, ramp: STYLES.dS.ramp, scale: "diverging", flux: { v: "dS" }, anomaly: "absolute" },
 };
 
 /** Which groups a measure's basins are compared in: the rain's by climate, the rivers' by where they go. */
@@ -165,8 +163,6 @@ const GROUPING: Record<MeasureKey, Grouping> = {
   ratio: "climate",
   balance: "climate",
   Q: "drain",
-  Qmax: "drain",
-  Qmin: "drain",
   dS: "drain",
 };
 
@@ -263,19 +259,19 @@ function fluxSeriesOf(c: BasinCtx, a: { kind: "sub" | "major"; id: number }, v: 
   return s ? { s: s[v], first: status.result.dekads[0] } : null;
 }
 
-/** A flux statistic of a series over range `r` (NaN: no values in it). */
-function fluxStat(s: Float64Array, first: number, r: DekadRange, stat: "mean" | "max" | "min") {
+/** The mean of a flux series over range `r` (NaN: no values in it). */
+function fluxMean(s: Float64Array, first: number, r: DekadRange) {
   const from = Math.max(0, r.start - first);
   const to = Math.min(s.length, r.end - first + 1);
-  let acc = stat === "max" ? -Infinity : stat === "min" ? Infinity : 0;
+  let acc = 0;
   let n = 0;
   for (let i = from; i < to; i++) {
     const v = s[i];
     if (!Number.isFinite(v)) continue;
-    acc = stat === "max" ? Math.max(acc, v) : stat === "min" ? Math.min(acc, v) : acc + v;
+    acc += v;
     n++;
   }
-  return n ? (stat === "mean" ? acc / n : acc) : NaN;
+  return n ? acc / n : NaN;
 }
 
 /** The World's (or a group's) flux per dekad: summed over its major basins. */
@@ -306,7 +302,7 @@ export function valueOf(c: BasinCtx, m: MeasureKey, a: Area, w = c.windows.curre
     if (flux) {
       // Groups and the World: of the sum of their basins' series.
       const series = areaFlux(c, a, flux.v);
-      v = series ? fluxStat(series.s, series.first, c.windows.ranges[w], flux.stat) : NaN;
+      v = series ? fluxMean(series.s, series.first, c.windows.ranges[w]) : NaN;
     } else {
       v = waporValue(c, m, sumsOf(c, a, w));
     }
@@ -374,8 +370,8 @@ export interface BasinMapSpec {
   listed?: Set<number>;
   /** Why the map has no values (yet), for the legend. */
   status?: string;
-  /** Discharge per sub-basin: can be drawn along the rivers instead (river-map.ts). */
-  rivers?: boolean;
+  /** Discharge or storage change per sub-basin: can be drawn as the water balance scheme instead (scheme-map.ts). */
+  scheme?: "Q" | "dS";
 }
 
 /** The maps' level: the selected basin's sub-basins, or the major basins. */
@@ -384,11 +380,7 @@ const subBasinsOf = (c: BasinCtx, major: number) => [...c.stats.sub].filter(([, 
 
 function valueNote(c: BasinCtx, m: MeasureKey, level: "major" | "sub") {
   const per = level === "major" ? "major basin" : "sub-basin";
-  const flux = MEASURES[m].flux;
-  if (flux) {
-    const what = flux.stat === "mean" ? "Mean" : flux.stat === "max" ? "Highest dekad" : "Lowest dekad";
-    return m === "dS" ? `${what} per ${per}` : level === "major" ? `${what} outflow per ${per}` : `${what} per ${per}`;
-  }
+  if (MEASURES[m].flux) return m === "Q" && level === "major" ? `Mean outflow per ${per}` : `Mean per ${per}`;
   if (m === "ratio") return `AETI as a share of PCP, per ${per}`;
   if (m === "balance") return "Brown: more evaporates than falls · teal: water left over";
   return c.units.per === "total" ? `Total per ${per}` : `Average per ${c.units.per}, per ${per}`;
@@ -415,7 +407,7 @@ function measureMap(c: BasinCtx, m: MeasureKey, level: "major" | "sub", mode: "v
     value: (id) => (anomaly ? anomalyOf(c, m, area(id)) : valueOf(c, m, area(id))),
     ramp: anomaly ? (m === "aeti" || m === "dS" ? STYLES.dS.ramp : BALANCE_RAMP) : def.ramp,
     scale: anomaly ? "diverging" : def.scale,
-    rivers: !anomaly && def.flux?.v === "Q" && level === "sub",
+    scheme: !anomaly && level === "sub" ? def.flux?.v : undefined,
     only,
     listed,
     status: status || undefined,
@@ -739,8 +731,6 @@ export const TOPICS: TopicDef[] = [
     label: "Discharge",
     tiles: [
       { id: "t-q", label: "Mean discharge", color: STYLES.Q.color, measure: "Q" },
-      { id: "t-qmax", label: "Highest dekad", color: "#08519c", measure: "Qmax" },
-      { id: "t-qmin", label: "Lowest dekad", color: "#9ecae1", measure: "Qmin" },
     ],
     cards: [hydrograph, groupCard("Q"), rankCard("Q", "top", "Largest outflows"), yearsCard("Q"), subCard("Q", "top")],
     about: "Discharge (Q): from the water balance model, routed through the sub-basins as linear reservoirs; a major basin's is the sum at its outlets, a group's the sum over its major basins.",

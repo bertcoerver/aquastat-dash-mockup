@@ -149,6 +149,18 @@
       <button class="legend-ramp ramp-menu" id="bs-legend-ramp" type="button" aria-haspopup="listbox" aria-expanded="false"
         aria-label="Colour range"><span class="title-menu-label" hidden></span></button>
       <div class="legend-ticks" id="bs-legend-ticks" aria-hidden="true"></div>
+      <!-- The scheme's key: line widths or dot sizes, in place of the ramp (src/basin/scheme-map.ts). -->
+      <svg class="scheme-key" id="bs-scheme-key" aria-hidden="true" hidden></svg>
+      <!-- The discharge network: how far its lines may stray from the rivers (src/basin/scheme-map.ts). -->
+      <div class="legend-quality" id="bs-simplify" hidden>
+        <label class="legend-quality-head" for="bs-simplify-input"
+          title="The lines are simplified (Douglas–Peucker): each stays within this distance of the river network, as a share of the basin's size.">
+          Simplify
+        </label>
+        <input class="legend-quality-input" id="bs-simplify-input" type="range" min="0" max="6" step="0.25" value="1.5" />
+        <div class="legend-quality-ends" aria-hidden="true"><span>Rivers</span><span>Simple</span></div>
+        <div class="legend-quality-value" id="bs-simplify-value"></div>
+      </div>
       <div class="legend-status" id="bs-legend-status" role="status"></div>
     </aside>
 
@@ -261,7 +273,6 @@
         <!-- Basin statistics: charts that each drive the map (src/basin/basin-stats.ts). -->
         <section class="bs-section" id="bs-section" hidden>
           <h3 class="bs-heading" id="bs-heading"></h3>
-          <div class="wb-vars cp-topics" id="bs-topics" role="tablist" aria-label="Topic"></div>
           <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
           <p class="wb-message" id="bs-message" hidden></p>
           <div class="wb-stats cp-stats" id="bs-stats"></div>

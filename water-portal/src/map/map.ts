@@ -14,7 +14,7 @@ import { bordersLayer } from "./layers/borders";
 import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
-import { riverFlowsLayers, type RiverFlows } from "./layers/river-flows";
+import { basinSchemeLayers, type BasinScheme } from "./layers/basin-scheme";
 import { terrainLayer } from "./layers/terrain";
 import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
@@ -65,10 +65,11 @@ export interface WaterMap {
    */
   setBasinStatFills(fills: BasinStatFills | null): void;
   /**
-   * Basin view: rivers drawn by their discharge (basin-stats.ts), in place of the river
-   * tiles' in their sub-basins (null: none). By `key`, as above.
+   * Basin view: the water balance scheme (basin-stats.ts): discharge as lines along the
+   * rivers, in place of the river tiles' in their sub-basins, and storage change as dots
+   * (null: none). By `key`, as above.
    */
-  setRiverFlows(flows: RiverFlows | null): void;
+  setBasinScheme(scheme: BasinScheme | null): void;
   /**
    * Country view: fill countries with their own colours (a statistic's values), and
    * outline the selected country instead of filling it (null: none). `key` names the
@@ -137,7 +138,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
     basinStats: null as BasinStatFills | null,
-    riverFlows: null as RiverFlows | null,
+    scheme: null as BasinScheme | null,
     dragged: null as LngLat | null, // the marker while it is dragged
     terrain: false, // 3D relief (the button among the map's controls)
   };
@@ -209,7 +210,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       selectedColor: theme.selectedSubBasin,
       fills: values ?? state.hoverFills,
     });
-    const flows = basins ? state.riverFlows : null;
+    const scheme = basins ? state.scheme : null;
     const outlined = stats
       ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])]
       : state.outlined;
@@ -229,11 +230,11 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       riversLayer({
         color: theme.river,
         visible: state.visible.rivers,
-        hidden: flows ? { key: flows.key, subBasins: flows.subBasins } : undefined,
+        hidden: scheme ? { key: scheme.key, subBasins: scheme.subBasins } : undefined,
       }),
-      ...riverFlowsLayers(flows),
       lakesLayer({ color: theme.water, visible: state.visible.lakes }),
       subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
+      ...basinSchemeLayers(scheme),
       countryOutlineLayer({
         m49: state.selection.country,
         color: theme.outline,
@@ -532,9 +533,9 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       state.basinStats = fills;
       render();
     },
-    setRiverFlows(flows) {
-      if (flows?.key === state.riverFlows?.key) return;
-      state.riverFlows = flows;
+    setBasinScheme(scheme) {
+      if (scheme?.key === state.scheme?.key) return;
+      state.scheme = scheme;
       render();
     },
     setCountryFills(fills) {

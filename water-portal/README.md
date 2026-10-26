@@ -46,6 +46,8 @@ Other commands:
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
 | `npm run groups` | Rebuild the major basins' groups for the Basin view: where their water goes and their climate (`public/data/basin-groups.json`; needs GDAL, downloads ~400 MB the first time, takes ~6 min) |
+| `npm run rivers` | Rebuild the river network per major basin and the sub-basins' middles for the Basin view's water balance scheme (`public/data/rivers/`, `public/data/sub-basin-middles.json`; from `../river-flow-poc`'s `rivers.bin` and `nodes.json`) |
+| `npm run wapor-series` | Rebuild every sub-basin's dekadal WaPOR PCP and AETI for the Basin view's statistics (`public/data/wapor-series.bin`; from FAO's BigQuery proxy, takes ~2 min; again when WaPOR has new dekads) |
 | `npm run tiles` | Rebuild the country and border tiles (needs `tippecanoe`; downloads ~220 MB the first time) |
 
 ## Project layout
@@ -59,6 +61,8 @@ water-portal/
 ├── public/                 Copied as-is into the site
 │   ├── data/               Country, major basin and sub-basin lists (name, ID, bounding
 │   │   │                   box; for sub-basins also their major basin, where they drain and area)
+│   │   ├── rivers/         The river network per major basin (<id>.bin), for the water balance scheme
+│   │   ├── sub-basin-middles.json  A point inside each sub-basin, for its storage change dot
 │   │   └── model/          Precomputed Q and ΔS (not in git; see Notes: the water balance model)
 │   └── tiles/              Vector tiles ({z}/{x}/{y}.pbf)
 │       ├── m49/            Country areas
@@ -91,6 +95,7 @@ water-portal/
     │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
+    │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, storage change dots
     │       └── marker.ts     The click marker
     ├── basin/              Basin view: the water balance of the selected sub-basin
     │   ├── calc_runoff.js  The model (copy of fao-wapor-discharge's js/calc_runoff.js)
@@ -98,9 +103,12 @@ water-portal/
     │   ├── variables.ts    PCP / AETI / Q / ΔS: labels, units, colour scales
     │   ├── timeseries.ts   Time series charts (drag to choose the period)
     │   ├── sankey.ts       Sankey diagram of the network's water balance
-    │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, the same days in other years, and per month (BigQuery)
+    │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, the same days in other years, and per month (from wapor-series.bin)
     │   ├── stats-cards.ts  The statistics topics: tiles, charts and each one's map
     │   ├── groups.ts       The major basins' groups: by where the water goes, by climate
+    │   ├── rivers.ts       Loads a major basin's river network and the sub-basins' middles
+    │   ├── scheme.ts       The water balance scheme: lines along the rivers, dots, simplification
+    │   ├── scheme-map.ts   The scheme on the map: the legend's switch, key and simplify slider
     │   ├── basin-stats.ts  Statistics in the panel: topics, preview / pin, map colours, legend, tooltip
     │   └── water-balance.ts  Connects selection, date range, model, map and panel
     ├── country/            Country view: AQUASTAT statistics and the maps that go with them
@@ -147,10 +155,11 @@ water-portal/
   are summed or area-weighted from the region's countries. Regions follow FAO's Water Portal (SDG
   regions with some split into sub-regions), from UNSD's M49 table.
 - **Basin statistics** read the same WaPOR v3 L1 dekadal zonal statistics as the model
-  (`fao-maps-review.zonal_stats_openEO.L1-PCP-D_…` and `L1-AETI-D_…`, 2018 to Dec 2025): one
-  query per range for all ~7,600 sub-basins (~250 KB, ~3 s, after the range rests for 0.4 s), one
-  for the same days in every other year of the record (~1.2 MB, ~5 s), and one for the monthly
-  cycle. Totals are each sub-basin's mean daily rate × the days covered; major basins, groups and
+  (`fao-maps-review.zonal_stats_openEO.L1-PCP-D_…` and `L1-AETI-D_…`, 2018 to Dec 2025), every
+  sub-basin's dekadal series at once from a static file (`public/data/wapor-series.bin`, ~9 MB,
+  `npm run wapor-series`), loaded when the Basin view first opens. The period, the same days in
+  every other year of the record and the monthly cycle are summed from it in the browser (a few ms),
+  so changing the range shows at once. Totals are each sub-basin's mean daily rate × the days covered; major basins, groups and
   the World are area-weighted (or, over the basin, summed) over their sub-basins, and their
   discharge and storage change summed over their major basins. A range of more than a year is
   compared with the other spans of its length that fit in the record, so with fewer than 3 of
@@ -256,6 +265,26 @@ water-portal/
   hidden. Moving the map loads the frames ahead again for the new view; any change of
   range or view stops playback. Up to 16 requests to the bucket at once (it speaks
   HTTP/2), instead of deck.gl-raster's default of 6.
+- **The water balance scheme** ([src/basin/scheme.ts](src/basin/scheme.ts), from
+  river-flow-poc's `scheme.html`): with a major basin selected, the discharge and storage change
+  maps of its sub-basins have a switch in the legend. Discharge: **Network** (lines along the
+  rivers, as wide as the discharge they carry) or **Sub-basins** (fills). Storage change:
+  **Dots** (a dot on each sub-basin's river near its middle, its area the change, green rising,
+  red falling) or **Sub-basins**. In a sub-basin, the line runs from each upstream sub-basin's
+  outlet down the network to where the river leaves it; a piece carries the outflow of the
+  upstream sub-basins passing through it and, below the dot, the sub-basin's own gain (where it
+  loses water, everything is scaled down to its outflow), so widths are linear and add up where
+  rivers join, and each outlet's width is that sub-basin's outflow. Outlets are traced from
+  upstream down rather than taken as the end of a sub-basin's biggest arc: the network has
+  parallel duplicate arcs, and the river traced along one twin never reaches the other's end.
+  Where the network doesn't connect, the line is straight; water from other major basins counts
+  as a sub-basin's own gain. The widest line is the basin's largest outflow in the period, a dot
+  of 12 px the 98th percentile of |ΔS|; the legend shows a key of sizes instead of the ramp. The
+  **Simplify** slider (discharge only) simplifies the lines between junctions (Douglas–Peucker)
+  to 0–6 % of the basin's size (1.5 % at first): at 0 they are the network as stored, itself
+  simplified to ~500 m from FAO's `rivers_world_47950`. The river network
+  (`public/data/rivers/<id>.bin`, 8.3 MB in all, up to ~490 kB a basin (the Amazon)) and the middles
+  (200 kB) load on the first such map.
 - **The water balance model's maps** (Q and ΔS in the Basin view's legend) read files
   precomputed by [fao-wapor-discharge](../../fao-wapor-discharge)'s
   `python -m fao_wapor_discharge.portal --sub-basins public/data/sub-basins.json --out-dir …`,
