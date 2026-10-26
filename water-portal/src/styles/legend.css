@@ -242,3 +242,79 @@
   fill: var(--muted);
   font: 400 10px/1 var(--mono);
 }
+
+/* --- Layers (panels/legend.ts): a section per layer on the map, under the checklist. --- */
+.legend-layer-note {
+  display: block;
+  font: 500 10px/1.4 var(--sans);
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.legend-layer-note:empty {
+  display: none;
+}
+.legend-layer-head {
+  display: none;
+}
+/* With more than one layer: each has its title, and a × to take it off the map. */
+.legend-layer.titled {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.legend-layer.titled .legend-layer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+.legend-remove {
+  flex: none;
+  padding: 0 4px;
+  font: 400 15px/1 var(--sans);
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.legend-remove:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+.legend-remove:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.legend-layer .legend-quality {
+  margin-top: 6px;
+}
+.scheme-key .key-dot {
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+/* The checklist: a box before each map, ticked when it's on the map. */
+.title-menu-list[aria-multiselectable="true"] [role="option"] {
+  justify-content: flex-start;
+  align-items: baseline;
+}
+.title-menu-list[aria-multiselectable="true"] [role="option"]::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--muted);
+  border-radius: 3px;
+}
+.title-menu-list[aria-multiselectable="true"] [aria-selected="true"]::before {
+  border-color: var(--accent);
+  background: var(--accent)
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><path d='M2.5 6.2l2.4 2.4 4.6-5' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>")
+    center / 100% no-repeat;
+}
+.title-menu-list[aria-multiselectable="true"] [role="option"] small {
+  margin-left: auto;
+  padding-left: 12px;
+}

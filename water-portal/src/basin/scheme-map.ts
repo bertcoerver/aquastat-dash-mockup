@@ -8,30 +8,40 @@
  * - storage change as a dot on each sub-basin's river, its area the change, green as
  *   storage rises and red as it falls.
  *
+ * Both at once, over another map's fills (the legend's layers, panels/legend.ts).
  * basin-stats.ts asks for it for the maps that allow it (BasinMapSpec.scheme: discharge
- * or storage change per sub-basin), and a switch in the legend goes back to the fills.
- * The legend shows a key to the widths or sizes in place of the colour ramp. Sizes are
- * set per map: the widest line is the basin's largest outflow in the period, a dot of
- * DS_PX the 98th percentile of the sub-basins' |ΔS|.
+ * or storage change per sub-basin), and a switch in each one's legend section goes back
+ * to the fills. The legend shows a key to the widths or sizes in place of the colour
+ * ramp. Sizes are set per map: the widest line is the basin's largest outflow in the
+ * period, a dot of DS_PX the 98th percentile of the sub-basins' |ΔS|.
  */
 import type { SchemeArrow, SchemeDot, SchemeLineStyle } from "../map/layers/basin-scheme";
 import type { WaterMap } from "../map/map";
 import type { SubBasin } from "../map/sub-basin-network";
 import type { Color } from "../map/theme";
-import { fmtStop } from "../panels/ramp-menu";
+import { nice, type LayerLegend, type LegendKey } from "../panels/legend";
 import { slideSelection } from "../panels/segmented";
 import { loadMiddles, loadRivers } from "./rivers";
 import { buildScheme, lineQ, simplify, type Scheme } from "./scheme";
 
 export type SchemeKind = "Q" | "dS";
+/** The legend's slot of each kind drawn as the scheme. */
+export const SCHEME_SLOT: Record<SchemeKind, "lines" | "dots"> = { Q: "lines", dS: "dots" };
+
+/** A map to draw as the scheme: its value per sub-basin, and `key` names those (for the cache). */
+export interface SchemeLayer {
+  kind: SchemeKind;
+  value(id: number): number;
+  key: string;
+}
 
 interface Options {
   map: WaterMap;
   subBasins: SubBasin[];
-  /** The legend (#bs-legend): the switch goes under its title. */
-  legend: HTMLElement;
-  /** Draw the map again: the rivers loaded, or the switch moved. */
-  onChange(): void;
+  /** The legend: the switches go in their layers' sections. */
+  legend: LayerLegend;
+  /** Draw the map again: the rivers loaded, or a switch moved (`kind`: its map). */
+  onChange(kind?: SchemeKind): void;
   /** The line or dot under the pointer changed (see hovered). */
   onHover(): void;
 }
@@ -39,13 +49,19 @@ interface Options {
 export interface SchemeMap {
   /**
    * Whether a map of `kind` (BasinMapSpec.scheme; undefined: not allowed) of major basin
-   * `major` is drawn as the scheme, from `value` per sub-basin (`key` names that, for the
-   * cache), and if so why it isn't drawn yet (the status: "" when it is). Null: draw the
-   * fills. Shows the legend's switch when there's a choice.
+   * `major` is drawn as the scheme (true) or as fills.
    */
-  prepare(kind: SchemeKind | undefined, major: number | null, value: (id: number) => number, key: string): { status: string } | null;
-  /** Draw the scheme last prepared (false: none), with its key in the legend. */
-  draw(on: boolean): void;
+  isScheme(kind: SchemeKind | undefined, major: number | null): boolean;
+  /**
+   * Show each kind's switch in its section of the legend (`shown`: the maps of the kinds
+   * on the map, in the slot they're in), hiding the others.
+   */
+  showSwitches(shown: { kind: SchemeKind; slot: string }[], major: number | null): void;
+  /**
+   * Draw `layers` (at most one of each kind) of major basin `major` as the scheme (none:
+   * clear it). Returns each one's key for the legend, or why it isn't drawn (yet).
+   */
+  draw(major: number | null, layers: SchemeLayer[]): Map<SchemeKind, { status: string; key: LegendKey | null }>;
   /** The line or dot under the pointer: its sub-basin and value (null: none). */
   hovered(): { subBasin: number; value: number; kind: SchemeKind } | null;
 }
@@ -66,59 +82,60 @@ const LABELS: Record<SchemeKind, [string, string, string, string]> = {
 };
 
 const $ = (id: string) => document.getElementById(id)!;
+const rgb = (c: Color) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Options): SchemeMap {
   const schemes = new Map<number, Status>();
   const mode: Record<SchemeKind, "scheme" | "fills"> = { Q: "scheme", dS: "scheme" };
-  let kind: SchemeKind | null = null;
-  let prepared: { key: string; kind: SchemeKind; scheme: Scheme; value: (id: number) => number } | null = null;
-  let hover: { subBasin: number; value: number } | null = null;
+  let hover: { subBasin: number; value: number; kind: SchemeKind } | null = null;
   let lastMajor: number | null = null;
-  const key = document.getElementById("bs-scheme-key") as unknown as SVGSVGElement;
   const slider = $("bs-simplify");
   const input = $("bs-simplify-input") as HTMLInputElement;
+  /** The basin's scheme last drawn (for the slider). */
+  let drawnScheme: Scheme | null = null;
 
-  // --- The switch, under the legend's title ----------------------------------------------
-  const toggle = document.createElement("div");
-  toggle.className = "wb-vars";
-  toggle.setAttribute("role", "radiogroup");
-  toggle.style.margin = "8px 0 2px";
-  toggle.hidden = true;
-  toggle.innerHTML =
-    '<button type="button" role="radio" data-mode="scheme"></button><button type="button" role="radio" data-mode="fills"></button>';
-  legend.querySelector(".legend-title")!.after(toggle);
-  slideSelection(toggle);
-  const [schemeButton, fillsButton] = toggle.querySelectorAll<HTMLElement>("[data-mode]");
-  function showMode() {
-    if (!kind) return;
+  // --- The switches, one per kind, in their layers' sections --------------------------------
+  const toggles = {} as Record<SchemeKind, HTMLElement>;
+  for (const kind of ["Q", "dS"] as SchemeKind[]) {
     const [a, aTitle, b, bTitle] = LABELS[kind];
-    schemeButton.textContent = a;
-    schemeButton.title = aTitle;
-    fillsButton.textContent = b;
-    fillsButton.title = bTitle;
+    const toggle = document.createElement("div");
+    toggle.className = "wb-vars";
+    toggle.setAttribute("role", "radiogroup");
     toggle.setAttribute("aria-label", kind === "Q" ? "Discharge shown" : "Storage change shown");
-    for (const button of [schemeButton, fillsButton]) button.setAttribute("aria-checked", String(button.dataset.mode === mode[kind]));
+    toggle.style.margin = "6px 0 2px";
+    toggle.hidden = true;
+    toggle.innerHTML =
+      `<button type="button" role="radio" data-mode="scheme" title="${aTitle}">${a}</button>` +
+      `<button type="button" role="radio" data-mode="fills" title="${bTitle}">${b}</button>`;
+    slideSelection(toggle);
+    toggle.addEventListener("click", (e) => {
+      const button = (e.target as Element).closest<HTMLElement>("[data-mode]");
+      if (!button || button.dataset.mode === mode[kind]) return;
+      mode[kind] = button.dataset.mode as "scheme" | "fills";
+      showMode(kind);
+      onChange(kind);
+    });
+    toggles[kind] = toggle;
+    showMode(kind);
   }
-  toggle.addEventListener("click", (e) => {
-    const button = (e.target as Element).closest<HTMLElement>("[data-mode]");
-    if (!button || !kind || button.dataset.mode === mode[kind]) return;
-    mode[kind] = button.dataset.mode as "scheme" | "fills";
-    showMode();
-    onChange();
-  });
+  function showMode(kind: SchemeKind) {
+    for (const button of toggles[kind].querySelectorAll<HTMLElement>("[data-mode]")) {
+      button.setAttribute("aria-checked", String(button.dataset.mode === mode[kind]));
+    }
+  }
 
   // --- The simplification slider -----------------------------------------------------------
   /** Tolerance as a share of the basin's size. */
   const share = () => Number(input.value) / 100;
   function showSimplify() {
-    const km = prepared ? share() * prepared.scheme.extent * 111 : 0;
+    const km = drawnScheme ? share() * drawnScheme.extent * 111 : 0;
     const text = share() === 0 ? "The rivers as mapped" : `Within ${km < 10 ? km.toFixed(1) : Math.round(km)} km of the rivers`;
     $("bs-simplify-value").textContent = text;
     input.setAttribute("aria-valuetext", text);
   }
   input.addEventListener("input", () => {
-    if (!prepared) return;
-    simplify(prepared.scheme.lines, share() * prepared.scheme.extent);
+    if (!drawnScheme) return;
+    simplify(drawnScheme.lines, share() * drawnScheme.extent);
     showSimplify();
     drawn = "";
     onChange();
@@ -135,85 +152,97 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
           schemes.set(major, { kind: "ready", scheme });
         })
         .catch((err: Error) => schemes.set(major, { kind: "error", message: err.message }))
-        .then(onChange);
+        .then(() => onChange());
     }
     return s;
   }
 
-  function off() {
-    prepared = null;
+  function clear() {
+    drawn = "";
+    drawnScheme = null;
+    slider.hidden = true;
+    map.setBasinScheme(null);
     if (hover) {
       hover = null;
       onHover();
     }
-    return null;
   }
 
   let drawn = "";
+  /** The last drawing's keys, while `drawn` stays the same. */
+  let drawnKeys = new Map<SchemeKind, { status: string; key: LegendKey | null }>();
 
   return {
-    prepare(k, major, value, valueKey) {
-      kind = k ?? null;
-      toggle.hidden = !k || major === null;
-      showMode();
-      if (!k || major === null || mode[k] !== "scheme") return off();
+    isScheme(kind, major) {
+      return !!kind && major !== null && mode[kind] === "scheme";
+    },
+
+    showSwitches(shown, major) {
+      for (const kind of ["Q", "dS"] as SchemeKind[]) {
+        const s = major === null ? undefined : shown.find((x) => x.kind === kind);
+        const toggle = toggles[kind];
+        toggle.hidden = !s;
+        if (s) legend.section(s.slot).extra.append(toggle);
+      }
+    },
+
+    draw(major, layers) {
+      const out = new Map<SchemeKind, { status: string; key: LegendKey | null }>();
+      if (major === null || !layers.length) {
+        clear();
+        return out;
+      }
       // A failed load is tried again once another basin has been picked.
       if (major !== lastMajor) for (const [id, s] of schemes) if (s.kind === "error") schemes.delete(id);
       lastMajor = major;
       const s = status(major);
       if (s.kind !== "ready") {
-        prepared = null;
-        return { status: s.kind === "loading" ? "Loading the rivers…" : s.message };
+        clear();
+        const message = s.kind === "loading" ? "Loading the rivers…" : s.message;
+        for (const l of layers) out.set(l.kind, { status: message, key: null });
+        return out;
       }
-      prepared = { key: `${major}:${k}:${valueKey}`, kind: k, scheme: s.scheme, value };
-      return { status: "" };
-    },
-
-    draw(on) {
-      slider.hidden = !on || prepared?.kind !== "Q";
-      key.toggleAttribute("hidden", !on || !prepared);
-      if (!on || !prepared) {
-        drawn = "";
-        map.setBasinScheme(null);
-        return;
-      }
-      const theme = map.theme;
-      const { scheme, value, kind: k } = prepared;
-      const mapKey = `${prepared.key}:${input.value}`;
-      if (mapKey === drawn) return;
+      const scheme = s.scheme;
+      const q = layers.find((l) => l.kind === "Q");
+      slider.hidden = !q;
+      if (q) legend.section(SCHEME_SLOT.Q).after.append(slider);
+      drawnScheme = scheme;
+      const mapKey = `${major}:${layers.map((l) => `${l.kind}:${l.key}`).join("|")}:${input.value}`;
+      if (mapKey === drawn) return drawnKeys;
       drawn = mapKey;
       showSimplify();
-      const ids = [...scheme.nodes.keys()];
-      const onHoverItem = (item: { subBasin: number; value: number } | null) => {
-        if (item?.subBasin === hover?.subBasin && item?.value === hover?.value) return;
-        hover = item;
-        onHover();
-      };
-      const common = { key: mapKey, color: theme.scheme, casing: theme.schemeCasing, onHover: onHoverItem };
 
-      if (k === "Q") {
-        const ref = Math.max(0, ...ids.map(value).filter(Number.isFinite)) || 1;
-        const width = (q: number) => (q > 0 ? Math.max(Q_MIN_PX, (q / ref) * Q_PX) : 0);
-        const lines: SchemeLineStyle[] = [];
-        const arrows: SchemeArrow[] = [];
+      const theme = map.theme;
+      const ids = [...scheme.nodes.keys()];
+      const lines: SchemeLineStyle[] = [];
+      const arrows: SchemeArrow[] = [];
+      let dots: SchemeDot[] = [];
+
+      if (q) {
+        const ref = Math.max(0, ...ids.map(q.value).filter(Number.isFinite)) || 1;
+        const width = (v: number) => (v > 0 ? Math.max(Q_MIN_PX, (v / ref) * Q_PX) : 0);
         for (const line of scheme.lines) {
-          const q = lineQ(line, value, scheme);
-          lines.push({ path: line.path, width: width(q), subBasin: line.in, value: q });
+          const v = lineQ(line, q.value, scheme);
+          lines.push({ path: line.path, width: width(v), subBasin: line.in, value: v });
           if (line.kind !== "mouth") continue;
           const [[x0, y0], [x1, y1]] = line.path;
           const angle = (Math.atan2(y1 - y0, (x1 - x0) * Math.cos((y0 * Math.PI) / 180)) * 180) / Math.PI;
-          arrows.push({ position: [x1, y1], angle, size: Math.min(36, 10 + width(q)), subBasin: line.in, value: q });
+          arrows.push({ position: [x1, y1], angle, size: Math.min(36, 10 + width(v)), subBasin: line.in, value: v });
         }
         // Thin lines first, so the big rivers run over them at confluences.
         lines.sort((a, b) => a.width - b.width);
-        map.setBasinScheme({ ...common, lines, arrows, dots: [], subBasins: new Set(ids) });
-        drawKey(ref, (q) => width(q), "Q", theme.scheme, theme);
-      } else {
-        const values = ids.map(value).filter(Number.isFinite);
+        const top = nice(ref);
+        const color = rgb(theme.scheme);
+        out.set("Q", { status: "", key: { kind: "lines", items: [top / 10, top / 2, top].map((v) => ({ value: v, size: width(v), color })) } });
+      }
+
+      const ds = layers.find((l) => l.kind === "dS");
+      if (ds) {
+        const values = ids.map(ds.value).filter(Number.isFinite);
         const ref = quantile(values.map(Math.abs), 0.98) || 1;
-        const radius = (ds: number) => Math.min(DS_MAX_PX, Math.max(DS_MIN_PX, Math.sqrt(Math.abs(ds) / ref) * DS_PX));
-        const dots: SchemeDot[] = ids
-          .map((id) => ({ id, v: value(id) }))
+        const radius = (v: number) => Math.min(DS_MAX_PX, Math.max(DS_MIN_PX, Math.sqrt(Math.abs(v) / ref) * DS_PX));
+        dots = ids
+          .map((id) => ({ id, v: ds.value(id) }))
           .filter(({ v }) => Number.isFinite(v))
           .map(({ id, v }) => ({
             position: scheme.dots.get(id)!,
@@ -224,48 +253,37 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
           }))
           // Big dots first, so small ones beside them stay visible.
           .sort((a, b) => b.radius - a.radius);
-        map.setBasinScheme({ ...common, lines: [], arrows: [], dots, subBasins: new Set() });
-        drawKey(ref, radius, "dS", theme.storageRise, theme);
+        const top = nice(ref);
+        const items = ([[top / 4, theme.storageRise, "+"], [top, theme.storageRise, "+"], [top, theme.storageFall, "−"]] as const)
+          .map(([v, c, sign]) => ({ value: v, size: radius(v), color: rgb(c), sign }));
+        out.set("dS", { status: "", key: { kind: "circles", items } });
       }
+
+      // The tooltip's: a dot (as given by the map: its sub-basin and value) or a line.
+      const isDot = (item: { subBasin: number; value: number }) => dots.some((d) => d.subBasin === item.subBasin && d.value === item.value);
+      map.setBasinScheme({
+        key: mapKey,
+        color: theme.scheme,
+        casing: theme.schemeCasing,
+        lines,
+        arrows,
+        dots,
+        subBasins: new Set(q ? ids : []),
+        onHover(item) {
+          const next = item && { ...item, kind: (isDot(item) ? "dS" : "Q") as SchemeKind };
+          if (next?.subBasin === hover?.subBasin && next?.value === hover?.value) return;
+          hover = next;
+          onHover();
+        },
+      });
+      drawnKeys = out;
+      return out;
     },
 
     hovered() {
-      return hover && prepared ? { ...hover, kind: prepared.kind } : null;
+      return drawnScheme ? hover : null;
     },
   };
-
-  /** The legend's key: three line widths (discharge), or dot sizes rising and falling (storage change). */
-  function drawKey(ref: number, size: (v: number) => number, k: SchemeKind, color: Color, theme: WaterMap["theme"]) {
-    const rgb = (c: Color) => `rgb(${c[0]},${c[1]},${c[2]})`;
-    const top = nice(ref);
-    const label = (x: number, v: number, sign = "") => `<text x="${x}" y="21">${sign}${fmtStop(v, top)}</text>`;
-    const width = legend.clientWidth - 24 || 220;
-    const step = width / 3;
-    if (k === "Q") {
-      key.innerHTML = [top / 10, top / 2, top]
-        .map((q, i) => {
-          const x = i * step;
-          return `<line x1="${x + 1}" y1="16" x2="${x + 28}" y2="16" stroke="${rgb(color)}" stroke-width="${size(q)}" stroke-linecap="round"/>` +
-            label(x + 34, q);
-        })
-        .join("");
-    } else {
-      key.innerHTML = ([[top / 4, theme.storageRise, "+"], [top, theme.storageRise, "+"], [top, theme.storageFall, "−"]] as const)
-        .map(([v, c, sign], i) => {
-          const x = i * step + DS_MAX_PX / 2;
-          return `<circle cx="${x}" cy="16" r="${size(v)}" fill="${rgb(c)}" stroke="${rgb(theme.schemeCasing)}"/>` + label(x + size(v) + 5, v, sign);
-        })
-        .join("");
-    }
-    key.setAttribute("viewBox", `0 0 ${width} 34`);
-    key.setAttribute("width", String(width));
-  }
-}
-
-/** A round number at or below x (1, 2 or 5 × a power of ten). */
-function nice(x: number) {
-  const p = 10 ** Math.floor(Math.log10(x));
-  return [5, 2, 1].map((m) => m * p).find((v) => v <= x) ?? p;
 }
 
 /** The p-th quantile (0–1) of the values. */

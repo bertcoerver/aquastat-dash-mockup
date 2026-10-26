@@ -26,8 +26,8 @@ import type { Place } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
 import { mixColor, type Color } from "../map/theme";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
-import { DEFAULT_STRETCH, fmtStop, initRampMenu } from "../panels/ramp-menu";
-import { initTitleMenu, type MenuOption } from "../panels/title-menu";
+import { SLOT_HINTS, initLayerLegend, onePerSlot, toggled, type LegendKey, type LegendLayer } from "../panels/legend";
+import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Selection } from "../selection";
 import type { MajorBasin } from "../toolbar/place-picker";
 import { WAPOR_MIN_YEAR, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
@@ -35,7 +35,7 @@ import { basinLastDekad, type DekadRange, type View } from "../toolbar/range-rul
 import { inGroup, setBasinGroups, type BasinGroups } from "./groups";
 import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { MODEL_SHOWN } from "./water-balance";
-import { initSchemeMap } from "./scheme-map";
+import { SCHEME_SLOT, initSchemeMap } from "./scheme-map";
 import {
   BASIN_UNITS,
   TOPICS,
@@ -54,7 +54,7 @@ import {
   type TopicDef,
 } from "./stats-cards";
 import { loadSeries, monthlyStats, periodStats, windowRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
-import { fmt, rampScale } from "./variables";
+import { fmt, rampScale, type ColorScale } from "./variables";
 
 interface Options {
   map: WaterMap;
@@ -74,6 +74,16 @@ export interface BasinStats {
   setSelection(selection: Selection): void;
   /** What is under the pointer on the map (null: nothing). */
   hover(place: Place | null): void;
+}
+
+/** How the maps are drawn, in the legend's order: fills, the scheme's discharge lines, its storage change dots. */
+const SLOTS = ["fill", "lines", "dots"];
+
+/** A map on the map: its tile or card, and how it's drawn (the legend's slot). */
+interface Layer {
+  d: Driver;
+  spec: BasinMapSpec;
+  slot: string;
 }
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; series: WaporSeries };
@@ -98,7 +108,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     status: { kind: "idle" } as Status,
     /** Pins and the legend's picks, per scope ("world", "major"). */
     pinned: new Map<string, Driver>(),
-    chosen: new Map<string, Driver>(),
+    /** The maps checked in the legend, oldest first (none: the first tile's). */
+    chosen: new Map<string, string[]>(),
     hover: null as Place | null,
     /** The model's output: "majors" (per major basin) or a major basin's id (its sub-basins). */
     fluxes: new Map<string, FluxStatus>(),
@@ -110,12 +121,68 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   const section = $("bs-section");
   const cardsEl = $("bs-cards");
   const tilesEl = $("bs-stats");
-  const legend = $("bs-legend");
   const tooltip = $("bs-tooltip");
-  let current: { ctx: BasinCtx; spec: BasinMapSpec | null; csv: Map<string, (string | number)[][]> } | null = null;
+  let current: { ctx: BasinCtx; layers: Layer[]; csv: Map<string, (string | number)[][]> } | null = null;
+
+  // The legend's title: a checklist of all the maps, each once, in the order of the tiles
+  // and cards; each one on the map has a section (panels/legend.ts). Checking one unpins
+  // the chart that was pinned (its map stays checked).
+  const legend = initLayerLegend($("bs-legend"), {
+    slots: SLOTS,
+    options() {
+      if (!current) return { options: [], current: [] };
+      const ctx = current.ctx;
+      const options = menuMaps(ctx).map(({ id, spec }) => ({ id, label: spec.title, hint: SLOT_HINTS[slotOf(spec, ctx)] }));
+      return { options, current: current.layers.map((l) => optionId(ctx, l.spec)) };
+    },
+    onToggle(id) {
+      if (!current) return;
+      const ids = toggled(current.layers.map((l) => optionId(current!.ctx, l.spec)), id);
+      state.chosen.set(scope(), ids);
+      // With a sub-basin selected the map defaults to the model's, so a pick is a pin.
+      if (followsModel() && ids.includes(id)) state.pinned.set(scope(), { id, sub: null });
+      else state.pinned.delete(scope());
+      drivers.clearPreview();
+      drawMap();
+      markAll();
+    },
+    // How much of the basins' values the colours span: a menu on the ramp.
+    ramp: {
+      of: "the basins' values",
+      initial: state.stretch,
+      onPick(cut) {
+        state.stretch = cut;
+        drawMap();
+      },
+    },
+    // The unit (not for maps in % or m³/s).
+    units: {
+      options: () => ({ options: BASIN_UNITS.map((u, i) => ({ id: String(i), label: basinUnit(u) })), current: String(BASIN_UNITS.indexOf(state.units)) }),
+      onPick(id) {
+        const picked = BASIN_UNITS[Number(id)];
+        if (picked === state.units) return;
+        state.units = picked;
+        render();
+      },
+      title: () => `Values ${describeBasinUnits(state.units)}.`,
+    },
+  });
   // Discharge and storage change maps of a basin's sub-basins: as the water balance scheme
-  // (a network of lines, dots), or (the legend's switch) as fills.
-  const schemeMap = initSchemeMap({ map, subBasins, legend, onChange: () => drawMap(), onHover: () => showMapTooltip() });
+  // (a network of lines, dots), or (each one's switch in the legend) as fills. Switched,
+  // the map takes its new slot from the one there.
+  const schemeMap = initSchemeMap({
+    map,
+    subBasins,
+    legend,
+    onChange(kind) {
+      const ctx = current?.ctx;
+      const ids = state.chosen.get(scope());
+      const moved = ctx && kind && ids?.find((id) => specFor(ctx, { id, sub: null }).scheme === kind);
+      if (moved) state.chosen.set(scope(), [...ids!.filter((id) => id !== moved), moved]);
+      drawMap();
+    },
+    onHover: () => showMapTooltip(),
+  });
 
   // All the topics' tiles and cards together, in one column.
   const allTopics: TopicDef = {
@@ -149,66 +216,22 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     tooltip,
   });
 
-  // The legend's title: all the maps, each once, in the order of the tiles and cards.
-  const variable = initTitleMenu(
-    $("bs-variable") as HTMLButtonElement,
-    () => {
-      if (!current) return { options: [], current: null };
-      const ctx = current.ctx;
-      const topic = topicDef();
-      const options: MenuOption[] = [];
-      const seen = new Set<string>();
-      for (const [id, spec] of [
-        ...topic.tiles.map((t) => [t.id, tileMap(ctx, t)] as const),
-        ...topic.cards.map((c) => [c.id, c.map(ctx, null)] as const),
-      ]) {
-        if (seen.has(spec.title)) continue;
-        seen.add(spec.title);
-        options.push({ id, label: spec.title });
-      }
-      return { options, current: options.find((o) => o.label === current!.spec?.title)?.id ?? null };
-    },
-    (id) => {
-      const d = { id, sub: null };
-      // With a sub-basin selected the map defaults to the model's, so the pick is a pin.
-      if (followsModel()) state.pinned.set(scope(), d);
-      else {
-        state.chosen.set(scope(), d);
-        state.pinned.delete(scope());
-      }
-      drivers.clearPreview();
-      drawMap();
-      markAll();
-    },
-  );
-
-  // The unit, from a menu (not for maps in % or m³/s).
-  const unitButton = $("bs-unit") as HTMLButtonElement;
-  const unitMenu = initTitleMenu(
-    unitButton,
-    () => ({
-      options: current?.spec?.units ? BASIN_UNITS.map((u, i) => ({ id: String(i), label: basinUnit(u) })) : [],
-      current: String(BASIN_UNITS.indexOf(state.units)),
-    }),
-    (id) => {
-      const picked = BASIN_UNITS[Number(id)];
-      if (picked === state.units) return;
-      state.units = picked;
-      render();
-    },
-  );
-  function showUnit(spec: BasinMapSpec) {
-    unitMenu.setLabel(spec.unit);
-    // Nothing to pick from: plain text.
-    unitButton.disabled = !spec.units;
-    unitButton.title = spec.units ? `Values ${describeBasinUnits(state.units)}.` : "";
+  /** All the maps, each once (several charts can share one), in the order of the tiles and cards. */
+  function menuMaps(ctx: BasinCtx): { id: string; spec: BasinMapSpec }[] {
+    const topic = topicDef();
+    const seen = new Set<string>();
+    return [
+      ...topic.tiles.map((t) => ({ id: t.id, spec: tileMap(ctx, t) })),
+      ...topic.cards.map((c) => ({ id: c.id, spec: c.map(ctx, null) })),
+    ].filter(({ spec }) => !seen.has(spec.title) && !!seen.add(spec.title));
   }
+  /** The checklist's option for a map (by its title, as charts share maps). */
+  const optionId = (ctx: BasinCtx, spec: BasinMapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
 
-  // How much of the basins' values the colours span: a menu on the ramp.
-  initRampMenu($("bs-legend-ramp") as HTMLButtonElement, "the basins' values", state.stretch, (cut) => {
-    state.stretch = cut;
-    drawMap();
-  });
+  /** How a map is drawn: as the scheme's lines or dots, or as fills. */
+  function slotOf(spec: BasinMapSpec, ctx: BasinCtx): string {
+    return spec.scheme && schemeMap.isScheme(spec.scheme, ctx.major?.id ?? null) ? SCHEME_SLOT[spec.scheme] : "fill";
+  }
 
   // The map tooltip follows the pointer (to its right).
   const mapEl = map.map.getContainer();
@@ -349,7 +372,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       .join("") +
       `<p class="wb-about">${esc(topic.about)} ` +
       (otherYears.length ? `Other years: the same days in ${otherYears.join(", ")}.` : "") + `</p>`;
-    current = { ctx, spec: null, csv };
+    current = { ctx, layers: [], csv };
     markAll();
     drawMap();
   }
@@ -384,10 +407,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
 
   function clear() {
     current = null;
-    legend.hidden = true;
+    legend.show(null);
     tooltip.hidden = true;
     map.setBasinStatFills(null);
-    schemeMap.draw(false);
+    schemeMap.showSwitches([], null);
+    schemeMap.draw(null, []);
     setMapOverride(false);
   }
 
@@ -399,13 +423,34 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   const isDriver = (d: Driver | null | undefined): d is Driver =>
     !!d && (topicDef().tiles.some((t) => t.id === d.id) || topicDef().cards.some((c) => c.id === d.id));
 
-  /** The tile or card the map follows: previewed, pinned, picked in the legend, or the first tile. */
-  function activeDriver(): Driver | null {
+  /** The previewed or pinned tile or card. */
+  function leadDriver(): Driver | null {
     const d = drivers.preview() ?? state.pinned.get(scope()) ?? null;
-    if (isDriver(d)) return d;
-    if (followsModel() || !current) return null;
-    const chosen = state.chosen.get(scope());
-    return isDriver(chosen) ? chosen : { id: topicDef().tiles[0].id, sub: null };
+    return isDriver(d) ? d : null;
+  }
+
+  /** The tile or card the map follows: previewed, pinned, or the first map on it. */
+  function activeDriver(): Driver | null {
+    return leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : null);
+  }
+
+  /**
+   * The maps on the map: those checked in the legend (else the first tile's), with the
+   * previewed or pinned one in its slot. None while the map is the model's.
+   */
+  function shownLayers(ctx: BasinCtx): Layer[] {
+    const lead = leadDriver();
+    if (!lead && followsModel()) return [];
+    const chosen = (state.chosen.get(scope()) ?? []).filter((id) => isDriver({ id, sub: null }));
+    const layers = (chosen.length ? chosen : [topicDef().tiles[0].id]).map((id) => layerOf(ctx, { id, sub: null }));
+    if (!lead) return onePerSlot(layers, SLOTS);
+    const l = layerOf(ctx, lead);
+    return onePerSlot([...layers.filter((m) => m.spec.title !== l.spec.title), l], SLOTS);
+  }
+
+  function layerOf(ctx: BasinCtx, d: Driver): Layer {
+    const spec = specFor(ctx, d);
+    return { d, spec, slot: slotOf(spec, ctx) };
   }
 
   function specFor(ctx: BasinCtx, d: Driver): BasinMapSpec {
@@ -421,92 +466,104 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
 
   function drawMap() {
     if (!current) return;
-    const d = activeDriver();
-    if (!d) {
-      current.spec = null;
-      legend.hidden = true;
+    const { ctx } = current;
+    const layers = shownLayers(ctx);
+    current.layers = layers;
+    if (!layers.length) {
+      legend.show(null);
       map.setBasinStatFills(null);
-      schemeMap.draw(false);
+      schemeMap.showSwitches([], null);
+      schemeMap.draw(null, []);
       setMapOverride(false);
       return;
     }
-    const { ctx } = current;
-    const spec = specFor(ctx, d);
-    current.spec = spec;
+    const major = ctx.major?.id ?? null;
+    const theme = map.theme;
+    const fill = layers.find((l) => l.slot === "fill")?.spec;
+    // The others as the water balance scheme: lines or dots, sized rather than coloured.
+    const sized = layers.filter((l) => l.slot !== "fill");
+    const keys = schemeMap.draw(
+      major,
+      sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${ctx.period}` })),
+    );
+    schemeMap.showSwitches(layers.filter((l) => l.spec.scheme).map((l) => ({ kind: l.spec.scheme!, slot: l.slot })), major);
 
     // The area under the pointer in a chart (or the one the card is pinned on): a group
     // or a major basin keeps its colours and fades the rest; a sub-basin is outlined.
-    const picked = parseArea(d.sub);
-    const ids = spec.level === "major" ? ctx.majors : [...(spec.only ?? ctx.stats.sub.keys())];
-    const theme = map.theme;
-    // Or as the water balance scheme: lines or dots, sized rather than coloured.
-    const scheme = spec.status ? null : schemeMap.prepare(spec.scheme, ctx.major?.id ?? null, spec.value, `${spec.id}:${ctx.period}`);
-    const values = scheme ? [] : ids.map((id) => spec.value(id));
-    const scale = rampScale(spec, values, undefined, state.stretch);
-    const majorOf = (id: number) => (spec.level === "major" ? id : ctx.stats.sub.get(id)?.majorBasin ?? NaN);
-    const shown = (id: number) => {
-      if (picked?.kind === "major") return majorOf(id) === picked.id;
-      if (picked?.kind === "group") return inGroup(majorOf(id), picked.id);
-      return !spec.listed || spec.listed.has(id);
-    };
+    const sub = leadDriver()?.sub ?? null;
+    const picked = parseArea(sub);
     const colors = new Map<number, Color>();
-    if (scheme) {
-      // Plain land under the scheme; the other major basins greyed.
-      for (const id of ctx.majors) colors.set(id, id === ctx.major?.id ? theme.land : theme.noData);
-    } else {
+    let scale: ColorScale | null = null;
+    if (fill) {
+      const ids = fill.level === "major" ? ctx.majors : [...(fill.only ?? ctx.stats.sub.keys())];
+      const values = ids.map((id) => fill.value(id));
+      scale = rampScale(fill, values, undefined, state.stretch);
+      const majorOf = (id: number) => (fill.level === "major" ? id : ctx.stats.sub.get(id)?.majorBasin ?? NaN);
+      const shown = (id: number) => {
+        if (picked?.kind === "major") return majorOf(id) === picked.id;
+        if (picked?.kind === "group") return inGroup(majorOf(id), picked.id);
+        return !fill.listed || fill.listed.has(id);
+      };
       ids.forEach((id, i) => {
-        const c = scale.color(values[i]) ?? (spec.level === "major" ? theme.noData : null);
+        const c = scale!.color(values[i]) ?? (fill.level === "major" ? theme.noData : null);
         if (c) colors.set(id, shown(id) ? c : mixColor(c, theme.land, 0.78));
       });
+    } else {
+      // Plain land under the scheme; the other major basins greyed.
+      for (const id of ctx.majors) colors.set(id, id === major ? theme.land : theme.noData);
     }
     const outlined = picked?.kind === "sub" ? [picked.id] : [];
-    const status = scheme?.status || spec.status;
-    const period = status ? "" : ctx.period;
     map.setBasinStatFills({
-      level: scheme ? "major" : spec.level,
-      key: `${spec.id}:${scheme ? "scheme" : ""}:${state.stretch}:${period}:${d.sub ?? ""}:${outlined.join()}`,
+      level: fill?.level ?? "major",
+      key: `${fill?.id ?? ""}:${sized.map((l) => l.spec.id).join()}:${state.stretch}:${fill?.status ? "" : ctx.period}:${sub ?? ""}:${outlined.join()}`,
       colors,
       outlined,
     });
-    schemeMap.draw(!!scheme && !scheme.status);
     setMapOverride(true);
 
-    // Legend
-    legend.hidden = false;
-    variable.setLabel(spec.title);
-    const note = !scheme ? spec.note : spec.scheme === "Q" ? spec.note.replace(/per sub-basin$/, "along the rivers") : spec.note.replace(/per sub-basin$/, "per sub-basin, on its river");
-    $("bs-legend-note").textContent = `${note}${spec.scale === "log" && !scheme ? " · Log scale" : ""}`;
-    // Without values (the model's output, still loading), no colour ramp: only the status.
-    // The scheme has a key of sizes instead.
-    const empty = !scale.ticks.length;
-    $("bs-legend-period").parentElement!.hidden = scheme ? !!status : empty;
-    $("bs-legend-ramp").hidden = empty;
-    $("bs-legend-ticks").hidden = empty;
-    $("bs-legend-status").textContent = status ?? "";
-    $("bs-legend-period").textContent = period;
-    showUnit(spec);
-    $("bs-legend-ramp").style.background = scale.gradient;
-    const span = Math.max(...scale.ticks.map((t) => t.value)) - Math.min(...scale.ticks.map((t) => t.value));
-    $("bs-legend-ticks").innerHTML = scale.ticks.map((t) => `<span style="left:${t.at * 100}%">${fmtStop(t.value, span)}</span>`).join("");
+    // Without values (the model's output, still loading), no key: only the status.
+    legend.show(
+      layers.map(({ spec, slot }): LegendLayer => {
+        const common = { slot, id: optionId(ctx, spec), title: spec.title, unit: spec.unit, units: spec.units };
+        if (slot === "fill") {
+          const key: LegendKey | null = scale?.ticks.length ? { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks } : null;
+          const note = `${spec.note}${spec.scale === "log" ? " · Log scale" : ""}`;
+          return { ...common, note, period: key ? ctx.period : "", key, status: spec.status };
+        }
+        // The scheme has a key of sizes instead.
+        const drawn = keys.get(spec.scheme!);
+        const status = spec.status || drawn?.status || "";
+        const key = status ? null : drawn?.key ?? null;
+        const note = spec.note.replace(/per sub-basin$/, spec.scheme === "Q" ? "along the rivers" : "per sub-basin, on its river");
+        return { ...common, note, period: key ? ctx.period : "", key, status };
+      }),
+    );
     showMapTooltip();
   }
 
   function showMapTooltip() {
-    const place = state.hover;
-    const spec = current?.spec;
-    const item = spec?.scheme ? schemeMap.hovered() : null;
-    if (spec && item && Number.isFinite(item.value)) {
+    const layers = current?.layers ?? [];
+    const item = schemeMap.hovered();
+    const sized = item && layers.find((l) => l.slot !== "fill" && l.spec.scheme === item.kind);
+    if (item && sized && Number.isFinite(item.value)) {
       const name = subNames.get(item.subBasin) ?? String(item.subBasin);
-      const what = item.kind === "Q" ? `${spec.title} in the river` : spec.title;
-      tooltip.innerHTML = `<b>${esc(name)}</b><br>${esc(what)}: ${fmt(item.value)} ${esc(spec.unit)}`;
+      const what = item.kind === "Q" ? `${sized.spec.title} in the river` : sized.spec.title;
+      tooltip.innerHTML = `<b>${esc(name)}</b><br>${esc(what)}: ${fmt(item.value)} ${esc(sized.spec.unit)}`;
       tooltip.hidden = false;
       return;
     }
-    if (!place || !spec) return void (tooltip.hidden = true);
-    const target = spec.level === "major" ? place.majorBasin : place.subBasin;
-    if (!target || (spec.only && !spec.only.has(target.id))) return void (tooltip.hidden = true);
-    const name = (spec.level === "major" ? majorNames : subNames).get(target.id) ?? target.name;
-    tooltip.innerHTML = `<b>${esc(name)}</b><br>${esc(spec.title)}: ${fmt(spec.value(target.id))} ${esc(spec.unit)}`;
+    const place = state.hover;
+    if (!place) return void (tooltip.hidden = true);
+    // Each map's value there, under the basin's name.
+    let name = "";
+    const rows = layers.flatMap(({ spec }) => {
+      const target = spec.level === "major" ? place.majorBasin : place.subBasin;
+      if (!target || (spec.only && !spec.only.has(target.id))) return [];
+      name ||= (spec.level === "major" ? majorNames : subNames).get(target.id) ?? target.name;
+      return [`${esc(spec.title)}: ${fmt(spec.value(target.id))} ${esc(spec.unit)}`];
+    });
+    if (!rows.length) return void (tooltip.hidden = true);
+    tooltip.innerHTML = `<b>${esc(name)}</b><br>${rows.join("<br>")}`;
     tooltip.hidden = false;
   }
 

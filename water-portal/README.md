@@ -119,6 +119,7 @@ water-portal/
     ├── panels/
     │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
+    │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
     │   ├── debug-panel.ts  Draggable window: click, time and hover state as a JSON tree
     │   └── loading-indicator.ts  Spinner in the top bar while any data request is running
     ├── toolbar/
@@ -139,7 +140,7 @@ water-portal/
         ├── panels.css      Layers menu and debug window
         ├── basin.css       Water balance panel, its legend and tooltips
         ├── country.css     Country panel, chart cards, chart colours, its legend
-        └── legend.css      WaPOR legend
+        └── legend.css      Map legends: the WaPOR legend, layers, the checklist
 ```
 
 ## Notes
@@ -171,6 +172,12 @@ water-portal/
   **climate** is the UNEP aridity class of WaPOR L1 PCP-A over RET-A, 2018–2025, area-weighted.
   WaPOR's precipitation stops at 60°N, so 17 northern basins have no climate group. Without a pin, the map shows the topic's first tile (or what the legend picked),
   except with a sub-basin selected while the model's panel is shown.
+- **Map layers** (Basin and Country views, [src/panels/legend.ts](src/panels/legend.ts)): the
+  legend's title is a checklist of the maps, and several can be on the map at once, one per way
+  of drawing them (the checklist says which): a fill, and the scheme's discharge lines and storage
+  change dots (Basin) or circles of amounts (Country). Checking a map replaces the one drawn the
+  same way; a previewed or pinned chart's map takes its place for the while. Each layer has its
+  section in the legend (its key: a colour ramp, classes or sizes), and the tooltip lists them all.
 - **Country circles** (proportional symbols) are drawn without a depth test like every layer,
   so only those on the near side of the globe are kept.
 - **Date rules** are documented at the top of

@@ -7,7 +7,8 @@
  * which hides pixels whose NDVI input is gap-filled over more dekads. The markup lives
  * in index.html.
  */
-import { DEFAULT_STRETCH, fmtStop, initRampMenu } from "../panels/ramp-menu";
+import { ticksHtml } from "../panels/legend";
+import { DEFAULT_STRETCH, initRampMenu } from "../panels/ramp-menu";
 import { initTitleMenu } from "../panels/title-menu";
 import { fmtDay } from "../toolbar/dekads";
 import {
@@ -211,9 +212,7 @@ export function initWaporLegend({
       `linear-gradient(to right, ${colors.map((c, i) => `${c} ${at(q[i])}%`).join(", ")})`;
     // The ramp is per day and m², as the rasters.
     const k = unitFactor(variable, units, periodDays, area.m2 ?? Number.NaN);
-    $("wapor-ticks").innerHTML = q
-      .map((v) => `<span style="left:${at(v)}%">${Number.isFinite(k) ? fmtStop(v * k, span * k) : "–"}</span>`)
-      .join("");
+    $("wapor-ticks").innerHTML = ticksHtml(q.map((v) => ({ value: v * k, at: at(v) / 100 })));
   }
 
   return {

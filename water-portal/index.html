@@ -134,24 +134,15 @@
 
     <div class="wb-tooltip" id="wb-tooltip" hidden></div>
 
-    <aside class="legend cp-legend" id="bs-legend" hidden>
-      <!-- What the map shows; a menu of the other maps of the charts (src/panels/title-menu.ts). -->
+    <!-- The maps' layers: a checklist of the charts' maps (src/panels/title-menu.ts); a
+      section per layer on the map is added after the title (src/panels/legend.ts). -->
+    <aside class="legend" id="bs-legend" hidden>
       <div class="legend-title">
         <button class="title-menu" id="bs-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
-          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
-        <small id="bs-legend-note"></small>
+          aria-label="Map layers"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
       </div>
-      <!-- The unit: a menu of per day, month, year or total, per m² or over the basin (src/basin/basin-stats.ts). -->
-      <div class="legend-period"><span id="bs-legend-period"></span><button class="title-menu unit-menu" id="bs-unit"
-          type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span><span
-            class="title-caret" aria-hidden="true"></span></button></div>
-      <!-- The colour ramp; a menu of how much of the values it spans (src/panels/ramp-menu.ts). -->
-      <button class="legend-ramp ramp-menu" id="bs-legend-ramp" type="button" aria-haspopup="listbox" aria-expanded="false"
-        aria-label="Colour range"><span class="title-menu-label" hidden></span></button>
-      <div class="legend-ticks" id="bs-legend-ticks" aria-hidden="true"></div>
-      <!-- The scheme's key: line widths or dot sizes, in place of the ramp (src/basin/scheme-map.ts). -->
-      <svg class="scheme-key" id="bs-scheme-key" aria-hidden="true" hidden></svg>
-      <!-- The discharge network: how far its lines may stray from the rivers (src/basin/scheme-map.ts). -->
+      <!-- The discharge network: how far its lines may stray from the rivers (src/basin/scheme-map.ts),
+        moved into the discharge's section. -->
       <div class="legend-quality" id="bs-simplify" hidden>
         <label class="legend-quality-head" for="bs-simplify-input"
           title="The lines are simplified (Douglas–Peucker): each stays within this distance of the river network, as a share of the basin's size.">
@@ -161,26 +152,17 @@
         <div class="legend-quality-ends" aria-hidden="true"><span>Rivers</span><span>Simple</span></div>
         <div class="legend-quality-value" id="bs-simplify-value"></div>
       </div>
-      <div class="legend-status" id="bs-legend-status" role="status"></div>
     </aside>
 
     <div class="wb-tooltip" id="bs-tooltip" hidden></div>
 
     <!-- Country view: AQUASTAT statistics and the map that goes with each chart (src/country/country-panel.ts). -->
-    <aside class="legend cp-legend" id="cp-legend" hidden>
-      <!-- What the map shows; a menu of the topic's other maps (src/panels/title-menu.ts). -->
+    <!-- The maps' layers, as the Basin view's (src/panels/legend.ts). -->
+    <aside class="legend" id="cp-legend" hidden>
       <div class="legend-title">
         <button class="title-menu" id="cp-indicator" type="button" aria-haspopup="listbox" aria-expanded="false"
-          aria-label="Map indicator"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
-        <small id="cp-legend-note"></small>
+          aria-label="Map layers"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
       </div>
-      <div class="legend-period"><span id="cp-legend-year"></span><span id="cp-legend-unit"></span></div>
-      <!-- A ramp: a menu of how much of the values it spans (src/panels/ramp-menu.ts); or classes. -->
-      <button class="legend-ramp ramp-menu" id="cp-legend-ramp" type="button" aria-haspopup="listbox" aria-expanded="false"
-        aria-label="Colour range" hidden><span class="title-menu-label" hidden></span></button>
-      <div class="legend-ticks" id="cp-legend-ticks" aria-hidden="true" hidden></div>
-      <div id="cp-legend-scale"></div>
-      <div class="legend-status" id="cp-legend-status" role="status"></div>
     </aside>
 
     <div class="wb-tooltip" id="cp-tooltip" hidden></div>

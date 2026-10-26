@@ -11,11 +11,16 @@
  * clip it; it opens below the title, or above it in the lower half of the window.
  *
  * Keys: Enter, Space or ↓ open; ↓/↑ move; Enter picks; Escape or Tab closes.
+ *
+ * Or a checklist (`multi`): several options are chosen at once, a pick checks or unchecks
+ * one, and the list stays open (built again, as a pick can uncheck others).
  */
 
 export interface MenuOption {
   id: string;
   label: string;
+  /** A note to the right, e.g. how the option is drawn. */
+  hint?: string;
 }
 
 export interface TitleMenu {
@@ -23,11 +28,15 @@ export interface TitleMenu {
   setLabel(label: string): void;
 }
 
-/** `options` is asked for each time the menu opens; `current` is the chosen option's id. */
+/**
+ * `options` is asked for each time the menu opens; `current` is the chosen option's id
+ * (a checklist's: the checked ones').
+ */
 export function initTitleMenu(
   button: HTMLButtonElement,
-  options: () => { options: MenuOption[]; current: string | null },
+  options: () => { options: MenuOption[]; current: string | string[] | null },
   onPick: (id: string) => void,
+  { multi = false } = {},
 ): TitleMenu {
   const label = button.querySelector<HTMLElement>(".title-menu-label")!;
   const list = document.createElement("ul");
@@ -37,14 +46,17 @@ export function initTitleMenu(
   list.tabIndex = -1;
   list.hidden = true;
   list.setAttribute("aria-label", button.getAttribute("aria-label") ?? "");
+  if (multi) list.setAttribute("aria-multiselectable", "true");
   document.body.append(list);
   button.setAttribute("aria-controls", list.id);
 
   let shown: MenuOption[] = [];
   let active = -1;
 
-  function open() {
+  /** Fill the list; returns the first chosen option's index (-1: none). */
+  function build() {
     const { options: all, current } = options();
+    const chosen = new Set(Array.isArray(current) ? current : current === null ? [] : [current]);
     shown = all;
     list.replaceChildren(
       ...all.map((o, i) => {
@@ -52,15 +64,27 @@ export function initTitleMenu(
         li.id = `${list.id}-${i}`;
         li.role = "option";
         li.dataset.index = String(i);
-        li.setAttribute("aria-selected", String(o.id === current));
-        li.textContent = o.label;
+        li.setAttribute("aria-selected", String(chosen.has(o.id)));
+        const text = document.createElement("span");
+        text.textContent = o.label;
+        li.append(text);
+        if (o.hint) {
+          const hint = document.createElement("small");
+          hint.textContent = o.hint;
+          li.append(hint);
+        }
         return li;
       }),
     );
+    return all.findIndex((o) => chosen.has(o.id));
+  }
+
+  function open() {
+    const first = build();
     list.hidden = false;
     place();
     button.setAttribute("aria-expanded", "true");
-    setActive(Math.max(0, all.findIndex((o) => o.id === current)));
+    setActive(Math.max(0, first));
     list.focus();
   }
 
@@ -96,6 +120,12 @@ export function initTitleMenu(
 
   function pick(i: number) {
     const option = shown[i];
+    if (multi) {
+      if (!option) return;
+      onPick(option.id);
+      build();
+      return setActive(i);
+    }
     close(false);
     button.blur(); // back to reading as text
     if (option) onPick(option.id);
