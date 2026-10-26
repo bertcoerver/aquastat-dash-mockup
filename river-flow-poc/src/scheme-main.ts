@@ -4,11 +4,12 @@
  *
  * - Storage change (ΔS): a dot in the middle of each sub-basin, its area the mean change,
  *   green when storage rises and red when it falls.
- * - Discharge (Q): a line from each sub-basin's dot through its outlet to the dot of the
- *   sub-basin it drains into, as wide as its mean outflow (linear, so widths add up
- *   where rivers join: sub-basins meeting at a confluence share the line below it, a Y).
- *   Where the basin leaves the scheme (the sea, an inland sink) the line goes on a
- *   little past the outlet, with an arrow. See Line in scheme/balance.ts.
+ * - Discharge (Q): lines along the real rivers, simplified (a slider sets how much), from
+ *   each sub-basin's dot through its outlet into the next sub-basin, as wide as the
+ *   outflow they carry (linear, so widths add up where rivers join). The dots sit on the
+ *   river nearest each sub-basin's middle. Where the basin leaves the scheme (the sea, an
+ *   inland sink) the line goes on a little past the outlet, with an arrow. See
+ *   scheme/rivers.ts.
  * - Precipitation (P) and evapotranspiration (ET): the sub-basins filled by P − ET, P or
  *   ET (the FAO sub-basin tiles, as in the portal).
  *
@@ -35,11 +36,12 @@ import {
   type Aggregation,
   type Balance,
   type Node,
-  type Line,
   type NodeFile,
   type Period,
   type Scheme,
 } from "./scheme/balance";
+import { loadNetwork, type Network } from "./network";
+import { lineQ, riverScheme, simplify, type RiverLine, type RiverScheme } from "./scheme/rivers";
 import "./style.css";
 
 const SUB_BASIN_TILES = "https://storage.googleapis.com/fao-cog-data/basins/SDG6_SBM_v1_tiles/{z}/{x}/{y}.pbf";
@@ -86,6 +88,7 @@ const timeline = $("timeline");
 const playButton = $<HTMLButtonElement>("play");
 const periodSlider = $<HTMLInputElement>("period");
 const dateEl = $("date");
+const simplifySlider = $<HTMLInputElement>("simplify");
 
 const map = new maplibregl.Map({
   container: "map",
@@ -114,11 +117,15 @@ map.on("style.load", () => {
 let subBasins: SubBasin[] = [];
 let majorBasins: MajorBasin[] = [];
 let nodeFile: NodeFile = {};
+let network: Network;
 
 interface Current {
   major: MajorBasin;
   model: Awaited<ReturnType<typeof basinBalance>>;
   scheme: Scheme;
+  rivers: RiverScheme;
+  /** The basin's size (degrees of latitude), which the simplification is a share of. */
+  extent: number;
   /** m³/s at Q_PX. */
   qRef: number;
   // For the aggregation picked:
@@ -134,6 +141,8 @@ let current: Current | null = null;
 let periodIndex = 0;
 let fill: Fill = "PmE";
 let timer = 0;
+/** Bumped when the lines are simplified again (deck.gl's updateTriggers). */
+let pathVersion = 0;
 /** Bumped when the basin or the kind of period changes (deck.gl's updateTriggers). */
 let version = 0;
 
@@ -184,10 +193,10 @@ const ARROW = {
 
 function layers() {
   if (!current) return [];
-  const { scheme } = current;
-  const lineWidth = (line: Line) => qWidth(line.from.reduce((sum, id) => sum + (balance(id)?.Q ?? NaN), 0));
+  const { scheme, rivers } = current;
+  const lineWidth = (line: RiverLine) => qWidth(lineQ(line, balance, rivers.atDot));
   const triggers = { version, periodIndex, fill };
-  const mouths = scheme.lines.filter((l) => l.kind === "mouth");
+  const mouths = rivers.lines.filter((l) => l.kind === "mouth");
   return [
     new MVTLayer({
       id: "sub-basins",
@@ -209,24 +218,24 @@ function layers() {
     // A dark edge, so the lines read over any fill.
     new PathLayer({
       id: "q-casing",
-      data: scheme.lines,
+      data: rivers.lines,
       getPath: (d) => d.path,
       getWidth: (d) => (lineWidth(d) ? lineWidth(d) + 2 : 0),
       getColor: CASING,
       widthUnits: "pixels",
       capRounded: true,
-      updateTriggers: { getWidth: triggers },
+      updateTriggers: { getWidth: triggers, getPath: pathVersion },
     }),
     new PathLayer({
       id: "q",
-      data: scheme.lines,
+      data: rivers.lines,
       getPath: (d) => d.path,
       getWidth: lineWidth,
       getColor: Q_COLOR,
       widthUnits: "pixels",
       capRounded: true,
       pickable: true,
-      updateTriggers: { getWidth: triggers },
+      updateTriggers: { getWidth: triggers, getPath: pathVersion },
     }),
     new IconLayer({
       id: "mouths",
@@ -428,22 +437,30 @@ async function selectBasin(major: MajorBasin | null) {
     if (!model.dekads.length) throw new Error("the model returned no dekads");
     const scheme = buildScheme(model, subBasins, nodeFile);
     const nodes = [...scheme.nodes.values()];
+    const [bw, bs, be, bn] = scheme.bbox;
+    const extent = Math.max(be - bw, bn - bs);
+    const middles = new Map(nodes.map((n) => [n.id, n.position]));
+    const rivers = riverScheme(network, scheme.nodes, middles, Math.max(0.15, 0.04 * extent));
+    for (const n of nodes) n.position = rivers.dots.get(n.id) ?? n.position;
     const whole = periodBalance(model, scheme, { label: "", from: 0, to: model.dekads.length, partial: false });
     current = {
       major,
       model,
       scheme,
+      rivers,
+      extent,
       qRef: Math.max(...[...whole.values()].map((b) => b.Q).filter(Number.isFinite)) || 1,
       periods: [],
       balances: [],
       dsRef: 1,
       domains: { PCP: [0, 1], AETI: [0, 1], PmE: [-1, 1] },
     };
-    const unplaced = nodes.filter((n) => !n.outlet).length;
+    const straight = rivers.lines.filter((l) => l.kind === "straight").length;
     statusEl.textContent =
       `${major.name}: ${nodes.length} sub-basins (with any upstream of it), ${model.dekads.length} dekads, ` +
       `${((performance.now() - t0) / 1000).toFixed(1)} s.` +
-      (unplaced ? ` ${unplaced} without a river ${unplaced > 1 ? "have" : "has"} no outlet: ${unplaced > 1 ? "their lines go" : "its line goes"} straight from the dot.` : "");
+      (straight ? ` ${straight} link${straight > 1 ? "s" : ""} the river network doesn't make ${straight > 1 ? "are" : "is"} drawn straight.` : "");
+    resimplify();
     setAggregation(aggregationSelect.value as Aggregation);
   } catch (err) {
     if (Number(basinSelect.value) !== major.id) return;
@@ -454,6 +471,18 @@ async function selectBasin(major: MajorBasin | null) {
 }
 
 // --- Controls --------------------------------------------------------------------------
+
+/** Simplify the lines again to the slider's share of the basin's size. */
+function resimplify() {
+  if (!current) return;
+  simplify(current.rivers.lines, (Number(simplifySlider.value) / 100) * current.extent);
+  pathVersion++;
+}
+
+simplifySlider.addEventListener("input", () => {
+  resimplify();
+  redraw();
+});
 
 basinSelect.addEventListener("change", () => {
   const id = Number(basinSelect.value);
@@ -477,16 +506,18 @@ periodSlider.addEventListener("input", () => {
 // --- Start -----------------------------------------------------------------------------
 
 async function start() {
-  statusEl.textContent = "Loading the sub-basins…";
+  statusEl.textContent = "Loading the sub-basins and the river network…";
   statusEl.classList.add("busy");
-  const [majors, subs, file] = await Promise.all([
+  const [majors, subs, file, net] = await Promise.all([
     fetch(majorBasinsUrl).then((r) => r.json() as Promise<MajorBasin[]>),
     fetch(subBasinsUrl).then((r) => r.json() as Promise<SubBasin[]>),
     fetch(`${import.meta.env.BASE_URL}data/nodes.json`).then((r) => {
       if (!r.ok) throw new Error(`Couldn't load the sub-basins' middles and outlets (${r.status}); run npm run nodes`);
       return r.json() as Promise<NodeFile>;
     }),
+    loadNetwork(`${import.meta.env.BASE_URL}data/rivers.bin`),
   ]);
+  network = net;
   statusEl.classList.remove("busy");
   majorBasins = majors.sort((a, b) => a.name.localeCompare(b.name));
   subBasins = subs;

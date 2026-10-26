@@ -188,16 +188,26 @@ sub-basin and the model's balance around it, over a dekad, month or year (a time
 through them) or the whole record. `?basin=<major basin id>` opens a basin (7003 is the Nile,
 4025 the Danube).
 
-- **Storage change (ΔS)**: a dot in the middle of each sub-basin, its area the mean ΔS (the 98th
-  percentile of |ΔS| over the periods is 13 px), green when storage rises and red when it falls.
-- **Discharge (Q)**: a line from each sub-basin's dot through its outlet to the dot of the
-  sub-basin it drains into, as wide as its mean outflow. Widths are linear in Q (the basin's
-  biggest mean outflow over the record is 14 px), so they add up where rivers join: sub-basins
-  are split at confluences, so a tributary's sub-basin and the main river's above it share
-  their outlet, and the line below it is drawn once, as wide as both together (a Y). Where the
-  basin leaves the scheme (the sea, an inland sink) the line runs on past the outlet to an
-  arrow. A big river crossing a wide sub-basin near its edge makes a detour to the dot and back
-  (the Nile through Wadu Sayyak, a desert sub-basin of 71,000 km²).
+- **Storage change (ΔS)**: a dot on each sub-basin's river, at the point nearest its middle,
+  its area the mean ΔS (the 98th percentile of |ΔS| over the periods is 13 px), green when
+  storage rises and red when it falls.
+- **Discharge (Q)**: lines along the real rivers ([src/scheme/rivers.ts](src/scheme/rivers.ts)),
+  as wide as the outflow they carry. Widths are linear in Q (the basin's biggest mean outflow
+  over the record is 14 px), so they add up where rivers join. Within a sub-basin the line runs
+  from each upstream sub-basin's outlet down the network to where the river leaves it; a piece
+  carries the outflow of the upstream sub-basins passing through it and, below the dot, the
+  sub-basin's own gain (where it loses water, everything is scaled down to its outflow), so the
+  width at an outlet is that sub-basin's Q and the lines join up. A headwater's line starts at
+  its dot. Where the network doesn't connect, the line is straight (2 of the Nile's links).
+  Where the basin leaves the scheme (the sea, an inland sink) the line runs on past the outlet
+  to an arrow.
+- **Simplify** (slider): the lines between junctions are simplified (Douglas–Peucker) to a
+  share of the basin's size, 0 to 6 % (1.5 % by default): from every bend of the river to
+  nearly straight. Straight segments from dot to outlet to dot (the previous version) crossed
+  each other where rivers don't, e.g. Bandah's and Gelha's on the Nile.
+- **Outlets** are where the traced river leaves a sub-basin, worked out from upstream down:
+  not simply the end of its biggest arc, since the network has parallel duplicate arcs (equal
+  upstream area), so that end is often the twin of the arc the river is traced along.
 - **Precipitation and evapotranspiration**: the sub-basins (FAO's sub-basin tiles, as in the
   portal) coloured by P − ET (brown: ET above P, teal: P above ET), P or ET, in mm/day, over
   the 98th percentile of the periods' values.
@@ -209,14 +219,13 @@ through them) or the whole record. `?basin=<major basin id>` opens a basin (7003
 - **The model runs in the browser** for every outlet network of the basin, as the lanes page
   does without the precomputed files (`basinBalance` in [src/basin-model.ts](src/basin-model.ts)):
   the precomputed files only have Q and ΔS, and the scheme also needs P and ET. 2–7 s a basin.
-- **Middles and outlets** ([scripts/build-nodes.mjs](scripts/build-nodes.mjs), `npm run nodes`
-  → `public/data/nodes.json`, 380 kB, ~30 s). The middle: FAO's sub-basin tiles at zoom 5
-  rasterised into one global grid (~4 km cells); of each sub-basin's cells, the one nearest its
-  centroid among those at least half as far from its edge as its innermost cell, so the dot is
-  inside the sub-basin even when it's curved. (The tiles' own `CENTROID` property isn't used: a
-  centroid can lie outside a curved sub-basin.) The outlet: the end of the sub-basin's biggest
-  arc in the river network. 955 sub-basins have no arcs (mostly small coastal, island and desert
-  ones), so no outlet: their line goes straight from the dot, and a mouth gets no arrow.
+- **Middles** ([scripts/build-nodes.mjs](scripts/build-nodes.mjs), `npm run nodes` →
+  `public/data/nodes.json`, 380 kB, ~30 s): FAO's sub-basin tiles at zoom 5 rasterised into one
+  global grid (~4 km cells); of each sub-basin's cells, the one nearest its centroid among those
+  at least half as far from its edge as its innermost cell, so it's inside the sub-basin even
+  when it's curved. The page moves it onto the river. Sub-basins without rivers (955, mostly
+  small coastal, island and desert ones) keep it, and their water goes straight to the next dot.
+  The page also loads `rivers.bin` (8.5 MB) for the lines.
 
 Next steps for a full water balance scheme: P and ET as flows into and out of each node (arrows
 or bars in m³/s, on the same scale as Q) instead of the colours, and labels on the main nodes.

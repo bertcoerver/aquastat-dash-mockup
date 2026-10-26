@@ -39,15 +39,20 @@
         <h2>Discharge Q</h2>
         <svg id="q-key" class="scheme-key" width="268" height="44" aria-hidden="true"></svg>
         <p class="note">
-          From each sub-basin's dot through its outlet to the next one's dot: the line's width is the mean outflow, so
-          widths add up where rivers join. An arrow marks where the basin drains to the sea or a sink.
+          Along the rivers, from each sub-basin's dot through its outlet into the next sub-basin: the line's width is the
+          mean outflow, so widths add up where rivers join. An arrow marks where the basin drains to the sea or a sink.
         </p>
+        <div class="controls">
+          <label title="How far a line may stray from the river, as a share of the basin's size"
+            ><span>Simplify</span><input id="simplify" type="range" min="0" max="6" step="0.25" value="1.5"
+          /></label>
+        </div>
       </section>
 
       <section>
         <h2>Storage change ΔS</h2>
         <svg id="ds-key" class="scheme-key" width="268" height="44" aria-hidden="true"></svg>
-        <p class="note">In the middle of each sub-basin: the dot's area is the mean change, green as storage rises, red as it falls.</p>
+        <p class="note">On the river nearest the middle of each sub-basin: the dot's area is the mean change, green as storage rises, red as it falls.</p>
       </section>
 
       <section>
