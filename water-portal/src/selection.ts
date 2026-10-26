@@ -2,9 +2,10 @@
  * The current selection (the "click state"): what the user picked, by clicking the
  * map, choosing a country or basin in a panel title, or typing coordinates.
  *
- * Picking a country or basin by name selects only that: no point, and none of the
- * other areas. Picking a point (map click or coordinates) selects the point and
- * everything it lies in.
+ * Picking a country or basin by name selects only that: none of the other areas.
+ * Picking a point (map click or coordinates) selects everything it lies in. The point
+ * itself (`lngLat`) is the Local view's: only picking there changes it, so in the
+ * Country and Basin views it can lie outside what's selected.
  */
 import type { LngLat, Place } from "./map/places";
 

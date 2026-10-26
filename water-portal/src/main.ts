@@ -77,14 +77,18 @@ async function showHover(lngLat: LngLat | null) {
 // sub-basin (by name or on the map) selects its major basin.
 const subBasinOf = <T>(subBasin: T | null): T | null => (MODEL_SHOWN ? subBasin : null);
 
+// The point is the Local view's: selecting in the Country or Basin view (a click, a
+// name) leaves it as it was.
+const keptPoint = () => (view === "local" ? null : selection.get().lngLat);
+
 // Selecting a point (map click or typed coordinates) selects everything it lies in.
 let pointWanted: LngLat | null = null;
 async function selectPoint(lngLat: LngLat | null, source: SelectionSource) {
   pointWanted = lngLat;
-  if (!lngLat) return selection.set(NOTHING);
+  if (!lngLat) return selection.set({ ...NOTHING, lngLat: keptPoint() });
   const place = await placeAt(lngLat);
   if (pointWanted !== lngLat) return;
-  selection.set({ source, lngLat, ...place, subBasin: subBasinOf(place.subBasin) });
+  selection.set({ source, ...place, lngLat: view === "local" ? lngLat : keptPoint(), subBasin: subBasinOf(place.subBasin) });
 }
 
 const waterMap = createMap(
@@ -139,19 +143,22 @@ const picker = initPlacePicker({
   countries,
   basins,
   subBasins,
-  // Picking a country or basin by name selects only that: no point, no other areas
-  // (but a sub-basin comes with the major basin it is part of).
+  // Picking a country or basin by name selects only that: no other areas (but a
+  // sub-basin comes with the major basin it is part of), and the Local view's point.
   onCountry(country) {
     pointWanted = null;
-    selection.set(country ? { ...NOTHING, source: "country", country: { m49: country.m49, name: country.name } } : NOTHING);
+    const lngLat = keptPoint();
+    selection.set(country ? { ...NOTHING, lngLat, source: "country", country: { m49: country.m49, name: country.name } } : { ...NOTHING, lngLat });
     if (country) showBox(country.bbox);
   },
   onBasin(picked) {
     pointWanted = null;
-    if (!picked) return selection.set(NOTHING);
+    const lngLat = keptPoint();
+    if (!picked) return selection.set({ ...NOTHING, lngLat });
     const major = picked.kind === "major" ? picked.basin : picked.majorBasin;
     selection.set({
       ...NOTHING,
+      lngLat,
       source: "basin",
       majorBasin: { id: major.id, name: major.name },
       subBasin: picked.kind === "sub" ? subBasinOf({ id: picked.basin.id, name: picked.basin.name }) : null,
