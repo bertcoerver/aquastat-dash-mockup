@@ -1,6 +1,5 @@
 /*
- * The view tabs (Country / Basin / Local), the date range slider and, in the Local view,
- * the play button. Clicking a date above the slider picks it from a calendar
+ * The view tabs (Country / Basin / Local), the date range slider and the play button. Clicking a date above the slider picks it from a calendar
  * (date-picker.ts); clicking the length changes it (length-picker.ts). The arrows
  * either side of the dates move the range a year. The markup lives in index.html; this module keeps the range valid for the active view (see
  * range-rules.ts) and shows when the system, not the user, moved an end. The tabs sit
@@ -114,7 +113,6 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     picker.render();
     lengthPicker.render();
     for (const [btn, n] of shifts) btn.disabled = !shiftYears(state.view, state.range, n);
-    play.hidden = state.view !== "local";
     const slot = document.querySelector<HTMLElement>(`.tabs-slot[data-view="${state.view}"]`)!;
     if (tabs.parentElement !== slot) {
       const focused = tabs.contains(document.activeElement); // (moving it drops the focus)

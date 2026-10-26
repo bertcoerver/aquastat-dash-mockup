@@ -267,6 +267,10 @@ water-portal/
   hidden. Moving the map loads the frames ahead again for the new view; any change of
   range or view stops playback. Up to 16 requests to the bucket at once (it speaks
   HTTP/2), instead of deck.gl-raster's default of 6.
+- **Playback in Country and Basin** ([src/toolbar/range-player.ts](src/toolbar/range-player.ts))
+  moves the range on a year (Country, 0.8 s a frame) or a dekad (Basin, 0.3 s) at a time,
+  keeping its length, and stops at the view's last one; played from there, it starts over
+  from the first. Nothing is loaded ahead: each frame just sets the range.
 - **The water balance scheme** ([src/basin/scheme.ts](src/basin/scheme.ts), from
   river-flow-poc's `scheme.html`): with a major basin selected, the discharge and storage change
   maps of its sub-basins have a switch in the legend. Discharge: **Network** (lines along the

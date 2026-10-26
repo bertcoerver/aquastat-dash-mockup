@@ -248,6 +248,27 @@ export function shiftYears(view: View, prev: DayRange, n: number): DayRange | nu
   return next.start >= firstDay(view) && next.end <= lastDay(view) ? next : null;
 }
 
+/**
+ * Playback in Country and Basin (range-player.ts): the range a step on, keeping its
+ * length (a year in Country, a dekad in Basin). Null past the view's last day.
+ */
+export function stepRange(view: Exclude<View, "local">, prev: DayRange): DayRange | null {
+  if (view === "country") {
+    const [a, b] = [yearOfDay(prev.start) + 1, yearOfDay(prev.end) + 1];
+    return b <= countryLast ? countryYears(a, b) : null;
+  }
+  const { start, end } = coveringDekads(prev);
+  return end + 1 <= basinLast ? daysOfDekads({ start: start + 1, end: end + 1 }) : null;
+}
+
+/** Playback: the first range of the same length the view can show (where it starts over). */
+export function firstRange(view: Exclude<View, "local">, prev: DayRange): DayRange {
+  if (view === "country") return countryYears(MIN_YEAR, MIN_YEAR + yearOfDay(prev.end) - yearOfDay(prev.start));
+  const { start, end } = coveringDekads(prev);
+  const first = dayDk(WAPOR_FIRST_DAY);
+  return daysOfDekads({ start: first, end: first + end - start });
+}
+
 export type Period = "dekad" | "month" | "year";
 const PERIOD_DEKADS: Record<Period, number> = { dekad: 1, month: 3, year: 36 };
 

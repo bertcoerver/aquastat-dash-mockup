@@ -67,7 +67,7 @@
   grid-column: 2;
 }
 
-/* Play / pause (Local view). While frames load, a ring turns around it. */
+/* Play / pause. While frames load (Local view), a ring turns around it. */
 .play {
   grid-column: 1;
   grid-row: 1 / span 2;
@@ -83,9 +83,6 @@
   background: var(--surface);
   color: var(--accent);
   cursor: pointer;
-}
-.play[hidden] {
-  display: none;
 }
 .play:hover {
   background: var(--accent-soft);

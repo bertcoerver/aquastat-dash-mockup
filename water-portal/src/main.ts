@@ -32,6 +32,7 @@ import { initLoadBar } from "./panels/load-bar";
 import { initThemeSwitch } from "./panels/theme-switch";
 import { mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
+import { initRangePlayer } from "./toolbar/range-player";
 import { initToolbar, type Toolbar, type ToolbarState } from "./toolbar/toolbar";
 import { isCountryYear, type DayRange, type View } from "./toolbar/range-rules";
 import "./styles/tokens.css";
@@ -376,8 +377,8 @@ function showWaporLevel() {
 // (The level changes while deck.gl picks tiles.)
 onWaporLevel(() => queueMicrotask(showWaporLevel));
 
-// Playback: each frame sets the range on the toolbar, and its period, loaded ahead, on
-// the map. Any other change of range or view stops it.
+// Playback (Local): each frame sets the range on the toolbar, and its period, loaded
+// ahead, on the map. Any other change of range or view stops it.
 let waporRange: DayRange | null = null;
 let playing = false; // a frame is being shown
 let playback: PlaybackStatus = "stopped";
@@ -397,6 +398,18 @@ const player = initWaporPlayer({
     if (playback === "stopped") stretchWapor();
     toolbarApi?.setPlayback(state);
   },
+});
+
+// In Country and Basin, only the range moves on (range-player.ts).
+const rangePlayer = initRangePlayer({
+  getView: () => view,
+  getRange: () => waporRange!,
+  show(range) {
+    playing = true;
+    toolbarApi!.setDays(range);
+    playing = false;
+  },
+  onState: (status) => toolbarApi?.setPlayback({ status, bufferedTo: null }),
 });
 
 function hideWapor() {
@@ -424,11 +437,12 @@ function onToolbarChange({ view: newView, range, days }: ToolbarState) {
   waporRange = days;
   if (!playing) {
     player.stop();
+    rangePlayer.stop();
     showWapor(view === "local" ? days : null);
   }
 }
 selection.set(NOTHING);
-toolbarApi = initToolbar(onToolbarChange, () => player.toggle());
+toolbarApi = initToolbar(onToolbarChange, () => (view === "local" ? player : rangePlayer).toggle());
 onToolbarChange(toolbarApi.state);
 // The Basin view's range ends at the latest dekad of the model output. Without the
 // output (not built yet, or unreachable) it isn't limited; Q and ΔS then say so.
