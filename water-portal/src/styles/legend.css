@@ -71,6 +71,12 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
+/* The pixel size, which lights up (.flash, toolbar.css) when zooming switches level. */
+#wapor-pixel {
+  border-radius: 3px;
+  padding: 0 2px;
+  margin: 0 -2px;
+}
 .legend-period {
   display: flex;
   flex-wrap: wrap; /* a long range puts the unit on its own line */

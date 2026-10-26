@@ -10,6 +10,7 @@
 import { DEFAULT_STRETCH, fmtStop, initRampMenu } from "../panels/ramp-menu";
 import { initTitleMenu } from "../panels/title-menu";
 import { fmtDay } from "../toolbar/dekads";
+import { flash } from "../toolbar/toolbar";
 import {
   PER_DAYS,
   WAPOR_UNITS,
@@ -124,7 +125,11 @@ export function initWaporLegend({
   function showVariable(v: WaporVariable) {
     variable = v;
     menu.setLabel(v.label);
-    $("wapor-source").textContent = `WaPOR v3 · ${v.short} · ${waporPixel(v, level)}`;
+    // The pixel size in its own span, so it alone lights up when the level changes.
+    const pixel = document.createElement("span");
+    pixel.id = "wapor-pixel";
+    pixel.textContent = waporPixel(v, level);
+    $("wapor-source").replaceChildren(`WaPOR v3 · ${v.short} · `, pixel);
     showPer();
   }
 
@@ -241,6 +246,8 @@ export function initWaporLegend({
       if (shown === level) return;
       level = shown;
       showVariable(variable);
+      // The system, not the user, changed the resolution (zooming in or out): show it.
+      if (waporPixel(variable, "L1") !== waporPixel(variable, "L2")) flash($("wapor-pixel"));
     },
     pixelArea(m2, lat) {
       area = { m2, lat };

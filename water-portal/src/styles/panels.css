@@ -42,7 +42,7 @@
 .maplibregl-ctrl-group .layers-button {
   display: grid;
   place-items: center;
-  color: #333; /* as MapLibre's own icons, on its white buttons in either theme */
+  color: var(--ink); /* as MapLibre's own icons (map.css) */
 }
 .maplibregl-ctrl-group .layers-button[aria-expanded="true"] {
   color: var(--accent);

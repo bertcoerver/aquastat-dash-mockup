@@ -19,6 +19,10 @@
 
   /* How opaque floating panels over the map are. */
   --glass: 78%;
+  /* MapLibre's control icons (dark grey images): as they are, or flipped to light
+     (the hue turned back, so the compass stays red and the 3D button blue). */
+  --ctrl-icon-filter: none;
+  --ctrl-hover: rgb(0 0 0 / 5%);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -34,6 +38,8 @@
     --accent-soft: #163341;
     --snap: #e6a94c;
     --snap-soft: #3a2a12;
+    --ctrl-icon-filter: invert(1) hue-rotate(180deg);
+    --ctrl-hover: rgb(255 255 255 / 8%);
   }
 }
 
@@ -49,4 +55,6 @@
   --accent-soft: #163341;
   --snap: #e6a94c;
   --snap-soft: #3a2a12;
+  --ctrl-icon-filter: invert(1) hue-rotate(180deg);
+  --ctrl-hover: rgb(255 255 255 / 8%);
 }

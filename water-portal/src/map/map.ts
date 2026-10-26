@@ -41,7 +41,7 @@ export interface WaterMap {
   setWaporMaxGap(maxGap: number | null): void;
   /** The colour map for the WaPOR raster, in its variable's unit per day. */
   setWaporRamp(ramp: WaporRamp): void;
-  /** Show the selection: a marker at the point, and the country and basins filled. */
+  /** Show the selection: a marker at the point (Local view), and the country and basins filled. */
   setSelection(selection: MapSelection): void;
   /** Move the camera to show a box: [west, south, east, north], west > east across 180°. */
   showBox(bbox: [number, number, number, number]): void;
@@ -242,7 +242,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         visible: state.view === "country" && Boolean(state.countryFills),
       }),
       countrySymbolsLayer({ symbols: state.view === "country" ? visibleSymbols() : null }),
-      markerLayer({ position: state.dragged ?? state.selection.lngLat, fill: theme.marker, ring: theme.markerRing }),
+      // The clicked point: only the Local view is about a point.
+      markerLayer({
+        position: state.view === "local" ? (state.dragged ?? state.selection.lngLat) : null,
+        fill: theme.marker,
+        ring: theme.markerRing,
+      }),
     ];
   }
 
@@ -375,7 +380,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   const canvas = map.getCanvas();
   function onMarker(point: maplibregl.Point) {
     const at = state.selection.lngLat;
-    if (!at) return false;
+    if (!at || state.view !== "local") return false; // (only shown in the Local view)
     const { lng, lat } = map.getCenter();
     if (facing(at, [lng, lat]) <= 0) return false; // on the far side of the globe
     return map.project(at).dist(point) <= MARKER_GRAB;
