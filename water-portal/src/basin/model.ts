@@ -1,40 +1,29 @@
 /*
- * The water balance model: discharge (Q) and storage change (ΔS) from WaPOR L1
- * precipitation (PCP) and actual evapotranspiration (AETI).
+ * The Basin view's data: WaPOR L1 precipitation (PCP) and actual evapotranspiration
+ * (AETI), and the water balance model's discharge (Q) and storage change (ΔS) from them.
  *
- * The maps read them precomputed: fao_wapor_discharge.portal runs the model for every
- * outlet network and writes, under MODEL_FILES (see the README),
+ * All precomputed by fao_wapor_discharge.portal, which downloads the WaPOR zonal
+ * statistics, runs the model for every outlet network and writes, under MODEL_FILES
+ * (see the README),
  *
  *   latest.json        the dekads covered, and a version for the other files' URLs;
- *   majors.json        per major basin, Q at its outlets and ΔS summed, per dekad;
- *   major/<id>.json    per sub-basin of a major basin, Q and ΔS per dekad.
+ *   subbasins.bin      per sub-basin, its major basin, area, and PCP and AETI per dekad;
+ *   majors.bin         per major basin, Q at its outlets and ΔS summed, per dekad;
+ *   major/<id>.bin     per sub-basin of a major basin, Q and ΔS per dekad.
  *
- * The rest of this module runs the model itself, for a sub-basin and everything upstream
- * of it (the water balance panel, switched off for now: MODEL_SHOWN in water-balance.ts).
+ * Every series runs over the same dekads, those in latest.json. The .bin format: see
+ * parseFile (and portal.py). Nothing is queried here: the files are all there is.
  *
- * The model runs here, in the browser: calc_runoff.js is a copy of js/calc_runoff.js
- * from the fao-wapor-discharge project, a port of its calc_runoff (a linear-reservoir
- * model, routed downstream through the sub-basins, retention factor 0.1) that gives
- * the same numbers as the Python function, bit for bit. Its inputs, the network's
- * dekadal PCP and AETI, come from FAO's BigQuery proxy, joined as the Python pipeline
- * joins them, with one row per sub-basin and the time series as arrays: the proxy
- * returns at most 50,000 rows, and big networks have more (the Mississippi: 766
- * sub-basins × 288 dekads).
+ * The water balance panel (switched off for now: MODEL_SHOWN in water-balance.ts) shows a
+ * sub-basin and everything upstream of it: networkSeries, from the same files.
  */
-import { MIN_YEAR, mk } from "../toolbar/dekads";
+import { MIN_YEAR } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
 import type { SubBasin } from "../map/sub-basin-network";
-import { calcRunoff } from "./calc_runoff.js";
 
-const PROXY_URL = "https://data.apps.fao.org/api/v2/bigquery";
-/** Where the precomputed model output is (a directory URL, ending in /). */
+/** Where the precomputed files are (a directory URL, ending in /). */
 const MODEL_FILES: string = import.meta.env.VITE_MODEL_FILES ?? `${import.meta.env.BASE_URL}data/model/`;
-const FORMAT_VERSION = 1; // of the files
-const PCP = "`fao-maps-review.zonal_stats_openEO.L1-PCP-D_HYDRO_SUB_BASIN_V2`";
-const AETI = "`fao-maps-review.zonal_stats_openEO.L1-AETI-D_HYDRO_SUB_BASIN_V2`";
-const SPINUP = 2; // model passes (calc_runoff's default)
-// BigQuery arrays can't hold NULL; PCP and AETI are never negative.
-const NONE = -9999;
+const FORMAT_VERSION = 2; // of the files
 
 export type Variable = "PCP" | "AETI" | "Q" | "dS";
 export const VARIABLES: Variable[] = ["PCP", "AETI", "Q", "dS"];
@@ -71,168 +60,158 @@ export interface ModelFiles {
 /** Period means per sub-basin (PCP, AETI in mm/day; Q, ΔS in m³/s). */
 export type Means = Map<number, Record<Variable, number>>;
 
-/** A sub-basin's inputs: start times (Unix seconds), PCP and AETI in mm/day. */
-interface Row {
-  id: number;
-  t: number[];
-  pcp: number[];
-  aeti: number[];
+/** A .bin file: per id (a sub-basin or major basin), some values and some series. */
+export interface DataFile {
+  /** The first dekad (as in dekads.ts), and how many follow on. */
+  first: number;
+  dekads: number;
+  ids: Int32Array;
+  /** One value per id. */
+  columns: Record<string, Int32Array | Float32Array>;
+  /** One value per id per dekad, id after id (NaN: missing). */
+  series: Record<string, Float32Array>;
 }
 
-const results = new Map<number, Promise<NetworkResult>>();
-
-/**
- * Run the model for `outlet` and the sub-basins upstream of it (`upstream`, not
- * including `outlet`). Results are kept, so selecting the same sub-basin again is
- * instant. A failed run is forgotten, so it can be retried.
- */
-export function runNetwork(outlet: SubBasin, upstream: SubBasin[]): Promise<NetworkResult> {
-  let result = results.get(outlet.id);
-  if (!result) {
-    const network = [outlet, ...upstream];
-    result = query(inputsSql(network.map((b) => b.id))).then((rows) => {
-      // The outlet drains out of the network: -999 (terminal), as far as the model knows.
-      const routes = Object.fromEntries(network.map((b) => [b.id, [b.id === outlet.id ? -999 : b.downstream, b.area]]));
-      return { outlet: outlet.id, ...toSeries([runModel(rows, routes)]) };
-    });
-    result.catch(() => results.delete(outlet.id));
-    results.set(outlet.id, result);
-  }
-  return result;
-}
-
-// --- Precomputed output -----------------------------------------------------------------
 // Loaded once (a failed load is forgotten, so it can be retried).
 
 let latest: Promise<ModelFiles> | null = null;
-const files = new Map<string, Promise<FluxSeries>>();
+const files = new Map<string, Promise<DataFile>>();
+const fluxes = new Map<string, Promise<FluxSeries>>();
+const networks = new Map<number, Promise<NetworkResult>>();
 
 /** latest.json: the dekads with output. Always asked for afresh, not from the cache. */
 export function loadModelFiles(): Promise<ModelFiles> {
   if (!latest) {
-    latest = fetchJson(`${MODEL_FILES}latest.json`, { cache: "no-cache" }).then((f) => {
-      if (f.version !== FORMAT_VERSION) throw new Error(`The model output is in an unknown format (version ${f.version}).`);
-      return { first: isoDekad(f.first), last: isoDekad(f.last), updated: f.updated };
-    });
+    latest = fetch(`${MODEL_FILES}latest.json`, { cache: "no-cache" })
+      .then((r) => checked(r, "latest.json").json())
+      .then((f) => {
+        if (f.version !== FORMAT_VERSION) throw new Error(`The model output is in an unknown format (version ${f.version}).`);
+        return { first: isoDekad(f.first), last: isoDekad(f.last), updated: f.updated };
+      });
     latest.catch(() => (latest = null));
   }
   return latest;
 }
 
-/** Q and ΔS per major basin (Q: at its outlets, ΔS: summed over its sub-basins). */
-export const loadMajorFluxes = () => loadFile("majors.json", "majors");
-
-/** Q and ΔS per sub-basin of major basin `major`. */
-export const loadSubBasinFluxes = (major: number) => loadFile(`major/${major}.json`, "subBasins");
-
-function loadFile(path: string, key: string): Promise<FluxSeries> {
+/** One of the .bin files, by its path under MODEL_FILES. */
+export function loadFile(path: string): Promise<DataFile> {
   let file = files.get(path);
   if (!file) {
     // Versioned, so a browser doesn't keep a copy from before an update.
     file = loadModelFiles()
-      .then(({ updated }) => fetchJson(`${MODEL_FILES}${path}?v=${encodeURIComponent(updated)}`))
-      .then((f) => {
-        const first = isoDekad(f.first);
-        const dekads = Array.from({ length: isoDekad(f.last) - first + 1 }, (_, i) => first + i);
-        const values = (xs: (number | null)[]) => Float64Array.from(xs, (x) => x ?? NaN);
-        const series = new Map<number, Record<Flux, Float64Array>>();
-        for (const [id, s] of Object.entries(f[key] as Record<string, Record<Flux, (number | null)[]>>)) {
-          series.set(Number(id), { Q: values(s.Q), dS: values(s.dS) });
-        }
-        return { dekads, series };
-      });
+      .then(({ updated }) => fetch(`${MODEL_FILES}${path}?v=${encodeURIComponent(updated)}`))
+      .then((r) => checked(r, path).arrayBuffer())
+      .then(parseFile);
     file.catch(() => files.delete(path));
     files.set(path, file);
   }
   return file;
 }
 
-/** Mean of `flux` per basin over the dekads in `range` (inclusive). */
-export function fluxMeans({ dekads, series }: FluxSeries, range: DekadRange, flux: Flux): Map<number, number> {
-  const from = Math.max(0, range.start - dekads[0]);
-  const to = Math.min(dekads.length, range.end - dekads[0] + 1);
-  return new Map([...series].map(([id, s]) => [id, mean(s[flux], from, to)]));
+function checked(response: Response, path: string) {
+  if (!response.ok) throw new Error(`The model output couldn't be loaded (${response.status} for ${path}).`);
+  return response;
 }
 
-async function fetchJson(url: string, init?: RequestInit): Promise<any> {
-  const response = await fetch(url, init);
-  if (!response.ok) throw new Error(`The model output couldn't be loaded (${response.status} for ${url}).`);
-  return response.json();
+/**
+ * Little-endian: Uint32 header length; the header, JSON ({ first, dekads, n, columns:
+ * [{ name, type }], series: [{ name, type, scale?, none? }] }); Int32[n] ids; each column,
+ * n values; each series, n × dekads values, id after id: float32 (NaN: missing), or
+ * uint16 (value × scale; `none`: missing).
+ */
+function parseFile(buf: ArrayBuffer): DataFile {
+  const length = new DataView(buf).getUint32(0, true);
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, length)));
+  const { n, dekads } = header;
+  let offset = 4 + length;
+  const types = { int32: Int32Array, float32: Float32Array, uint16: Uint16Array };
+  const take = (type: keyof typeof types, count: number) => {
+    const array = new types[type](buf, offset, count);
+    offset += array.byteLength;
+    return array;
+  };
+  const ids = take("int32", n) as Int32Array;
+  const columns: DataFile["columns"] = {};
+  for (const c of header.columns) columns[c.name] = take(c.type, n) as Int32Array | Float32Array;
+  const series: DataFile["series"] = {};
+  for (const s of header.series) {
+    const raw = take(s.type, n * dekads);
+    series[s.name] = s.type === "uint16" ? Float32Array.from(raw, (x) => (x === s.none ? NaN : x / s.scale)) : (raw as Float32Array);
+  }
+  return { first: isoDekad(header.first), dekads, ids, columns, series };
+}
+
+/** Row `row` of series `name`, as numbers. */
+const rowOf = (file: DataFile, name: string, row: number) =>
+  Float64Array.from(file.series[name].subarray(row * file.dekads, (row + 1) * file.dekads));
+
+/** Q and ΔS per major basin (Q: at its outlets, ΔS: summed over its sub-basins). */
+export const loadMajorFluxes = () => loadFluxes("majors.bin");
+
+/** Q and ΔS per sub-basin of major basin `major`. */
+export const loadSubBasinFluxes = (major: number) => loadFluxes(`major/${major}.bin`);
+
+function loadFluxes(path: string): Promise<FluxSeries> {
+  let result = fluxes.get(path);
+  if (!result) {
+    result = loadFile(path).then((file) => ({
+      dekads: Array.from({ length: file.dekads }, (_, i) => file.first + i),
+      series: new Map([...file.ids].map((id, row) => [id, { Q: rowOf(file, "Q", row), dS: rowOf(file, "dS", row) }])),
+    }));
+    result.catch(() => fluxes.delete(path));
+    fluxes.set(path, result);
+  }
+  return result;
+}
+
+/**
+ * All four variables for `outlet` and the sub-basins upstream of it (`upstream`, not
+ * including `outlet`), over the dekads with the outlet's Q. The network can reach into
+ * other major basins: their files are loaded too.
+ */
+export function networkSeries(outlet: SubBasin, upstream: SubBasin[]): Promise<NetworkResult> {
+  let result = networks.get(outlet.id);
+  if (!result) {
+    const network = [outlet, ...upstream];
+    const majors = [...new Set(network.map((b) => b.majorBasin))];
+    result = Promise.all([loadFile("subbasins.bin"), ...majors.map((m) => loadFile(`major/${m}.bin`))]).then(([wapor, ...flux]) => {
+      const rows = (file: DataFile) => new Map([...file.ids].map((id, row) => [id, row]));
+      const waporRows = rows(wapor);
+      const fluxRows = flux.map(rows);
+      const empty = () => new Float64Array(wapor.dekads).fill(NaN);
+      const all = new Map<number, Series>();
+      for (const b of network) {
+        const w = waporRows.get(b.id);
+        const f = fluxRows.findIndex((r) => r.has(b.id));
+        const fr = f < 0 ? null : fluxRows[f].get(b.id)!;
+        all.set(b.id, {
+          PCP: w === undefined ? empty() : rowOf(wapor, "PCP", w),
+          AETI: w === undefined ? empty() : rowOf(wapor, "AETI", w),
+          Q: fr === null ? empty() : rowOf(flux[f], "Q", fr),
+          dS: fr === null ? empty() : rowOf(flux[f], "dS", fr),
+        });
+      }
+      // The dekads the model has output for (its network's common date range).
+      const q = all.get(outlet.id)!.Q;
+      const from = q.findIndex(Number.isFinite);
+      const to = from < 0 ? 0 : q.findLastIndex(Number.isFinite) + 1;
+      const dekads = Array.from({ length: Math.max(0, to - from) }, (_, i) => wapor.first + from + i);
+      const series = new Map<number, Series>();
+      for (const [id, s] of all) {
+        series.set(id, { PCP: s.PCP.slice(from, to), AETI: s.AETI.slice(from, to), Q: s.Q.slice(from, to), dS: s.dS.slice(from, to) });
+      }
+      return { outlet: outlet.id, dekads, series };
+    });
+    result.catch(() => networks.delete(outlet.id));
+    networks.set(outlet.id, result);
+  }
+  return result;
 }
 
 /** The dekad of an ISO date (yyyy-mm-dd). */
 function isoDekad(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
   return (y - MIN_YEAR) * 36 + (m - 1) * 3 + (d <= 10 ? 0 : d <= 20 ? 1 : 2);
-}
-
-// --- Running the model -------------------------------------------------------------------
-
-/** The inner join of the PCP and AETI zonal statistics, as pipeline._combine does it. */
-function inputsSql(ids: number[]): string {
-  return `SELECT p.FAO_SB_ID AS id,
-  ARRAY_AGG(UNIX_SECONDS(p.start_datetime) ORDER BY p.start_datetime) AS t,
-  ARRAY_AGG(IFNULL(p.mean, ${NONE}) ORDER BY p.start_datetime) AS pcp,
-  ARRAY_AGG(IFNULL(a.mean, ${NONE}) ORDER BY p.start_datetime) AS aeti
-FROM ${PCP} AS p
-JOIN ${AETI} AS a ON a.FAO_SB_ID = p.FAO_SB_ID AND a.start_datetime = p.start_datetime
-WHERE p.FAO_SB_ID IN (${ids.join(", ")})
-GROUP BY id`;
-}
-
-function runModel(rows: Row[], routes: Record<string, unknown[]>) {
-  const basin: number[] = [];
-  const start: number[] = [];
-  const pcp: number[] = [];
-  const aeti: number[] = [];
-  const value = (v: number) => (v === NONE ? NaN : v);
-  for (const row of rows) {
-    row.t.forEach((t, i) => {
-      basin.push(row.id);
-      start.push(t * 1000);
-      pcp.push(value(row.pcp[i]));
-      aeti.push(value(row.aeti[i]));
-    });
-  }
-  return calcRunoff({ basin, start, pcp, aeti }, routes, { spinup: SPINUP });
-}
-
-async function query(sql: string): Promise<Row[]> {
-  const response = await fetch(PROXY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: sql, output_format: "json", download: "false" }),
-  });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`The model query failed (${response.status}): ${text.slice(0, 300)}`);
-  const rows = JSON.parse(text);
-  if (!Array.isArray(rows)) throw new Error(`The model query failed: ${text.slice(0, 300)}`);
-  return rows;
-}
-
-/** Model output (of one or more networks) to series on one shared dekad axis (missing values are NaN). */
-function toSeries(outs: ReturnType<typeof calcRunoff>[]): ModelSeries {
-  const dekadOf = (ms: number) => {
-    const d = new Date(ms);
-    return mk(d.getUTCFullYear(), d.getUTCMonth(), Math.floor((d.getUTCDate() - 1) / 10));
-  };
-  const rowDekads = outs.map((out) => out.start.map(dekadOf));
-  const dekads = [...new Set(rowDekads.flat())].sort((a, b) => a - b);
-  const index = new Map(dekads.map((dk, i) => [dk, i]));
-  const series = new Map<number, Series>();
-  outs.forEach((out, o) => out.basin.forEach((id, r) => {
-    let s = series.get(id);
-    if (!s) {
-      const empty = () => new Float64Array(dekads.length).fill(NaN);
-      series.set(id, (s = { PCP: empty(), AETI: empty(), Q: empty(), dS: empty() }));
-    }
-    const i = index.get(rowDekads[o][r])!;
-    s.PCP[i] = out.pcp[r];
-    s.AETI[i] = out.aeti[r];
-    s.Q[i] = out.q[r];
-    s.dS[i] = out.dS[r];
-  }));
-  return { dekads, series };
 }
 
 /** The part of `range` that has model output, or null if none of it has. */
