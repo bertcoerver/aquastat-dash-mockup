@@ -188,13 +188,16 @@ sub-basin and the model's balance around it, over a dekad, month or year (a time
 through them) or the whole record. `?basin=<major basin id>` opens a basin (7003 is the Nile,
 4025 the Danube).
 
-- **Discharge (Q)**: a straight line from each sub-basin's node to the node of the sub-basin it
-  drains into, as wide as its mean outflow. Widths are linear in Q (the basin's biggest mean
-  outflow over the record is 14 px), so they add up where rivers join: two upstream sub-basins
-  and the one they drain into make a Y. Where the basin leaves the scheme (the sea, an inland
-  sink) the line runs on through the outlet to an arrow.
-- **Storage change (ΔS)**: a dot on each node, its area the mean ΔS (the 98th percentile of
-  |ΔS| over the periods is 13 px), green when storage rises and red when it falls.
+- **Storage change (ΔS)**: a dot in the middle of each sub-basin, its area the mean ΔS (the 98th
+  percentile of |ΔS| over the periods is 13 px), green when storage rises and red when it falls.
+- **Discharge (Q)**: a line from each sub-basin's dot through its outlet to the dot of the
+  sub-basin it drains into, as wide as its mean outflow. Widths are linear in Q (the basin's
+  biggest mean outflow over the record is 14 px), so they add up where rivers join: sub-basins
+  are split at confluences, so a tributary's sub-basin and the main river's above it share
+  their outlet, and the line below it is drawn once, as wide as both together (a Y). Where the
+  basin leaves the scheme (the sea, an inland sink) the line runs on past the outlet to an
+  arrow. A big river crossing a wide sub-basin near its edge makes a detour to the dot and back
+  (the Nile through Wadu Sayyak, a desert sub-basin of 71,000 km²).
 - **Precipitation and evapotranspiration**: the sub-basins (FAO's sub-basin tiles, as in the
   portal) coloured by P − ET (brown: ET above P, teal: P above ET), P or ET, in mm/day, over
   the 98th percentile of the periods' values.
@@ -206,14 +209,14 @@ through them) or the whole record. `?basin=<major basin id>` opens a basin (7003
 - **The model runs in the browser** for every outlet network of the basin, as the lanes page
   does without the precomputed files (`basinBalance` in [src/basin-model.ts](src/basin-model.ts)):
   the precomputed files only have Q and ΔS, and the scheme also needs P and ET. 2–7 s a basin.
-- **Nodes** ([scripts/build-outlets.mjs](scripts/build-outlets.mjs), `npm run outlets` →
-  `public/data/outlets.json`, 350 kB): a sub-basin's outlet is the end of its biggest arc in
-  the river network. Sub-basins are split at confluences, so a tributary's sub-basin and the
-  main river's above it drain out at the same point; drawn there, their dots overlapped and
-  their lines lay on top of each other. So the node sits 30 % of the way up the sub-basin's own
-  main river from the outlet, and the two lines meet at the next node down. 956 of the 7,596
-  sub-basins have no arcs (mostly small coastal, island and desert ones); they sit at the
-  centre of their bounding box.
+- **Middles and outlets** ([scripts/build-nodes.mjs](scripts/build-nodes.mjs), `npm run nodes`
+  → `public/data/nodes.json`, 380 kB, ~30 s). The middle: FAO's sub-basin tiles at zoom 5
+  rasterised into one global grid (~4 km cells); of each sub-basin's cells, the one nearest its
+  centroid among those at least half as far from its edge as its innermost cell, so the dot is
+  inside the sub-basin even when it's curved. (The tiles' own `CENTROID` property isn't used: a
+  centroid can lie outside a curved sub-basin.) The outlet: the end of the sub-basin's biggest
+  arc in the river network. 955 sub-basins have no arcs (mostly small coastal, island and desert
+  ones), so no outlet: their line goes straight from the dot, and a mouth gets no arrow.
 
 Next steps for a full water balance scheme: P and ET as flows into and out of each node (arrows
 or bars in m³/s, on the same scale as Q) instead of the colours, and labels on the main nodes.
@@ -223,7 +226,7 @@ or bars in m³/s, on the same scale as Q) instead of the colours, and labels on 
 ```bash
 npm install
 npm run network   # once: builds public/data/rivers.bin from the shapefile (needs GDAL)
-npm run outlets   # after that: public/data/outlets.json (the scheme's nodes) from rivers.bin
+npm run nodes     # after that: public/data/nodes.json (the scheme's middles and outlets; downloads the sub-basin tiles)
 npm run dev       # http://localhost:5175
 ```
 

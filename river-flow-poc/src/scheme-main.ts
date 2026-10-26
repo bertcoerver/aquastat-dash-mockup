@@ -2,14 +2,13 @@
  * The water balance scheme: a major basin's sub-basins as a diagram on the map, over a
  * period (a dekad, month or year, or the whole record) that a timeline steps through.
  *
- * - Discharge (Q): a straight line from each sub-basin's outlet to the outlet of the
+ * - Storage change (ΔS): a dot in the middle of each sub-basin, its area the mean change,
+ *   green when storage rises and red when it falls.
+ * - Discharge (Q): a line from each sub-basin's dot through its outlet to the dot of the
  *   sub-basin it drains into, as wide as its mean outflow (linear, so widths add up
- *   where rivers join: two tributaries and the river below make a Y). Where the basin
- *   leaves the scheme (the sea, an inland sink) the line goes on a little, with an arrow.
- * - Storage change (ΔS): a dot at each outlet, its area the mean change, green when
- *   storage rises and red when it falls. The nodes (dots, line ends) sit a little way up
- *   each sub-basin's main river from its outlet, since sub-basins meeting at a confluence
- *   share it (scripts/build-outlets.mjs).
+ *   where rivers join: sub-basins meeting at a confluence share the line below it, a Y).
+ *   Where the basin leaves the scheme (the sea, an inland sink) the line goes on a
+ *   little past the outlet, with an arrow. See Line in scheme/balance.ts.
  * - Precipitation (P) and evapotranspiration (ET): the sub-basins filled by P − ET, P or
  *   ET (the FAO sub-basin tiles, as in the portal).
  *
@@ -36,7 +35,8 @@ import {
   type Aggregation,
   type Balance,
   type Node,
-  type Outlets,
+  type Line,
+  type NodeFile,
   type Period,
   type Scheme,
 } from "./scheme/balance";
@@ -113,15 +113,12 @@ map.on("style.load", () => {
 
 let subBasins: SubBasin[] = [];
 let majorBasins: MajorBasin[] = [];
-let outlets: Outlets = {};
+let nodeFile: NodeFile = {};
 
 interface Current {
   major: MajorBasin;
   model: Awaited<ReturnType<typeof basinBalance>>;
   scheme: Scheme;
-  /** The scheme's lines: one from each node to the next down, or out of the basin. */
-  links: { node: Node; path: [number, number][] }[];
-  mouths: { node: Node; path: [number, number][] }[];
   /** m³/s at Q_PX. */
   qRef: number;
   // For the aggregation picked:
@@ -187,10 +184,10 @@ const ARROW = {
 
 function layers() {
   if (!current) return [];
-  const { links, mouths, scheme } = current;
-  const linkWidth = ({ node }: { node: Node }) => qWidth(balance(node.id)?.Q ?? NaN);
+  const { scheme } = current;
+  const lineWidth = (line: Line) => qWidth(line.from.reduce((sum, id) => sum + (balance(id)?.Q ?? NaN), 0));
   const triggers = { version, periodIndex, fill };
-  const allLines = [...links, ...mouths];
+  const mouths = scheme.lines.filter((l) => l.kind === "mouth");
   return [
     new MVTLayer({
       id: "sub-basins",
@@ -212,9 +209,9 @@ function layers() {
     // A dark edge, so the lines read over any fill.
     new PathLayer({
       id: "q-casing",
-      data: allLines,
+      data: scheme.lines,
       getPath: (d) => d.path,
-      getWidth: (d) => (linkWidth(d) ? linkWidth(d) + 2 : 0),
+      getWidth: (d) => (lineWidth(d) ? lineWidth(d) + 2 : 0),
       getColor: CASING,
       widthUnits: "pixels",
       capRounded: true,
@@ -222,9 +219,9 @@ function layers() {
     }),
     new PathLayer({
       id: "q",
-      data: allLines,
+      data: scheme.lines,
       getPath: (d) => d.path,
-      getWidth: linkWidth,
+      getWidth: lineWidth,
       getColor: Q_COLOR,
       widthUnits: "pixels",
       capRounded: true,
@@ -235,9 +232,12 @@ function layers() {
       id: "mouths",
       data: mouths,
       getIcon: () => ARROW,
-      getPosition: (d) => d.path[2],
-      getAngle: (d) => (Math.atan2(d.node.direction[1], d.node.direction[0]) * 180) / Math.PI,
-      getSize: (d) => Math.min(40, 12 + linkWidth(d)),
+      getPosition: (d) => d.path[1],
+      getAngle: (d) => {
+        const [dx, dy] = scheme.nodes.get(d.in)!.direction;
+        return (Math.atan2(dy, dx) * 180) / Math.PI;
+      },
+      getSize: (d) => Math.min(40, 12 + lineWidth(d)),
       getColor: Q_COLOR,
       sizeUnits: "pixels",
       pickable: true,
@@ -279,7 +279,7 @@ const fmt = (x: number) =>
 
 function getTooltip({ object, layer }: PickingInfo) {
   if (!current || !object || !layer) return null;
-  const id: number | undefined = layer.id.startsWith("sub-basins") ? object.properties?.SDG6_SB_ID : (object.node ?? object).id;
+  const id: number | undefined = layer.id.startsWith("sub-basins") ? object.properties?.SDG6_SB_ID : (object.in ?? object.id);
   const node = id === undefined ? undefined : current.scheme.nodes.get(id);
   const b = node && balance(node.id);
   if (!node || !b) return null;
@@ -426,39 +426,24 @@ async function selectBasin(major: MajorBasin | null) {
     const model = await basinBalance(major.id, subBasins);
     if (Number(basinSelect.value) !== major.id) return;
     if (!model.dekads.length) throw new Error("the model returned no dekads");
-    const scheme = buildScheme(model, subBasins, outlets);
+    const scheme = buildScheme(model, subBasins, nodeFile);
     const nodes = [...scheme.nodes.values()];
-    const [bw, bs, be, bn] = scheme.bbox;
-    const reach = Math.max(0.15, 0.05 * Math.max(be - bw, bn - bs));
     const whole = periodBalance(model, scheme, { label: "", from: 0, to: model.dekads.length, partial: false });
     current = {
       major,
       model,
       scheme,
-      links: nodes
-        .filter((n) => n.downstream !== null)
-        .map((node) => ({ node, path: [node.position, scheme.nodes.get(node.downstream!)!.position] })),
-      mouths: nodes
-        .filter((n) => n.downstream === null)
-        .map((node) => ({
-          node,
-          path: [
-            node.position,
-            node.outlet,
-            [node.outlet[0] + (node.direction[0] * reach) / Math.cos((node.outlet[1] * Math.PI) / 180), node.outlet[1] + node.direction[1] * reach],
-          ],
-        })),
       qRef: Math.max(...[...whole.values()].map((b) => b.Q).filter(Number.isFinite)) || 1,
       periods: [],
       balances: [],
       dsRef: 1,
       domains: { PCP: [0, 1], AETI: [0, 1], PmE: [-1, 1] },
     };
-    const unplaced = nodes.filter((n) => !n.located).length;
+    const unplaced = nodes.filter((n) => !n.outlet).length;
     statusEl.textContent =
       `${major.name}: ${nodes.length} sub-basins (with any upstream of it), ${model.dekads.length} dekads, ` +
       `${((performance.now() - t0) / 1000).toFixed(1)} s.` +
-      (unplaced ? ` ${unplaced} without a river ${unplaced > 1 ? "are" : "is"} drawn at the centre.` : "");
+      (unplaced ? ` ${unplaced} without a river ${unplaced > 1 ? "have" : "has"} no outlet: ${unplaced > 1 ? "their lines go" : "its line goes"} straight from the dot.` : "");
     setAggregation(aggregationSelect.value as Aggregation);
   } catch (err) {
     if (Number(basinSelect.value) !== major.id) return;
@@ -494,18 +479,18 @@ periodSlider.addEventListener("input", () => {
 async function start() {
   statusEl.textContent = "Loading the sub-basins…";
   statusEl.classList.add("busy");
-  const [majors, subs, outs] = await Promise.all([
+  const [majors, subs, file] = await Promise.all([
     fetch(majorBasinsUrl).then((r) => r.json() as Promise<MajorBasin[]>),
     fetch(subBasinsUrl).then((r) => r.json() as Promise<SubBasin[]>),
-    fetch(`${import.meta.env.BASE_URL}data/outlets.json`).then((r) => {
-      if (!r.ok) throw new Error(`Couldn't load the outlets (${r.status}); run npm run outlets`);
-      return r.json() as Promise<Outlets>;
+    fetch(`${import.meta.env.BASE_URL}data/nodes.json`).then((r) => {
+      if (!r.ok) throw new Error(`Couldn't load the sub-basins' middles and outlets (${r.status}); run npm run nodes`);
+      return r.json() as Promise<NodeFile>;
     }),
   ]);
   statusEl.classList.remove("busy");
   majorBasins = majors.sort((a, b) => a.name.localeCompare(b.name));
   subBasins = subs;
-  outlets = outs;
+  nodeFile = file;
   for (const b of majorBasins) basinSelect.add(new Option(b.name, String(b.id)));
   fill = fillSelect.value as Fill;
   const wanted = majorBasins.find((b) => b.id === Number(new URLSearchParams(location.search).get("basin")));

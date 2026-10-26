@@ -1,7 +1,7 @@
 /*
- * The water balance scheme's data: the sub-basins as a graph (a node at each one's
- * outlet, a link to the next one down), the periods to step through, and each
- * sub-basin's balance over a period.
+ * The water balance scheme's data: the sub-basins as a graph (a node in the middle of
+ * each, lines through each one's outlet to the next one down), the periods to step
+ * through, and each sub-basin's balance over a period.
  *
  * The model (basin-model.ts, basinBalance) gives per sub-basin and dekad PCP and AETI
  * (mm/day over the sub-basin) and Q and ΔS (m³/s), with
@@ -15,60 +15,75 @@ import { mean, type ModelSeries, type Variable } from "@portal/basin/model";
 import type { SubBasin } from "@portal/map/sub-basin-network";
 import { MONTHS, dkM, dkY, fmtEnd, fmtStart } from "@portal/toolbar/dekads";
 
+type LonLat = [number, number];
+
 /**
- * Per sub-basin (outlets.json, scripts/build-outlets.mjs): its node (lon, lat: on its main
- * river, a little way up from the outlet), its outlet (lon, lat) and the direction the
- * water leaves in.
+ * Per sub-basin (nodes.json, scripts/build-nodes.mjs): its middle (lon, lat), and where it
+ * has a river, its outlet (lon, lat) and the direction the water leaves in (east, north).
  */
-export type Outlets = Record<string, [number, number, number, number, number, number]>;
+export type NodeFile = Record<string, [number, number] | [number, number, number, number, number, number]>;
 
 export interface Node {
   id: number;
   name: string;
   /** km² */
   area: number;
-  /** Where the scheme draws it (lon, lat): on its main river, a little way up from the outlet. */
-  position: [number, number];
-  /** Where it drains out (lon, lat). */
-  outlet: [number, number];
+  /** The middle of the sub-basin (lon, lat): where its dot is. */
+  position: LonLat;
+  /** Where it drains out (lon, lat); null without a river. */
+  outlet: LonLat | null;
   /** Unit vector (east, north) the water leaves in. */
-  direction: [number, number];
+  direction: LonLat;
   /** The node it drains into; null when it leaves the scheme. */
   downstream: number | null;
   /** Where it goes when it leaves the scheme. */
   mouth: "sea" | "sink" | "outside" | null;
   /** The nodes draining straight into it. */
   upstream: number[];
-  /** Whether outlets.json had it (else it sits at its bounding box's centre). */
-  located: boolean;
+}
+
+/**
+ * A stretch of the scheme's lines, carrying the outflow of `from` (summed):
+ * - "out": from a node's middle to its outlet;
+ * - "in": from an outlet to the middle of the node it drains into (`to`). Sub-basins
+ *   meeting at a confluence share their outlet, so they share this stretch: the lines
+ *   from their middles join there, as a Y;
+ * - "mouth": out of the scheme, from a node's outlet on in its direction (an arrow).
+ */
+export interface Line {
+  kind: "out" | "in" | "mouth";
+  from: number[];
+  /** The sub-basin the stretch lies in (hovering shows it). */
+  in: number;
+  path: LonLat[];
 }
 
 export interface Scheme {
   nodes: Map<number, Node>;
-  /** Bounding box of the outlets: west, south, east, north. */
+  lines: Line[];
+  /** Bounding box of the nodes: west, south, east, north. */
   bbox: [number, number, number, number];
 }
 
 /** The scheme for the sub-basins the model ran for. */
-export function buildScheme(model: ModelSeries, subBasins: SubBasin[], outlets: Outlets): Scheme {
+export function buildScheme(model: ModelSeries, subBasins: SubBasin[], file: NodeFile): Scheme {
   const byId = new Map(subBasins.map((b) => [b.id, b]));
   const nodes = new Map<number, Node>();
   for (const id of model.series.keys()) {
     const b = byId.get(id);
     if (!b) continue;
-    const o = outlets[id];
+    const f = file[id];
     const [w, s, e, n] = b.bbox;
     nodes.set(id, {
       id,
       name: b.name,
       area: b.area ?? NaN,
-      position: o ? [o[0], o[1]] : [(w + e) / 2, (s + n) / 2],
-      outlet: o ? [o[2], o[3]] : [(w + e) / 2, (s + n) / 2],
-      direction: o ? [o[4], o[5]] : [0, -1],
+      position: f ? [f[0], f[1]] : [(w + e) / 2, (s + n) / 2],
+      outlet: f?.length === 6 ? [f[2], f[3]] : null,
+      direction: f?.length === 6 ? [f[4], f[5]] : [0, -1],
       downstream: null,
       mouth: null,
       upstream: [],
-      located: Boolean(o),
     });
   }
   for (const node of nodes.values()) {
@@ -80,9 +95,32 @@ export function buildScheme(model: ModelSeries, subBasins: SubBasin[], outlets: 
       node.mouth = down === -999 ? "sea" : down === -888 ? "sink" : "outside";
     }
   }
-  const xs = [...nodes.values()].map((n) => n.position[0]);
-  const ys = [...nodes.values()].map((n) => n.position[1]);
-  return { nodes, bbox: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)] };
+
+  const xs = [...nodes.values()].flatMap((n) => [n.position[0], ...(n.outlet ? [n.outlet[0]] : [])]);
+  const ys = [...nodes.values()].flatMap((n) => [n.position[1], ...(n.outlet ? [n.outlet[1]] : [])]);
+  const bbox: Scheme["bbox"] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  // How far a mouth's arrow reaches out, in degrees of latitude.
+  const reach = Math.max(0.15, 0.04 * Math.max(bbox[2] - bbox[0], bbox[3] - bbox[1]));
+
+  const lines: Line[] = [];
+  const ins = new Map<string, Line>();
+  for (const node of nodes.values()) {
+    // Without a river, the line goes straight from the middle (as if that were the outlet).
+    const outlet = node.outlet ?? node.position;
+    if (node.outlet) lines.push({ kind: "out", from: [node.id], in: node.id, path: [node.position, node.outlet] });
+    if (node.downstream !== null) {
+      const key = `${node.downstream}:${outlet[0].toFixed(3)},${outlet[1].toFixed(3)}`;
+      const line = ins.get(key);
+      if (line) line.from.push(node.id);
+      else ins.set(key, { kind: "in", from: [node.id], in: node.downstream, path: [outlet, nodes.get(node.downstream)!.position] });
+    } else if (node.outlet) {
+      const k = Math.cos((outlet[1] * Math.PI) / 180);
+      const end: LonLat = [outlet[0] + (node.direction[0] * reach) / k, outlet[1] + node.direction[1] * reach];
+      lines.push({ kind: "mouth", from: [node.id], in: node.id, path: [outlet, end] });
+    }
+  }
+  lines.push(...ins.values());
+  return { nodes, lines, bbox };
 }
 
 // --- Periods ---------------------------------------------------------------------------

@@ -8,7 +8,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "network": "./scripts/build-network.sh",
-    "outlets": "node scripts/build-outlets.mjs"
+    "nodes": "node scripts/build-nodes.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "~9.4.0",
