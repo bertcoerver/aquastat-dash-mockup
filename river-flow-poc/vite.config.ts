@@ -15,8 +15,8 @@ export default defineConfig({
   },
   resolve: { alias: { "@portal": `${portal}/src`, "@portal-data": `${portal}/public/data` } },
   server: { port: 5175, fs: { allow: [".", portal] } },
-  // Five pages: the wind map as deck.gl layers (index.html) and on its own canvas
-  // (canvas.html), the lanes version (lanes.html), rain (rain.html) and
-  // evapotranspiration (et.html).
-  build: { rollupOptions: { input: ["index.html", "canvas.html", "lanes.html", "rain.html", "et.html"] } },
+  // Six pages: the wind map as deck.gl layers (index.html) and on its own canvas
+  // (canvas.html), the lanes version (lanes.html), rain (rain.html),
+  // evapotranspiration (et.html) and the water balance scheme (scheme.html).
+  build: { rollupOptions: { input: ["index.html", "canvas.html", "lanes.html", "rain.html", "et.html", "scheme.html"] } },
 });

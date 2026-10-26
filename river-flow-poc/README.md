@@ -34,6 +34,10 @@ There are two versions:
 - **[et.html](et.html): evapotranspiration in 3D** ([src/et-main.ts](src/et-main.ts),
   [src/et/](src/et/)): WaPOR's dekadal evapotranspiration rising as vapour off a tilted map,
   through a heat shimmer. See "Evapotranspiration" below.
+- **[scheme.html](scheme.html): the water balance as a scheme** ([src/scheme-main.ts](src/scheme-main.ts),
+  [src/scheme/balance.ts](src/scheme/balance.ts)): no particles, a major basin's sub-basins as a
+  diagram on the map: discharge as lines from one sub-basin to the next, storage change as dots,
+  precipitation and evapotranspiration as the sub-basins' colour. See "Water balance scheme" below.
 
 ## The wind map
 
@@ -177,11 +181,52 @@ evapotranspiration rising as vapour, the map shimmering beneath it where water g
   up, as a picture of it; a shimmer of the unmet demand (reference ET − AETI) would be the
   more physical choice.
 
+## Water balance scheme
+
+[scheme.html](scheme.html) is the schematic take: instead of every river, one node per SDG 6
+sub-basin and the model's balance around it, over a dekad, month or year (a timeline steps
+through them) or the whole record. `?basin=<major basin id>` opens a basin (7003 is the Nile,
+4025 the Danube).
+
+- **Storage change (ΔS)**: a dot in the middle of each sub-basin, its area the mean ΔS (the 98th
+  percentile of |ΔS| over the periods is 13 px), green when storage rises and red when it falls.
+- **Discharge (Q)**: a line from each sub-basin's dot through its outlet to the dot of the
+  sub-basin it drains into, as wide as its mean outflow. Widths are linear in Q (the basin's
+  biggest mean outflow over the record is 14 px), so they add up where rivers join: sub-basins
+  are split at confluences, so a tributary's sub-basin and the main river's above it share
+  their outlet, and the line below it is drawn once, as wide as both together (a Y). Where the
+  basin leaves the scheme (the sea, an inland sink) the line runs on past the outlet to an
+  arrow. A big river crossing a wide sub-basin near its edge makes a detour to the dot and back
+  (the Nile through Wadu Sayyak, a desert sub-basin of 71,000 km²).
+- **Precipitation and evapotranspiration**: the sub-basins (FAO's sub-basin tiles, as in the
+  portal) coloured by P − ET (brown: ET above P, teal: P above ET), P or ET, in mm/day, over
+  the 98th percentile of the periods' values.
+- **Hover** a sub-basin, line or dot for its balance in m³/s: Q in + P − ET − ΔS = Q out. It
+  closes exactly: the model's ΔS is defined that way (calc_runoff.js), and period values are
+  means of the dekads'.
+- **Scales are fixed per basin** (and per kind of period for ΔS and the colours), so stepping
+  or playing through the periods shows the changes.
+- **The model runs in the browser** for every outlet network of the basin, as the lanes page
+  does without the precomputed files (`basinBalance` in [src/basin-model.ts](src/basin-model.ts)):
+  the precomputed files only have Q and ΔS, and the scheme also needs P and ET. 2–7 s a basin.
+- **Middles and outlets** ([scripts/build-nodes.mjs](scripts/build-nodes.mjs), `npm run nodes`
+  → `public/data/nodes.json`, 380 kB, ~30 s). The middle: FAO's sub-basin tiles at zoom 5
+  rasterised into one global grid (~4 km cells); of each sub-basin's cells, the one nearest its
+  centroid among those at least half as far from its edge as its innermost cell, so the dot is
+  inside the sub-basin even when it's curved. (The tiles' own `CENTROID` property isn't used: a
+  centroid can lie outside a curved sub-basin.) The outlet: the end of the sub-basin's biggest
+  arc in the river network. 955 sub-basins have no arcs (mostly small coastal, island and desert
+  ones), so no outlet: their line goes straight from the dot, and a mouth gets no arrow.
+
+Next steps for a full water balance scheme: P and ET as flows into and out of each node (arrows
+or bars in m³/s, on the same scale as Q) instead of the colours, and labels on the main nodes.
+
 ## Run
 
 ```bash
 npm install
 npm run network   # once: builds public/data/rivers.bin from the shapefile (needs GDAL)
+npm run nodes     # after that: public/data/nodes.json (the scheme's middles and outlets; downloads the sub-basin tiles)
 npm run dev       # http://localhost:5175
 ```
 
