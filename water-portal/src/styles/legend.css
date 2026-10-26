@@ -88,6 +88,12 @@
 .legend-period > * {
   white-space: nowrap;
 }
+/* The period: its tooltip has the equation (wapor-legend.ts). */
+#wapor-period[title]:not([title=""]) {
+  cursor: help;
+  text-decoration: underline dotted var(--muted);
+  text-underline-offset: 3px;
+}
 .legend-period > :last-child {
   margin-left: auto;
   color: var(--muted);

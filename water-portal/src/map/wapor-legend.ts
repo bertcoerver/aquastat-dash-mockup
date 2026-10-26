@@ -64,6 +64,19 @@ function describe(maxGap: number | null) {
 
 const $ = (id: string) => document.getElementById(id)!;
 
+/** What each raster in an equation is, e.g. A[2025]: WaPOR's annual raster for 2025. */
+const BLOCK_KINDS: Record<string, string> = {
+  D: "D[…]: a dekadal raster, per day (n·D: n of its days)",
+  M: "M[…]: a monthly raster, the month's total",
+  A: "A[…]: an annual raster, the year's total",
+};
+
+/** The period's tooltip: how the map is made from WaPOR's rasters, and what they are. */
+function describeEquation(equation: string) {
+  const kinds = Object.keys(BLOCK_KINDS).filter((k) => equation.includes(`${k}[`));
+  return [`How this map is made:`, equation, "", ...kinds.map((k) => BLOCK_KINDS[k])].join("\n");
+}
+
 
 export interface WaporLegend {
   /** Show the legend for a period (null hides it). */
@@ -170,8 +183,10 @@ export function initWaporLegend({
   function showPeriod() {
     if (!lastPeriod) return;
     const { range, variable: v, label } = lastPeriod;
-    $("wapor-period").textContent =
+    const el = $("wapor-period");
+    el.textContent =
       units.per === "total" ? `Accumulated ${v.short} at ${fmtDay(range.end)}, since ${fmtDay(range.start)}` : label;
+    el.title = describeEquation(lastPeriod.equation);
   }
   function showPer() {
     showPeriod();
