@@ -14,7 +14,7 @@ import { bordersLayer } from "./layers/borders";
 import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
-import { basinSchemeLayers, type BasinScheme } from "./layers/basin-scheme";
+import { basinSchemeLayers, PARTICLES_ID, type BasinScheme } from "./layers/basin-scheme";
 import { terrainLayer } from "./layers/terrain";
 import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
@@ -300,6 +300,19 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     overlay.setProps({ layers: drawn() });
   }
 
+  // The scheme's particles move every frame (deck.gl draws on each of MapLibre's repaints).
+  let animating = false;
+  function animate() {
+    if (animating) return;
+    const frame = () => {
+      animating = Boolean(state.scheme?.particles) && state.view === "basin";
+      if (!animating) return;
+      map.triggerRepaint();
+      requestAnimationFrame(frame);
+    };
+    frame();
+  }
+
   /**
    * The layers as drawn: with the relief, the terrain first (it has to exist before
    * the others sample it) and the others draped on it, the marker and the symbols
@@ -307,10 +320,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
    * TileLayer still loads its tiles.
    */
   function drawn() {
-    if (!state.terrain) return layers().map((layer) => layer && layer.clone({ extensions: [...layer.props.extensions, HORIZON] }));
+    // (The particles are drawn off screen and pasted on, flat: no extensions.)
+    const plain = (layer: ReturnType<typeof layers>[number]) => !layer || layer.id.startsWith(PARTICLES_ID);
+    if (!state.terrain) return layers().map((layer) => (plain(layer) ? layer : layer.clone({ extensions: [...layer.props.extensions, HORIZON] })));
     const draped = layers().map(
       (layer) =>
-        layer &&
+        plain(layer) ? layer :
         layer.clone({
           // Layers of their own: TerrainExtension leaves its draw mode in the layer's
           // state, and a layer it had draped wouldn't be drawn once flat again.
@@ -472,6 +487,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (view === state.view) return;
       state.view = view;
       render();
+      animate();
     },
     setLayerVisible(layer, visible) {
       state.visible[layer] = visible;
@@ -537,6 +553,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (scheme?.key === state.scheme?.key) return;
       state.scheme = scheme;
       render();
+      animate();
     },
     setCountryFills(fills) {
       if (fills?.key === state.countryFills?.key) return;

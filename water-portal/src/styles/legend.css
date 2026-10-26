@@ -242,3 +242,39 @@
   fill: var(--muted);
   font: 400 10px/1 var(--mono);
 }
+/* The particles' settings (basin/scheme-map.ts): for now, sliders to find the best ones. */
+.particle-tuning:not([hidden]) {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 14px;
+}
+.particle-tuning .legend-quality-head {
+  white-space: nowrap;
+}
+.particle-tuning .legend-quality-head span {
+  font-family: var(--mono);
+  color: var(--ink, inherit);
+  text-transform: none;
+}
+.particle-tuning-copy {
+  justify-self: start;
+  margin-top: 2px;
+  font: 500 11px/1 var(--sans);
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.particle-tuning-select {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font: 400 12px/1.4 var(--sans);
+  color: inherit;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 2px 4px;
+}

@@ -94,7 +94,8 @@ water-portal/
     │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
-    │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, storage change dots
+    │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, storage change dots, particles
+    │       ├── river-particles.ts  Particles streaming down the rivers (river-flow-poc's wind map)
     │       └── marker.ts     The click marker
     ├── basin/              Basin view: the water balance of the selected sub-basin
     │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; fao_wapor_discharge.portal), and a network's series for the panel
@@ -267,7 +268,7 @@ water-portal/
 - **The water balance scheme** ([src/basin/scheme.ts](src/basin/scheme.ts), from
   river-flow-poc's `scheme.html`): with a major basin selected, the discharge and storage change
   maps of its sub-basins have a switch in the legend. Discharge: **Network** (lines along the
-  rivers, as wide as the discharge they carry) or **Sub-basins** (fills). Storage change:
+  rivers, as wide as the discharge they carry), **Particles** (see below) or **Sub-basins** (fills). Storage change:
   **Dots** (a dot on each sub-basin's river near its middle, its area the change, green rising,
   red falling) or **Sub-basins**. In a sub-basin, the line runs from each upstream sub-basin's
   outlet down the network to where the river leaves it; a piece carries the outflow of the
@@ -284,6 +285,17 @@ water-portal/
   simplified to ~500 m from FAO's `rivers_world_47950`. The river network
   (`public/data/rivers/<id>.bin`, 8.3 MB in all, up to ~490 kB a basin (the Amazon)) and the middles
   (200 kB) load on the first such map.
+- **Discharge as particles** ([src/map/layers/river-particles.ts](src/map/layers/river-particles.ts),
+  from river-flow-poc's wind map, `index.html`): the major basin's real rivers (every arc, not
+  simplified), each with its sub-basin's outflow × its share of the sub-basin's largest upstream
+  area, as wide as log(Q) (1–7 px over 2.5 powers of ten; smaller rivers left out), and 3,500
+  particles streaming down them. The rivers are drawn as a vector field into an offscreen texture
+  whenever the view changes, the particles move through it on the GPU and leave fading trails;
+  big rivers carry more of them as they're wider. While it shows, the map repaints every frame
+  (map.ts's `animate`). It needs WebGL 2 with float render targets, and isn't draped on the relief.
+  For now the legend has sliders for the particles' look (count, speed, trails, size, speed
+  contrast, river widths, how many rivers, their opacity) to find the best settings; **Copy
+  settings** copies them as JSON. The defaults are `PARTICLES` in `scheme-map.ts`.
 - **The Basin view's data** (PCP, AETI, and the water balance model's Q and ΔS) are files
   precomputed by [fao-wapor-discharge](../../fao-wapor-discharge)'s
   `python -m fao_wapor_discharge.portal --sub-basins public/data/sub-basins.json --out-dir public/data/model`

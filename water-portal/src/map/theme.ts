@@ -21,6 +21,9 @@ export interface MapTheme {
   schemeCasing: Color;
   storageRise: Color;
   storageFall: Color;
+  /** Discharge as particles: the rivers under them, and the particles. */
+  particleRiver: Color;
+  particle: Color;
   marker: Color;
   markerRing: Color;
 }
@@ -43,6 +46,8 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     schemeCasing: [255, 255, 255, 220],
     storageRise: [38, 166, 91, 255],
     storageFall: [215, 48, 39, 255],
+    particleRiver: [33, 113, 181, 255],
+    particle: [255, 255, 255, 255],
     marker: [178, 111, 18, 255],
     markerRing: [255, 255, 255, 255],
   },
@@ -63,6 +68,8 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     schemeCasing: [10, 18, 22, 220],
     storageRise: [52, 199, 104, 255],
     storageFall: [235, 64, 70, 255],
+    particleRiver: [38, 92, 135, 255],
+    particle: [235, 248, 255, 255],
     marker: [230, 169, 76, 255],
     markerRing: [13, 22, 27, 255],
   },
