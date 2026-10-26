@@ -11,6 +11,7 @@ import type { Feature, Position } from "geojson";
 import type { CountryProperties } from "./layers/countries";
 import type { MajorBasinProperties, SubBasinProperties } from "./layers/basins";
 import { FAO_TILES, localTiles } from "./layers/tile-urls";
+import { quietFetch } from "../panels/load-bar";
 
 export type LngLat = [number, number];
 
@@ -54,7 +55,7 @@ async function featureAt({ url, zoom }: { url: string; zoom: number }, [lng, lat
 }
 
 async function loadTile(url: string, tileIndex: { x: number; y: number; z: number }): Promise<Feature[]> {
-  const response = await fetch(url);
+  const response = await quietFetch(url);
   if (!response.ok) return [];
   return (await parse(await response.arrayBuffer(), MVTLoader, {
     mvt: { coordinates: "wgs84", tileIndex, shape: "geojson" },

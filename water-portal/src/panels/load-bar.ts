@@ -10,6 +10,9 @@
  * A body that's never read (a HEAD request, an error page nobody reads) stops counting
  * at the headers, or after BODY_TIMEOUT_MS at the latest.
  *
+ * Lookups nobody waits for (what's under the pointer) fetch with quietFetch instead,
+ * or every move of the mouse over the map would set it off.
+ *
  * Messages that only said "Loading…" are gone with it: a status that is LOADING still
  * holds things back like any other message, but shows nothing (see unlessLoading).
  */
@@ -24,6 +27,9 @@ const BODY_READERS = ["arrayBuffer", "blob", "bytes", "formData", "json", "text"
 export const LOADING = "Loading…";
 /** A status as it is shown: LOADING as nothing. */
 export const unlessLoading = (status: string) => (status === LOADING ? "" : status);
+
+/** fetch() that the bar doesn't count (the page's own, from before initLoadBar). */
+export const quietFetch: typeof fetch = window.fetch.bind(window);
 
 const root = document.documentElement;
 let pending = 0;
@@ -105,11 +111,10 @@ function begin() {
 
 /** Start counting requests. Call before anything fetches. */
 export function initLoadBar() {
-  const fetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const end = begin();
     try {
-      const response = await fetch(input, init);
+      const response = await quietFetch(input, init);
       if (!response.body) {
         end();
         return response;
