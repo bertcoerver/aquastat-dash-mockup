@@ -3,17 +3,19 @@
 A map of the world (MapLibre globe + deck.gl) under a top bar for choosing the view
 (Country / Basin / Local) and a date range. The map has no basemap: it shows FAO's
 M49 countries (or, in the Basin view, the SDG 6 major basins), with lakes and rivers
-on top. In the Local view, the map shows WaPOR's actual evapotranspiration for any
+on top. In the Local view, the map shows a WaPOR variable (actual or reference evapotranspiration and its parts, precipitation, NPP, …) for any
 selected range, to the day, added up from WaPOR's dekadal, monthly and annual rasters, and a play
 button moves the range forward as an animation; for a single dekad, a slider in its
 legend hides pixels whose
-NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, charts after FAO's
-Water Portal rank the world's major basins (or the selected major basin's
-sub-basins) by precipitation minus evapotranspiration, evapotranspiration and share of
-precipitation over the range, with the monthly cycle and, for a basin, precipitation against
-evapotranspiration per sub-basin; the legend's title switches between the charts' maps and the
-discharge and storage change from FAO's water balance model (precomputed; per major basin, or per
-sub-basin of the selected one), and the range ends at the model's latest dekad. The model's own panel (a sub-basin and
+NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, a panel
+built like the Country view's has three topics (rain and evaporation, water left, discharge), each
+with number tiles and charts about the selected major basin or the World: per group of major
+basins (by climate for rain and evaporation, by where the water goes for discharge and storage)
+against the average of the same days in the other years, the highest and
+lowest major basins, the same days every year (click a year to select it), and the selected
+basin's sub-basins. Precipitation and evapotranspiration come from WaPOR; discharge and storage
+change from FAO's water balance model (precomputed; per major basin, or per sub-basin of the
+selected one). Each tile and chart has its map, and the range ends at the model's latest dekad. The model's own panel (a sub-basin and
 everything upstream of it, with its time series and a Sankey diagram) is in the code but switched
 off for now (`MODEL_SHOWN` in
 `src/basin/water-balance.ts`); until then, picking a sub-basin, by name or on the map, selects
@@ -43,6 +45,7 @@ Other commands:
 | `npm run typecheck` | Only check the TypeScript for errors |
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
+| `npm run groups` | Rebuild the major basins' groups for the Basin view: where their water goes and their climate (`public/data/basin-groups.json`; needs GDAL, downloads ~400 MB the first time, takes ~6 min) |
 | `npm run tiles` | Rebuild the country and border tiles (needs `tippecanoe`; downloads ~220 MB the first time) |
 
 ## Project layout
@@ -63,7 +66,8 @@ water-portal/
 ├── scripts/                Data preparation, not part of the website
 │   ├── build-tiles.sh      Download M49 polygons and UN boundary lines → tippecanoe → public/tiles/
 │   ├── build-lists.mjs     Country / basin / sub-basin lists for the top bar → public/data/
-│   └── build-country-info.mjs  Each country's region (UNSD M49) and centre → public/data/
+│   ├── build-country-info.mjs  Each country's region (UNSD M49) and centre → public/data/
+│   └── build-basin-groups.mjs  Each major basin's ocean (or inland) and aridity class → public/data/
 ├── data/                   Source data: downloaded boundaries (not committed) and
 │                           fao_sb_ids.json (sub-basin routes and areas, from fao-wapor-discharge)
 └── src/                    The application code
@@ -94,9 +98,10 @@ water-portal/
     │   ├── variables.ts    PCP / AETI / Q / ΔS: labels, units, colour scales
     │   ├── timeseries.ts   Time series charts (drag to choose the period)
     │   ├── sankey.ts       Sankey diagram of the network's water balance
-    │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, and per month (BigQuery)
-    │   ├── stats-cards.ts  The statistics charts (world, or a major basin) and each one's map
-    │   ├── basin-stats.ts  Statistics in the panel: preview / pin, map colours, legend, tooltip
+    │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, the same days in other years, and per month (BigQuery)
+    │   ├── stats-cards.ts  The statistics topics: tiles, charts and each one's map
+    │   ├── groups.ts       The major basins' groups: by where the water goes, by climate
+    │   ├── basin-stats.ts  Statistics in the panel: topics, preview / pin, map colours, legend, tooltip
     │   └── water-balance.ts  Connects selection, date range, model, map and panel
     ├── country/            Country view: AQUASTAT statistics and the maps that go with them
     │   ├── data.ts         Loads a topic's AQUASTAT variables in BigQuery; values per country and region
@@ -143,10 +148,20 @@ water-portal/
   regions with some split into sub-regions), from UNSD's M49 table.
 - **Basin statistics** read the same WaPOR v3 L1 dekadal zonal statistics as the model
   (`fao-maps-review.zonal_stats_openEO.L1-PCP-D_…` and `L1-AETI-D_…`, 2018 to Dec 2025): one
-  query per range for all ~7,600 sub-basins (~250 KB, ~3 s, after the range rests for 0.4 s), and
-  one for the monthly cycle. Totals are each sub-basin's mean daily rate × the days covered; major
-  basins are area-weighted over their sub-basins. Without a pin, the map shows the first chart's
-  map, except with a sub-basin selected: then it shows the model's values as before.
+  query per range for all ~7,600 sub-basins (~250 KB, ~3 s, after the range rests for 0.4 s), one
+  for the same days in every other year of the record (~1.2 MB, ~5 s), and one for the monthly
+  cycle. Totals are each sub-basin's mean daily rate × the days covered; major basins, groups and
+  the World are area-weighted (or, over the basin, summed) over their sub-basins, and their
+  discharge and storage change summed over their major basins. A range of more than a year is
+  compared with the other spans of its length that fit in the record, so with fewer than 3 of
+  them (a range of 3 years or more) there is no comparison. The groups (`npm run groups`):
+  **where the water goes** is the ocean most of a basin's area drains into (each sub-basin
+  followed downstream to its outlet; the outlet's coast votes for the nearest of Marine Regions'
+  Global Oceans and Seas, Baltic counted with the Atlantic, Black Sea with the Mediterranean), or
+  inland (an inland sink, or an outlet "to the sea" more than 0.5° from any ocean: the Caspian);
+  **climate** is the UNEP aridity class of WaPOR L1 PCP-A over RET-A, 2018–2025, area-weighted.
+  WaPOR's precipitation stops at 60°N, so 17 northern basins have no climate group. Without a pin, the map shows the topic's first tile (or what the legend picked),
+  except with a sub-basin selected while the model's panel is shown.
 - **Country circles** (proportional symbols) are drawn without a depth test like every layer,
   so only those on the near side of the globe are kept.
 - **Date rules** are documented at the top of

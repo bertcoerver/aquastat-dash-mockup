@@ -16,7 +16,8 @@
  *
  * The markup lives in index.html.
  */
-import { facing, type WaterMap } from "../map/map";
+import type { WaterMap } from "../map/map";
+import { flyTo, type Box } from "../map/fly-to";
 import { mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale, type ColorScale } from "../basin/variables";
@@ -54,8 +55,6 @@ export interface CountryPanel {
   /** The country under the pointer on the map (null: none). */
   hover(m49: number | null): void;
 }
-
-type Box = [number, number, number, number];
 
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
 
@@ -480,29 +479,13 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   // --- The camera ------------------------------------------------------------------------------
-  /**
-   * Fly to an area's countries and the selected country. Where they don't fit in one
-   * view (the country is far round the globe), show the whole globe if both are on its
-   * near side, else the area alone: it was what was clicked.
-   */
+  /** Fly to an area's countries, and the selected country where they fit with it (see flyTo). */
   function flyToArea(area: number) {
     const members = regions.find((r) => r.code === area)?.members ?? [area];
-    const own = members.filter((m49) => boxes.has(m49));
-    if (!own.length) return;
+    const extent = (m49: number) => ({ box: boxes.get(m49)!, center: centerOf.get(m49) });
     const sel = state.selection?.country?.m49;
-    const extra = sel !== undefined && !members.includes(sel) && boxes.has(sel) ? sel : null;
-    const region = unionBox(own.map((m49) => boxes.get(m49)!));
-    const both = extra === null ? region : unionBox([region, boxes.get(extra)!]);
-    if (fits(both)) return map.showBox(both);
-    const middle = meanCenter(own.map((m49) => [centerOf.get(m49) ?? boxCenter(boxes.get(m49)!), boxArea(boxes.get(m49)!)]));
-    const there = extra === null ? null : centerOf.get(extra) ?? boxCenter(boxes.get(extra)!);
-    if (there && facing(middle, there) > 0.2) return showGlobe(meanCenter([[middle, 1], [there, 1]]));
-    if (fits(region)) return map.showBox(region);
-    showGlobe(middle);
-  }
-
-  function showGlobe(center: [number, number]) {
-    map.showPoint(center, Math.min(map.map.getZoom(), GLOBE_ZOOM));
+    const extra = sel !== undefined && !members.includes(sel) && boxes.has(sel) ? extent(sel) : null;
+    flyTo(map, members.filter((m49) => boxes.has(m49)).map(extent), extra);
   }
 
   // --- Downloads ----------------------------------------------------------------------------------
@@ -543,49 +526,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       else showMapTooltip();
     },
   };
-}
-
-/** The zoom that shows the whole globe. */
-const GLOBE_ZOOM = 1.4;
-/** The widest box showBox can frame on the globe, in degrees of longitude. */
-const MAX_SPAN = 170;
-
-const lonSpan = ([w, , e]: Box) => (((e - w) % 360) + 360) % 360;
-const fits = (box: Box) => lonSpan(box) <= MAX_SPAN && box[3] - box[1] <= MAX_SPAN;
-const boxCenter = (box: Box): [number, number] => {
-  const lon = box[0] + lonSpan(box) / 2;
-  return [lon > 180 ? lon - 360 : lon, (box[1] + box[3]) / 2];
-};
-/** Roughly a box's area on the globe (square degrees at its middle latitude). */
-const boxArea = (box: Box) => Math.max(lonSpan(box), 0.1) * Math.max(box[3] - box[1], 0.1) * Math.cos(((box[1] + box[3]) / 2) * (Math.PI / 180));
-
-/** The smallest box around `list`: around the globe, it leaves out the widest gap in longitude. */
-function unionBox(list: Box[]): Box {
-  const arcs = list.map((b) => [b[0], lonSpan(b)]).sort((a, b) => a[0] - b[0]);
-  // Walk east from the westernmost start, keeping how far east the arcs so far reach.
-  let reach = arcs[0][0] + arcs[0][1];
-  let gap = { width: -Infinity, west: arcs[0][0] };
-  for (const [start, span] of arcs.slice(1)) {
-    if (start - reach > gap.width) gap = { width: start - reach, west: start };
-    reach = Math.max(reach, start + span);
-  }
-  // …and the gap from the furthest reach round to the first start.
-  if (arcs[0][0] + 360 - reach > gap.width) gap = { width: arcs[0][0] + 360 - reach, west: arcs[0][0] };
-  const west = gap.west;
-  const east = west + Math.min(359.9, 360 - Math.max(0, gap.width));
-  return [west, Math.min(...list.map((b) => b[1])), east > 180 ? east - 360 : east, Math.max(...list.map((b) => b[3]))];
-}
-
-/** The weighted mean of points on the globe. */
-function meanCenter(points: [[number, number], number][]): [number, number] {
-  const r = Math.PI / 180;
-  let [x, y, z] = [0, 0, 0];
-  for (const [[lon, lat], w] of points) {
-    x += w * Math.cos(lat * r) * Math.cos(lon * r);
-    y += w * Math.cos(lat * r) * Math.sin(lon * r);
-    z += w * Math.sin(lat * r);
-  }
-  return [Math.atan2(y, x) / r, Math.atan2(z, Math.hypot(x, y)) / r];
 }
 
 const csvCell = (v: string | number) =>

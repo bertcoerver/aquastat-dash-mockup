@@ -81,6 +81,9 @@ export function limitBasinDekads(last: number) {
   basinLast = clamp(last, dayDk(WAPOR_FIRST_DAY), MAX_DK);
 }
 
+/** Basin view: the latest dekad that can be selected. */
+export const basinLastDekad = () => basinLast;
+
 /** The first day a view's range may start on. */
 export const firstDay = (view: View) => (view === "country" ? 0 : WAPOR_FIRST_DAY);
 

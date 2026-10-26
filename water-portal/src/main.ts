@@ -1,4 +1,5 @@
 import { initBasinStats } from "./basin/basin-stats";
+import type { BasinGroups } from "./basin/groups";
 import { loadModelFiles } from "./basin/model";
 import { MODEL_SHOWN, initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
@@ -108,11 +109,12 @@ const waterMap = createMap(
 const { map, setView, setLayerVisible, setWapor, setWaporMaxGap, setWaporRamp, setSelection, showBox, showPoint, setHoveredSubBasin } =
   waterMap;
 
-const [countries, basins, subBasins, countryInfo] = await Promise.all([
+const [countries, basins, subBasins, countryInfo, basinGroups] = await Promise.all([
   loadList<Country>("countries"),
   loadList<MajorBasin>("major-basins"),
   loadList<SubBasin>("sub-basins"),
   loadData<CountryInfo>("country-info"),
+  loadData<BasinGroups>("basin-groups"),
 ]);
 const upstreamOf = upstreamFinder(subBasins);
 // Basin view: the water balance model for the selected sub-basin (map colours, panel).
@@ -128,7 +130,9 @@ const basinStats = initBasinStats({
   map: waterMap,
   majorBasins: basins,
   subBasins,
+  groups: basinGroups,
   setMapOverride: (override) => waterBalance.setMapOverride(override),
+  setRange: (range) => toolbarApi?.setRange(range),
 });
 // Country view: AQUASTAT statistics for the selected country (panel, map colours).
 const countryPanel = initCountryPanel({

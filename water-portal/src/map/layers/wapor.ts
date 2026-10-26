@@ -1,7 +1,8 @@
 /*
  * WaPOR v3 level 1 (global) variables: actual evapotranspiration and interception
  * (AETI), its parts transpiration (T), evaporation (E) and interception (I), net
- * primary production (NPP), all at 300 m, and precipitation (PCP, about 5 km). They're
+ * primary production (NPP), all at 300 m, precipitation (PCP, about 5 km) and reference
+ * evapotranspiration (RET, about 30 km: 0.3125° × 0.25°, AgERA5's grid). They're
  * read straight from FAO's bucket (it sends CORS headers). WaPOR publishes one COG per
  * dekad, and for some variables per calendar month and calendar year too (see
  * WAPOR_VARIABLES). A range is added up from one or more of them (see wapor-plan.ts for
@@ -53,7 +54,7 @@ export type WaporResolution = "dekadal" | "monthly" | "annual" | "custom";
 
 const RESOLUTIONS: Record<BlockKind, WaporResolution> = { D: "dekadal", M: "monthly", A: "annual" };
 
-export type WaporVariableId = "AETI" | "T" | "E" | "I" | "PCP" | "NPP" | "PCP-AETI" | "WP";
+export type WaporVariableId = "AETI" | "RET" | "T" | "E" | "I" | "PCP" | "NPP" | "PCP-AETI" | "WP";
 
 export interface WaporVariable {
   id: WaporVariableId;
@@ -111,6 +112,18 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     l2: true,
     quality: true,
     ramp: { quantities: [0.1, 2.5, 5, 7.5, 10], colors: ["#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"] },
+  },
+  {
+    id: "RET",
+    label: "Reference evapotranspiration",
+    short: "RET",
+    unit: "mm/day",
+    perPixel: "m³/day",
+    pixel: "30 km",
+    scale: 0.1,
+    kinds: ["D", "M", "A"],
+    quality: false, // (another grid)
+    ramp: { quantities: [0, 2, 4, 6, 8], colors: ["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"] },
   },
   {
     id: "T",

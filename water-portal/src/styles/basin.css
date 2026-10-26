@@ -597,6 +597,10 @@
   padding-top: 0;
   border-top: 0;
 }
+/* As many tiles as the topic has, side by side. */
+#bs-stats {
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+}
 .bs-heading {
   margin: 0 0 2px;
   font: 600 14px/1.3 var(--sans);

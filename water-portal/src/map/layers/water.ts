@@ -23,8 +23,11 @@ export function lakesLayer({ color, visible }: { color: Color; visible: boolean 
   });
 }
 
-/** Rivers, wider for higher stream (Strahler) order. */
-export function riversLayer({ color, visible }: { color: Color; visible: boolean }) {
+/**
+ * Rivers, wider for higher stream (Strahler) order. `hidden`: leave out the rivers of
+ * these sub-basins (drawn otherwise, as the river discharge map); `key` names the set.
+ */
+export function riversLayer({ color, visible, hidden }: { color: Color; visible: boolean; hidden?: { key: string; subBasins: Set<number> } }) {
   return new MVTLayer<RiverProperties>({
     id: "rivers",
     data: FAO_TILES.rivers,
@@ -33,7 +36,10 @@ export function riversLayer({ color, visible }: { color: Color; visible: boolean
     maxZoom: 8,
     onTileError: ignoreMissingTile,
     uniqueIdProperty: "SUBBAS_ID",
-    getLineColor: color,
+    getLineColor: hidden
+      ? (f: Feature) => (hidden.subBasins.has((f.properties as RiverProperties).SUBBAS_ID) ? [0, 0, 0, 0] : color)
+      : color,
+    updateTriggers: { getLineColor: hidden?.key },
     // 250 m per Strahler order, so small streams fade out as you zoom out.
     getLineWidth: (f: Feature) => (f.properties as RiverProperties).Strahler,
     lineWidthUnits: "meters",

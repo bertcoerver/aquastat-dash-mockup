@@ -91,6 +91,27 @@ const map = new maplibregl.Map({
 });
 map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
 
+/**
+ * Turns the relief on and off, in whichever mode was picked last. MapLibre's own
+ * TerrainControl only knows about MapLibre terrain; this one borrows its icon.
+ */
+const terrainButton = document.createElement("button");
+terrainButton.type = "button";
+terrainButton.innerHTML = '<span class="maplibregl-ctrl-icon" aria-hidden="true"></span>';
+terrainButton.addEventListener("click", () => setTerrain(state.terrain === "none" ? lastRelief : "none"));
+map.addControl(
+  {
+    onAdd() {
+      const group = document.createElement("div");
+      group.className = "maplibregl-ctrl maplibregl-ctrl-group";
+      group.append(terrainButton);
+      return group;
+    },
+    onRemove() {},
+  },
+  "bottom-right",
+);
+
 const overlay = new MapboxOverlay({ interleaved: true, layers: [], getTooltip });
 map.on("load", () => {
   map.addControl(overlay);
@@ -217,6 +238,10 @@ function render() {
   }
   overlay.setProps({ layers: buildLayers() });
   $<HTMLInputElement>("drape").disabled = state.terrain !== "deck";
+  const on = state.terrain !== "none";
+  terrainButton.className = on ? "maplibregl-ctrl-terrain-enabled" : "maplibregl-ctrl-terrain";
+  terrainButton.title = on ? "Disable terrain" : "Enable terrain";
+  terrainButton.setAttribute("aria-pressed", String(on));
 }
 
 function getTooltip({ object, layer }: { object?: { properties: Record<string, unknown> }; layer?: Layer | null }) {
@@ -236,11 +261,18 @@ function setStatus(key: string, msg: string) {
 
 // --- controls ---------------------------------------------------------------
 
-for (const input of document.querySelectorAll<HTMLInputElement>('input[name="terrain"]')) {
-  input.addEventListener("change", () => {
-    state.terrain = input.value as TerrainMode;
-    render();
-  });
+/** The relief mode the map-corner button turns back on. */
+let lastRelief: Exclude<TerrainMode, "none"> = state.terrain === "none" ? "deck" : state.terrain;
+
+const terrainInputs = document.querySelectorAll<HTMLInputElement>('input[name="terrain"]');
+function setTerrain(mode: TerrainMode) {
+  state.terrain = mode;
+  if (mode !== "none") lastRelief = mode;
+  for (const input of terrainInputs) input.checked = input.value === mode;
+  render();
+}
+for (const input of terrainInputs) {
+  input.addEventListener("change", () => setTerrain(input.value as TerrainMode));
 }
 const exInput = $<HTMLInputElement>("exaggeration");
 exInput.value = String(state.exaggeration);

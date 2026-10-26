@@ -9,6 +9,8 @@
  *   sub-basin missing a dekad isn't counted short.
  * - loadMonthly: PCP and AETI per calendar month of the range, area-weighted over all
  *   sub-basins or those of one major basin.
+ * - loadWindows: every sub-basin's mean daily PCP and AETI over each of several ranges
+ *   (the same days in other years: see sameDays), for comparing the period with them.
  *
  * Results are kept for the session; a failed query is forgotten, so it can be retried.
  */
@@ -57,8 +59,14 @@ const dekadOf = (iso: string) => {
 const daysIn = ({ start, end }: DekadRange) =>
   Math.round((Date.parse(isoEnd(end)) - Date.parse(isoStart(start))) / 86400000) + 1;
 
+export interface WindowRates {
+  /** Per sub-basin, mean mm/day in each of the ranges asked for, in their order (NaN: no data). */
+  sub: Map<number, { pcp: Float64Array; aeti: Float64Array }>;
+}
+
 const periods = new Map<string, Promise<PeriodStats>>();
 const monthlies = new Map<string, Promise<Monthly>>();
+const windowSets = new Map<string, Promise<WindowRates>>();
 
 export function loadPeriod(range: DekadRange): Promise<PeriodStats> {
   const key = `${range.start}-${range.end}`;
@@ -142,6 +150,45 @@ GROUP BY m ORDER BY m`);
     pcp: rows.map((r) => r.p ?? NaN),
     aeti: rows.map((r) => r.e ?? NaN),
   };
+}
+
+/** Mean daily PCP and AETI per sub-basin over each of `ranges` (one row per sub-basin). */
+export function loadWindows(ranges: DekadRange[]): Promise<WindowRates> {
+  const key = ranges.map((r) => `${r.start}-${r.end}`).join(",");
+  let load = windowSets.get(key);
+  if (!load) {
+    load = queryWindows(ranges);
+    load.catch(() => windowSets.delete(key));
+    windowSets.set(key, load);
+  }
+  return load;
+}
+
+async function queryWindows(ranges: DekadRange[]): Promise<WindowRates> {
+  const windows = ranges
+    .map((r, k) => (k ? `STRUCT(${k}, DATE '${isoStart(r.start)}', DATE '${isoStart(r.end)}')` : `STRUCT(0 AS k, DATE '${isoStart(r.start)}' AS d0, DATE '${isoStart(r.end)}' AS d1)`))
+    .join(", ");
+  const perWindow = (table: string) => `SELECT FAO_SB_ID AS id, w.k, SAFE_DIVIDE(SUM(mean * ${DAYS}), SUM(${DAYS})) AS rate
+  FROM ${table} JOIN w ON DATE(start_datetime) BETWEEN w.d0 AND w.d1 GROUP BY id, k`;
+  const rows = await query<{ id: number; k: number[]; p: number[]; e: number[] }>(`WITH w AS (SELECT * FROM UNNEST([${windows}])),
+pw AS (${perWindow(PCP)}), ew AS (${perWindow(AETI)})
+SELECT pw.id,
+  ARRAY_AGG(pw.k ORDER BY pw.k) AS k,
+  ARRAY_AGG(IFNULL(ROUND(pw.rate, 4), ${NONE}) ORDER BY pw.k) AS p,
+  ARRAY_AGG(IFNULL(ROUND(ew.rate, 4), ${NONE}) ORDER BY pw.k) AS e
+FROM pw LEFT JOIN ew USING (id, k) GROUP BY pw.id`);
+  const sub = new Map<number, { pcp: Float64Array; aeti: Float64Array }>();
+  const value = (v: number) => (v === NONE ? NaN : v);
+  for (const row of rows) {
+    const pcp = new Float64Array(ranges.length).fill(NaN);
+    const aeti = new Float64Array(ranges.length).fill(NaN);
+    row.k.forEach((k, i) => {
+      pcp[k] = value(row.p[i]);
+      aeti[k] = value(row.e[i]);
+    });
+    sub.set(row.id, { pcp, aeti });
+  }
+  return { sub };
 }
 
 async function query<T>(sql: string): Promise<T[]> {

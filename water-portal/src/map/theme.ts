@@ -16,6 +16,8 @@ export interface MapTheme {
   basinBorder: Color;
   water: Color; // lakes
   river: Color;
+  /** The river discharge map's colours, low to high (CSS): faint small rivers, strong big ones. */
+  discharge: string[];
   marker: Color;
   markerRing: Color;
 }
@@ -34,6 +36,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     basinBorder: [150, 112, 70, 255],
     water: [62, 138, 189, 255],
     river: [0, 0, 138, 200],
+    discharge: ["#a6cbe3", "#6baed6", "#4292c6", "#2171b5", "#08519c", "#08306b"],
     marker: [178, 111, 18, 255],
     markerRing: [255, 255, 255, 255],
   },
@@ -50,6 +53,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     basinBorder: [190, 150, 100, 255],
     water: [70, 150, 200, 255],
     river: [0, 0, 138, 200],
+    discharge: ["#2c5c7e", "#2f7bb0", "#3f9ad6", "#6cb8ea", "#a6d6f5", "#e3f4ff"],
     marker: [230, 169, 76, 255],
     markerRing: [13, 22, 27, 255],
   },

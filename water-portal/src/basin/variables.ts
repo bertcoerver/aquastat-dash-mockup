@@ -66,6 +66,8 @@ export interface ColorScale {
   gradient: string;
   /** Legend ticks: value and position along the ramp (0–1). */
   ticks: { value: number; at: number }[];
+  /** The values at the ends of the ramp ([0, 0]: no values). */
+  domain: [number, number];
 }
 
 /** A colour scale fitted to `values` (the sub-basins' period means). */
@@ -93,7 +95,7 @@ export function rampScale(
     return stops[i].map((c, k) => (k === 3 ? 255 : Math.round(c + (stops[i + 1][k] - c) * f))) as Color;
   };
 
-  if (!finite.length) return { color: () => null, gradient, ticks: [] };
+  if (!finite.length) return { color: () => null, gradient, ticks: [], domain: [0, 0] };
   const q = cut / 100;
   const lo = domain ? domain[0] : quantile(finite, q);
   const hi = domain ? domain[1] : quantile(finite, 1 - q);
@@ -104,6 +106,7 @@ export function rampScale(
       color: (v) => (Number.isFinite(v) ? at((v / m + 1) / 2) : null),
       gradient,
       ticks: [-m, -m / 2, 0, m / 2, m].map((value) => ({ value, at: (value / m + 1) / 2 })),
+      domain: [-m, m],
     };
   }
 
@@ -120,7 +123,7 @@ export function rampScale(
     if (values.length > 6) values = values.filter((v) => Number.isInteger(Math.log10(v)));
     if (values.length < 2) values = [10 ** a, 10 ** b];
     const ticks = values.map((value) => ({ value, at: t(value) }));
-    return { color: (v) => (Number.isFinite(v) ? at(t(v)) : null), gradient, ticks };
+    return { color: (v) => (Number.isFinite(v) ? at(t(v)) : null), gradient, ticks, domain: [10 ** a, 10 ** b] };
   }
 
   const span = hi - lo || 1;
@@ -128,6 +131,7 @@ export function rampScale(
     color: (v) => (Number.isFinite(v) ? at((v - lo) / span) : null),
     gradient,
     ticks: [0, 0.25, 0.5, 0.75, 1].map((f) => ({ value: lo + f * span, at: f })),
+    domain: [lo, lo + span],
   };
 }
 
