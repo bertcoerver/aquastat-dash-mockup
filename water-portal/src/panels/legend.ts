@@ -8,10 +8,11 @@
  *
  * - a colour ramp with ticks, also a menu of how much of the values it spans (ramp-menu.ts);
  * - classes, whose swatches switch them on and off on the map;
- * - sizes: three line widths or circles, labelled with their values.
+ * - sizes: three line widths, circles or bars, labelled with their values.
  *
  * A view can put its own controls in a section (extra: under the note; after: under
- * the key). Expects this markup (see index.html), the sections are added after the title:
+ * the key). A padlock in the title locks the ranges: each map keeps the colour range or
+ * sizes it has (hold), so other periods and places compare; the view draws it again. Expects this markup (see index.html), the sections are added after the title:
  *
  *   <aside class="legend">
  *     <div class="legend-title"><button class="title-menu" …>…</button></div>
@@ -35,8 +36,8 @@ export type LegendKey =
   | { kind: "ramp"; gradient: string; ticks: Tick[]; fixed?: boolean }
   /** `state`: shown on the map, switched off, or none of the picked places fall in it. */
   | { kind: "classes"; items: { label: string; background: string; state: "on" | "off" | "absent" }[] }
-  /** `size`: the line's width or the circle's radius, px; `sign` goes before the value. */
-  | { kind: "lines" | "circles"; items: { value: number; size: number; color: string; sign?: string }[] };
+  /** `size`: the line's width, the circle's radius or the bar's height, px; `sign` goes before the value. */
+  | { kind: "lines" | "circles" | "bars"; items: { value: number; size: number; color: string; sign?: string }[] };
 
 export interface LegendLayer {
   slot: string;
@@ -64,6 +65,15 @@ export interface LayerLegend {
   section(slot: string): LegendSection;
   /** Show these layers (null: hide the legend). */
   show(layers: LegendLayer[] | null): void;
+  /**
+   * A map's range (its colours' domain, the value of its biggest size): `range` as it
+   * is, or with the lock on, the one first given for `key` (the map, and its unit) since.
+   */
+  hold<T>(key: string, range: T): T;
+  /** Changes as the lock is switched (for the map's cache keys). */
+  lockKey(): number;
+  /** Lock the ranges as they are, as the padlock does (if not locked yet). */
+  lock(): void;
 }
 
 interface Options {
@@ -78,6 +88,8 @@ interface Options {
   units?: { options(): { options: MenuOption[]; current: string | null }; onPick(id: string): void; title(): string };
   /** A class's swatch clicked. */
   onClass?(slot: string, index: number): void;
+  /** The lock switched: draw the maps again. */
+  onLock(): void;
 }
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -96,7 +108,7 @@ export function toggled(ids: string[], id: string): string[] {
 }
 
 /** How a slot reads in the checklist, to the right of a map. */
-export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lines", dots: "dots", circles: "circles", rain: "rain", vapour: "vapour" };
+export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lines", dots: "dots", circles: "circles", bars: "3D bars", rain: "rain", vapour: "vapour" };
 
 /** A round number at or below x (1, 2 or 5 × a power of ten), for a key's sizes. */
 export function nice(x: number) {
@@ -145,9 +157,18 @@ export function ticksHtml(ticks: Tick[]) {
   return ticks.map((t) => `<span style="left:${t.at * 100}%">${Number.isFinite(t.value) ? fmtStop(t.value, span) : "–"}</span>`).join("");
 }
 
-export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, ramp, units, onClass }: Options): LayerLegend {
+export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, ramp, units, onClass, onLock }: Options): LayerLegend {
   const menuButton = aside.querySelector<HTMLButtonElement>(".legend-title .title-menu")!;
   const menu = initTitleMenu(menuButton, options, onToggle, { multi: true });
+  // The ranges held while locked, by map and unit (null: unlocked).
+  let held: Map<string, unknown> | null = null;
+  let lockKey = 0;
+  const onToggleLock = (locked: boolean) => {
+    held = locked ? new Map() : null;
+    lockKey++;
+    onLock();
+  };
+  const padlock = initLock(aside, onToggleLock);
 
   interface Parts extends LegendSection {
     title: HTMLElement;
@@ -241,10 +262,11 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     p.periodRow.hidden = !key && !layer.period;
     p.ramp.hidden = p.ticks.hidden = key?.kind !== "ramp";
     p.classes.hidden = key?.kind !== "classes";
-    p.sizes.toggleAttribute("hidden", key?.kind !== "lines" && key?.kind !== "circles");
+    p.sizes.toggleAttribute("hidden", key?.kind !== "lines" && key?.kind !== "circles" && key?.kind !== "bars");
     p.status.textContent = layer.status ?? "";
     if (key?.kind === "ramp") {
-      p.rampMenu?.setEnabled(!key.fixed);
+      // Locked, there's nothing to pick either.
+      p.rampMenu?.setEnabled(!key.fixed && !held);
       p.ramp.style.background = key.gradient;
       p.ticks.innerHTML = ticksHtml(key.ticks);
     } else if (key?.kind === "classes") {
@@ -265,14 +287,15 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       `title="${off ? "Show" : "Hide"} on the map" style="background:${background}"></button>${esc(label)}</li>`;
   }
 
-  /** Three line widths or circles side by side, each labelled with its value. */
-  function drawSizes(svg: SVGSVGElement, key: Extract<LegendKey, { kind: "lines" | "circles" }>) {
+  /** Three line widths, circles or bars side by side, each labelled with its value. */
+  function drawSizes(svg: SVGSVGElement, key: Extract<LegendKey, { kind: "lines" | "circles" | "bars" }>) {
     const width = aside.clientWidth - 24 || 220;
     const step = width / key.items.length;
     const top = Math.max(...key.items.map((k) => Math.abs(k.value)));
     const biggest = Math.max(...key.items.map((k) => k.size));
-    const height = key.kind === "circles" ? Math.max(34, 2 * biggest + 6) : 34;
-    const y = height / 2;
+    const height = key.kind === "circles" ? Math.max(34, 2 * biggest + 6) : key.kind === "bars" ? Math.max(34, biggest + 6) : 34;
+    // (Bars stand on the bottom, labelled at their middle.)
+    const y = key.kind === "bars" ? height - 3 - biggest / 2 : height / 2;
     const label = (x: number, v: number, sign = "") => `<text x="${x}" y="${y + 5}">${sign}${fmtStop(v, top)}</text>`;
     svg.innerHTML = key.items
       .map((k, i) => {
@@ -280,6 +303,9 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
         if (key.kind === "lines") {
           return `<line x1="${x + 1}" y1="${y}" x2="${x + 28}" y2="${y}" stroke="${k.color}" stroke-width="${k.size}" stroke-linecap="round"/>` +
             label(x + 34, k.value, k.sign);
+        }
+        if (key.kind === "bars") {
+          return `<rect x="${x + 1}" y="${height - 3 - k.size}" width="9" height="${k.size}" rx="1" fill="${k.color}"/>` + label(x + 16, k.value, k.sign);
         }
         const cx = x + Math.min(biggest, step / 3);
         return `<circle cx="${cx}" cy="${y}" r="${k.size}" fill="${k.color}" class="key-dot"/>` + label(cx + k.size + 5, k.value, k.sign);
@@ -300,6 +326,17 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       const several = layers.length > 1;
       menu.setLabel(several ? `${layers.length} layers on the map` : layers[0].title);
       for (const [slot, p] of sections) showSection(p, layers.find((l) => l.slot === slot) ?? null, several);
+    },
+    hold(key, range) {
+      if (!held) return range;
+      if (!held.has(key)) held.set(key, range);
+      return held.get(key) as typeof range;
+    },
+    lockKey: () => lockKey,
+    lock() {
+      if (padlock.locked) return;
+      padlock.set(true);
+      onToggleLock(true);
     },
   };
 }

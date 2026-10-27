@@ -3,6 +3,7 @@ import { MVTLayer, type GeoBoundingBox } from "@deck.gl/geo-layers";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { Feature, Position } from "geojson";
 import type { Color } from "../theme";
+import type { Timing } from "../tween";
 import { LOCAL_BOUNDS, geoBounds, tileOutlines } from "./basins";
 import { localTiles, ignoreMissingTile } from "./tile-urls";
 
@@ -16,7 +17,7 @@ export interface CountryProperties {
  * it's what a click on the map hits. The borders are a separate layer (borders.ts).
  * The selected country (by M49 code) is filled with `selectedColor`, unless the
  * countries have their own colours (`fills`: the Country view's map), which `key`
- * names (deck.gl only redraws the colours when it changes).
+ * names (deck.gl only redraws the colours when it changes), eased in by `transition`.
  */
 export function countriesLayer({
   color,
@@ -24,12 +25,14 @@ export function countriesLayer({
   selectedColor,
   visible,
   fills,
+  transition,
 }: {
   color: Color;
   selected: number | null;
   selectedColor: Color;
   visible: boolean;
   fills?: { key: string; colors: Map<number, Color> };
+  transition?: Timing;
 }) {
   return new MVTLayer<CountryProperties>({
     id: "m49-countries",
@@ -42,6 +45,7 @@ export function countriesLayer({
     stroked: false,
     getFillColor: fills ? (f: { properties: CountryProperties }) => fills.colors.get(f.properties.m49) ?? color : color,
     updateTriggers: { getFillColor: fills?.key },
+    transitions: transition && { getFillColor: transition },
     uniqueIdProperty: "m49",
     highlightedFeatureId: fills ? null : selected,
     highlightColor: selectedColor,
@@ -87,6 +91,8 @@ export function countryOutlineLayer({ m49, color, halo, visible }: { m49: number
 }
 
 export interface CountrySymbol {
+  /** Names it, so a change of its size or colour is eased (map.ts). */
+  id: string;
   position: [number, number];
   /** In pixels. */
   radius: number;

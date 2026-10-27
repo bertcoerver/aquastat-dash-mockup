@@ -81,10 +81,12 @@ water-portal/
     │   ├── sub-basin-network.ts  Sub-basins upstream of a sub-basin
     │   ├── wapor-legend.ts Legend for the WaPOR raster, with the NDVI quality slider
     │   ├── wapor-player.ts Playback (Local view): frames, loading ahead, timing
+    │   ├── tween.ts        Eases the circles, bars and scheme lines and dots from one map to the next
     │   └── layers/         One file per kind of layer
     │       ├── tile-urls.ts  Where each tile set lives (local or FAO's bucket)
     │       ├── countries.ts  M49 country areas (land; what clicks hit), the selected one's outline,
-    │       │                 circles on countries (Country view)
+    │       │                 circles on countries (Country view; and basins, Basin view)
+    │       ├── bars.ts       3D bars on the areas, a fixed height in pixels at any zoom
     │       ├── borders.ts    Country borders (UN lines; disputed ones dashed)
     │       ├── basins.ts     SDG 6 major basins and sub-basins: areas + outlines (sub-basins only shade the hovered one and those upstream)
     │       ├── water.ts      Lakes (HydroLAKES) and rivers
@@ -123,6 +125,7 @@ water-portal/
     │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
     │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
+    │   ├── shape-switch.ts A map's switch: the areas' colours, circles or 3D bars
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
     │   └── load-bar.ts     Load bar under the graph pane's heading while anything loads
     ├── toolbar/
@@ -177,12 +180,31 @@ water-portal/
   except with a sub-basin selected while the model's panel is shown.
 - **Map layers** (Basin and Country views, [src/panels/legend.ts](src/panels/legend.ts)): the
   legend's title is a checklist of the maps, and several can be on the map at once, one per way
-  of drawing them (the checklist says which): a fill, and the scheme's discharge lines and storage
-  change dots (Basin) or circles of amounts (Country). Checking a map replaces the one drawn the
-  same way; a previewed or pinned chart's map takes its place for the while. Each layer has its
+  of drawing them (the checklist says which): a fill, circles, 3D bars, and the scheme's discharge
+  lines and storage change dots (Basin). Checking a map replaces the one drawn the
+  same way; a previewed or pinned chart's map takes its place for the while.
+- **Colours, circles or 3D bars** ([src/panels/shape-switch.ts](src/panels/shape-switch.ts)): a
+  switch in a map's legend section draws it as the areas' colours, a circle on each (area: the
+  value) or a bar on each (height: the value), coloured as the fill would be; amounts (Country)
+  are circles or bars. Switched into a shape another map is drawn in, the map takes it and the
+  other moves to the shape this one left (or another free one it can take); only with none
+  free is it replaced. The change eases (map/tween.ts): the new circles grow and bars rise
+  while the old ones shrink away and the colours fade, and the switch's highlight, which goes
+  with its map from section to section, slides. Circles and bars of values
+  have the 98th percentile at full size, so a few outliers don't flatten the rest (those above
+  grow to at most 1.6 ×); an amount's circles have the largest. Bars tilt the map while shown
+  and stay the same height in pixels as you zoom. In the Basin view they stand at the sub-basins'
+  middles, and a major basin's at the middle of its sub-basin nearest the middle of them all.
+  The maps that have their own switch (discharge, storage change, precipitation and
+  evapotranspiration of a basin's sub-basins) don't get this one. Each layer has its
   section in the legend (its key: a colour ramp, classes or sizes), and the tooltip lists them all.
-- **Country circles** (proportional symbols) are drawn without a depth test like every layer,
-  so only those on the near side of the globe are kept.
+- **The lock** (a padlock in each legend's title) keeps the ranges as they are, so other periods
+  and places compare: the colour ramps' domains, the circles', lines' and dots' sizes, and the
+  WaPOR colour map. Each map keeps the range it had when first shown since the lock went on, per
+  unit (`LayerLegend.hold`); the stretch menu is off meanwhile. Picking another WaPOR variable unlocks.
+- **Circles** (proportional symbols) are drawn without a depth test like every layer,
+  so only those on the near side of the globe are kept. The bars are depth-tested, so near
+  ones hide those behind.
 - **Date rules** are documented at the top of
   [src/toolbar/range-rules.ts](src/toolbar/range-rules.ts). The slider works in days:
   any day in Local, dekad boundaries in Basin, whole calendar years (one or more) in Country. The track runs
@@ -201,6 +223,13 @@ water-portal/
   lines with the parts outside each tile dropped (see `tileOutlines` in
   [src/map/layers/basins.ts](src/map/layers/basins.ts)); a plain polygon stroke would
   also outline every tile edge.
+- **Changes on the map are eased in** (a 400 ms ease-out; while a range plays, evenly
+  over the whole step, so the map flows from one step to the next). The areas' fills
+  use deck.gl's `transitions`, which pair old and new values by index. The circles,
+  bars and scheme lines and dots are sorted by size, so a step reorders them and
+  deck.gl would slide them between places; [src/map/tween.ts](src/map/tween.ts) eases
+  those instead, paired by key (their area); ones that come grow from nothing, and ones
+  that go shrink away (so a map switched to circles or bars grows in).
 - **Lakes, rivers and basins** are loaded straight from FAO's tile bucket
   (`storage.googleapis.com/fao-cog-data/basins/…`, zoom 0–8). Those tile sets have no
   file for empty tiles, so 404s there are expected and ignored.

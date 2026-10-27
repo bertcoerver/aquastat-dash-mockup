@@ -227,7 +227,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
   },
   {
     id: "PCP-AETI",
-    label: "Precipitation − evapotranspiration",
+    label: "Net runoff",
     short: "PCP − AETI",
     unit: "mm/day",
     perPixel: "m³/day",

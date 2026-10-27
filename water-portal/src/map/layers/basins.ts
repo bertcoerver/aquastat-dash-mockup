@@ -3,6 +3,7 @@ import { MVTLayer, type GeoBoundingBox } from "@deck.gl/geo-layers";
 import { PathLayer } from "@deck.gl/layers";
 import type { Feature, Position } from "geojson";
 import type { Color } from "../theme";
+import type { Timing } from "../tween";
 import { FAO_TILES, ignoreMissingTile } from "./tile-urls";
 
 export interface MajorBasinProperties {
@@ -27,6 +28,8 @@ interface BasinOptions {
    * (deck.gl only redraws the colours when it changes).
    */
   fills?: { key: number | string; colors: Map<number, Color> };
+  /** How a change of the fills is eased in (none: at once). */
+  transition?: Timing;
 }
 
 /**
@@ -47,7 +50,7 @@ function basinsLayers<P>(
   id: string,
   data: string,
   idProperty: string,
-  { fill, border, visible, selected = null, selectedColor, fills }: BasinOptions,
+  { fill, border, visible, selected = null, selectedColor, fills, transition }: BasinOptions,
 ) {
   const common = {
     data,
@@ -67,6 +70,7 @@ function basinsLayers<P>(
       ? (f: { properties: P }) => fills.colors.get((f.properties as Record<string, number>)[idProperty]) ?? fill
       : fill,
     updateTriggers: { getFillColor: fills?.key },
+    transitions: transition && { getFillColor: transition },
     uniqueIdProperty: idProperty,
     highlightedFeatureId: selected,
     highlightColor: selectedColor,

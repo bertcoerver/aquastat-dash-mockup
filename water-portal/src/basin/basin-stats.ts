@@ -12,7 +12,9 @@
  * the map back to. Within a card, hovering a row picks out its basins on the map (a
  * group's, a basin, a sub-basin outlined), hovering a series in a legend maps that
  * series, and clicking a year on a chart of the same days every year selects that year.
- * Hovering a basin on the map shows its value.
+ * Hovering a basin on the map shows its value. A switch in a map's legend section draws
+ * it as the basins' colours, circles or 3D bars (panels/shape-switch.ts), except where
+ * a map has its own (the scheme's, the rain and vapour's).
  *
  * The legend's title is a menu of all the maps. Its unit is a menu too, as the WaPOR
  * legend's: per day, month or year, or in total over the period; per m² or over the
@@ -38,6 +40,10 @@ import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { MODEL_SHOWN } from "./water-balance";
 import { SCHEME_SLOT, initSchemeMap } from "./scheme-map";
 import { initEffectsMap } from "./effects-map";
+import { loadMiddles } from "./rivers";
+import { SHAPE_NOTES, SHAPES, initShapeSwitch, shapeSizes } from "../panels/shape-switch";
+import type { Bar } from "../map/layers/bars";
+import type { CountrySymbol } from "../map/layers/countries";
 import {
   BASIN_UNITS,
   TOPICS,
@@ -76,13 +82,16 @@ export interface BasinStats {
   setSelection(selection: Selection): void;
   /** What is under the pointer on the map (null: nothing). */
   hover(place: Place | null): void;
+  /** Lock the legend's ranges (when a range starts playing, so the dekads compare). */
+  lockLegend(): void;
 }
 
 /**
- * How the maps are drawn, in the legend's order: fills, the scheme's discharge lines, its
- * storage change dots, precipitation as rain, evapotranspiration as vapour.
+ * How the maps are drawn, in the legend's order: fills, circles, bars, the scheme's
+ * discharge lines, its storage change dots, precipitation as rain, evapotranspiration as vapour.
  */
-const SLOTS = ["fill", "lines", "dots", "rain", "vapour"];
+const SLOTS = ["fill", "circles", "bars", "lines", "dots", "rain", "vapour"];
+const isShape = (l: { slot: string }) => l.slot === "circles" || l.slot === "bars";
 const isScheme = (l: { slot: string }) => l.slot === "lines" || l.slot === "dots";
 const isEffect = (l: { slot: string }) => l.slot === "rain" || l.slot === "vapour";
 
@@ -173,6 +182,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       },
       title: () => `Values ${describeBasinUnits(state.units)}.`,
     },
+    onLock: () => drawMap(),
   });
   // Discharge and storage change maps of a basin's sub-basins: as the water balance scheme
   // (a network of lines, dots), or (each one's switch in the legend) as fills. Switched,
@@ -204,6 +214,51 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       drawMap();
     },
   });
+
+  // Each other map's shape (colours, circles, bars): a switch in its legend section.
+  // Switched, the map takes its new slot from the one there.
+  const shapes = initShapeSwitch(legend, (title) => {
+    const ctx = current?.ctx;
+    const ids = state.chosen.get(scope());
+    const moved = ctx && ids?.find((id) => specFor(ctx, { id, sub: null }).title === title);
+    if (moved) state.chosen.set(scope(), [...ids!.filter((id) => id !== moved), moved]);
+    drawMap();
+  });
+
+  // Where a basin's circle or bar stands: a sub-basin's middle; a major basin's, the
+  // middle of its sub-basin nearest the middle of them all (by area), so it's inside it.
+  let middles: { sub: Map<number, [number, number]>; major: Map<number, [number, number]> } | null = null;
+  let middlesAsked = false;
+  function loadedMiddles() {
+    if (!middles && !middlesAsked) {
+      middlesAsked = true;
+      loadMiddles()
+        .then((sub) => {
+          middles = { sub, major: majorMiddles(sub) };
+          drawMap();
+        })
+        .catch(() => (middlesAsked = false));
+    }
+    return middles;
+  }
+  function majorMiddles(sub: Map<number, [number, number]>) {
+    const byMajor = new Map<number, { at: [number, number]; area: number }[]>();
+    for (const b of subBasins) {
+      const at = sub.get(b.id);
+      if (!at) continue;
+      if (!byMajor.has(b.majorBasin)) byMajor.set(b.majorBasin, []);
+      byMajor.get(b.majorBasin)!.push({ at, area: b.area ?? 1 });
+    }
+    const out = new Map<number, [number, number]>();
+    for (const [id, parts] of byMajor) {
+      const total = parts.reduce((t, p) => t + p.area, 0);
+      const x = parts.reduce((t, p) => t + p.at[0] * p.area, 0) / total;
+      const y = parts.reduce((t, p) => t + p.at[1] * p.area, 0) / total;
+      const d = (p: [number, number]) => (p[0] - x) ** 2 + (p[1] - y) ** 2;
+      out.set(id, parts.reduce((a, b) => (d(b.at) < d(a.at) ? b : a)).at);
+    }
+    return out;
+  }
 
   // All the topics' tiles and cards together, in one column.
   const allTopics: TopicDef = {
@@ -249,11 +304,14 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: BasinCtx, spec: BasinMapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
 
-  /** How a map is drawn: as the scheme's lines or dots, as rain or vapour, or as fills. */
+  /** How a map is drawn: as the scheme's lines or dots, as rain or vapour, or as fills, circles or bars. */
   function slotOf(spec: BasinMapSpec, ctx: BasinCtx): string {
+    if (!ownSwitch(spec, ctx)) return shapes.shape(spec.title, SHAPES);
     if (spec.effect && effectsMap.isEffect(spec.effect, ctx.major?.id ?? null)) return spec.effect;
     return spec.scheme && schemeMap.isScheme(spec.scheme, ctx.major?.id ?? null) ? SCHEME_SLOT[spec.scheme] : "fill";
   }
+  /** A basin's sub-basins' discharge, storage change, rain and evapotranspiration have their own switch (scheme-map.ts, effects-map.ts). */
+  const ownSwitch = (spec: BasinMapSpec, ctx: BasinCtx) => !!(spec.scheme || spec.effect) && ctx.major !== null;
 
   // The map tooltip follows the pointer (to its right).
   const mapEl = map.map.getContainer();
@@ -436,6 +494,9 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     schemeMap.draw(null, []);
     effectsMap.showSwitches([], null);
     effectsMap.draw(null, null, []);
+    shapes.show([]);
+    map.setBasinSymbols(null);
+    map.setBars("basin", null);
     setMapOverride(false);
   }
 
@@ -500,6 +561,9 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       schemeMap.draw(null, []);
       effectsMap.showSwitches([], null);
       effectsMap.draw(null, null, []);
+      shapes.show([]);
+      map.setBasinSymbols(null);
+      map.setBars("basin", null);
       setMapOverride(false);
       return;
     }
@@ -510,7 +574,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const sized = layers.filter(isScheme);
     const keys = schemeMap.draw(
       major,
-      sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${ctx.period}` })),
+      sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${ctx.period}`, range: `${l.spec.title}:${l.spec.unit}` })),
     );
     schemeMap.showSwitches(layers.filter((l) => l.spec.scheme).map((l) => ({ kind: l.spec.scheme!, slot: l.slot })), major);
     // Or as rain and vapour.
@@ -525,42 +589,75 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     // or a major basin keeps its colours and fades the rest; a sub-basin is outlined.
     const sub = leadDriver()?.sub ?? null;
     const picked = parseArea(sub);
-    const colors = new Map<number, Color>();
-    let scale: ColorScale | null = null;
-    if (fill) {
-      const ids = fill.level === "major" ? ctx.majors : [...(fill.only ?? ctx.stats.sub.keys())];
-      const values = ids.map((id) => fill.value(id));
-      scale = rampScale(fill, values, undefined, state.stretch);
-      const majorOf = (id: number) => (fill.level === "major" ? id : ctx.stats.sub.get(id)?.majorBasin ?? NaN);
+    /** A map's basins, values and colours (locked: the colours' range when the lock was put on); `shown`: not faded. */
+    const paint = (spec: BasinMapSpec) => {
+      const ids = spec.level === "major" ? ctx.majors : [...(spec.only ?? ctx.stats.sub.keys())];
+      const values = ids.map((id) => spec.value(id));
+      let scale = rampScale(spec, values, undefined, state.stretch);
+      const domain = scale.ticks.length ? legend.hold(`${spec.title}:${spec.unit}:${spec.level}`, scale.domain) : scale.domain;
+      if (domain !== scale.domain) scale = rampScale(spec, values, domain);
+      const majorOf = (id: number) => (spec.level === "major" ? id : ctx.stats.sub.get(id)?.majorBasin ?? NaN);
       const shown = (id: number) => {
         if (picked?.kind === "major") return majorOf(id) === picked.id;
         if (picked?.kind === "group") return inGroup(majorOf(id), picked.id);
-        return !fill.listed || fill.listed.has(id);
+        return !spec.listed || spec.listed.has(id);
       };
+      return { ids, values, scale, shown };
+    };
+    const scales = new Map<string, ColorScale>();
+    const colors = new Map<number, Color>();
+    if (fill) {
+      const { ids, values, scale, shown } = paint(fill);
+      scales.set("fill", scale);
       ids.forEach((id, i) => {
-        const c = scale!.color(values[i]) ?? (fill.level === "major" ? theme.noData : null);
+        const c = scale.color(values[i]) ?? (fill.level === "major" ? theme.noData : null);
         if (c) colors.set(id, shown(id) ? c : mixColor(c, theme.land, 0.78));
       });
     } else {
-      // Plain land under the others; the other major basins greyed.
-      for (const id of ctx.majors) colors.set(id, id === major ? theme.land : theme.noData);
+      // Plain land under the others; with a basin selected, the other major basins greyed.
+      for (const id of ctx.majors) colors.set(id, major === null || id === major ? theme.land : theme.noData);
     }
+    // Circles (area) and bars (height) by the value (the 98th percentile at full size;
+    // locked, as when the lock was put on), coloured as the fill would be.
+    const symbols: CountrySymbol[] = [];
+    const bars: Bar[] = [];
+    const at = loadedMiddles();
+    for (const { spec, slot } of layers.filter(isShape)) {
+      const { ids, values, scale, shown } = paint(spec);
+      scales.set(slot, scale);
+      const where = spec.level === "major" ? at?.major : at?.sub;
+      if (!where) continue;
+      const size = shapeSizes(values, 0.98, (ref) => legend.hold(`${spec.title}:${spec.unit}:${spec.level}:${slot}`, ref));
+      ids.forEach((id, i) => {
+        const v = Math.abs(values[i]);
+        const position = where.get(id);
+        const c = scale.color(values[i]);
+        if (!position || !(v > 0) || !c) return;
+        const [r, g, b] = shown(id) ? c : mixColor(c, theme.land, 0.78);
+        if (slot === "circles") symbols.push({ id: `${spec.level}:${id}`, position, radius: size.radius(v), fill: [r, g, b, 200], line: [r * 0.6, g * 0.6, b * 0.6, 230] });
+        else bars.push({ position, height: size.height(v), color: [r, g, b, 255] });
+      });
+    }
+    // Small circles on top of big ones.
+    symbols.sort((a, b) => b.radius - a.radius);
     const outlined = picked?.kind === "sub" ? [picked.id] : [];
-    map.setBasinStatFills({
-      level: fill?.level ?? "major",
-      key: `${fill?.id ?? ""}:${layers.filter((l) => l.slot !== "fill").map((l) => l.spec.id).join()}:${state.stretch}:${fill?.status ? "" : ctx.period}:${sub ?? ""}:${outlined.join()}`,
-      colors,
-      outlined,
-    });
+    const statKey =
+      `${fill?.id ?? ""}:${layers.filter((l) => l.slot !== "fill").map((l) => `${l.spec.id}:${l.slot}`).join()}:${state.stretch}:` +
+      `${legend.lockKey()}:${fill?.status ? "" : ctx.period}:${sub ?? ""}:${outlined.join()}`;
+    map.setBasinStatFills({ level: fill?.level ?? "major", key: statKey, colors, outlined });
+    map.setBasinSymbols(symbols.length ? { key: `${statKey}:${!!at}`, items: symbols } : null);
+    map.setBars("basin", bars.length ? { key: `${statKey}:${!!at}`, items: bars } : null);
     setMapOverride(true);
 
     // Without values (the model's output, still loading), no key: only the status.
     legend.show(
       layers.map(({ spec, slot }): LegendLayer => {
         const common = { slot, id: optionId(ctx, spec), title: spec.title, unit: spec.unit, units: spec.units };
-        if (slot === "fill") {
-          const key: LegendKey | null = scale?.ticks.length ? { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks } : null;
-          const note = `${spec.note}${spec.scale === "log" ? " · Log scale" : ""}`;
+        if (slot === "fill" || isShape({ slot })) {
+          const scale = scales.get(slot);
+          // (Only the fill's ramp is a menu.)
+          const key: LegendKey | null = scale?.ticks.length ? { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, fixed: slot !== "fill" } : null;
+          const note = [spec.note, spec.scale === "log" ? "Log scale" : "", slot === "fill" ? "" : SHAPE_NOTES[slot as "circles" | "bars"]].filter(Boolean).join(" · ");
           return { ...common, note, period: key ? ctx.period : "", key, status: unlessLoading(spec.status ?? "") };
         }
         // Rain and vapour: a key of how many drops or puffs, per day whatever the units.
@@ -581,6 +678,9 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
         return { ...common, note, period: key ? ctx.period : "", key, status: unlessLoading(status) };
       }),
     );
+    // (After the legend, laid out, so a switch's highlight slides. The maps with their own
+    // switch take their slot all the same.)
+    shapes.show(layers.map(({ spec, slot }) => ({ title: spec.title, slot, shapes: ownSwitch(spec, ctx) ? [] : SHAPES })));
     showMapTooltip();
   }
 
@@ -626,6 +726,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   }).observe(cardsEl);
 
   return {
+    lockLegend: () => legend.lock(),
     setView(view) {
       state.view = view;
       forgetFailedFluxes();

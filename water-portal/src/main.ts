@@ -441,7 +441,12 @@ const rangePlayer = initRangePlayer({
     toolbarApi!.setDays(range);
     playing = false;
   },
-  onState: (status) => toolbarApi?.setPlayback({ status, bufferedTo: null }),
+  onState(status, stepMs) {
+    toolbarApi?.setPlayback({ status, bufferedTo: null });
+    // (Locked before the first step: its ranges are the ones held.)
+    if (status === "playing") (view === "basin" ? basinStats : countryPanel).lockLegend();
+    waterMap.setPlayback(stepMs);
+  },
 });
 
 function hideWapor() {

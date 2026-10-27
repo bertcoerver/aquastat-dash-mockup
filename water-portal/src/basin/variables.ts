@@ -113,8 +113,8 @@ export function rampScale(
   if (style.scale === "log") {
     // Values at or below zero (dry sub-basins) get the lowest colour.
     const positive = finite.filter((v) => v > 0);
-    const a = Math.log10(positive.length ? Math.max(quantile(positive, q), 1e-3) : 1e-3);
-    const b = Math.max(Math.log10(positive.length ? quantile(positive, 1 - q) : 1), a + 1);
+    const a = Math.log10(Math.max(domain ? domain[0] : positive.length ? quantile(positive, q) : 0, 1e-3));
+    const b = Math.max(Math.log10(domain ? domain[1] : positive.length ? quantile(positive, 1 - q) : 1), a + 1);
     const t = (v: number) => (Math.log10(Math.max(v, 10 ** a)) - a) / (b - a);
     // Ticks at 1, 2 and 5 × powers of ten; only the powers of ten if that's too many.
     let values: number[] = [];

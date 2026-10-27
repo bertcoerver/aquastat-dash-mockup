@@ -10,7 +10,9 @@
  * legend maps that series, and clicking a year on a line chart sets the year in the
  * top bar. For a range of years, every value is the mean of its yearly values. Clicking a row of a region (or country) also flies the map there, keeping
  * the selected country in view where both fit (see flyToArea).
- * Hovering a country on the map shows its value. A colour ramp in the legend is a menu
+ * Hovering a country on the map shows its value. A switch in a map's legend section draws
+ * it as the countries' colours, circles or 3D bars (panels/shape-switch.ts); the amounts'
+ * maps are circles or bars. A colour ramp in the legend is a menu
  * of how much of the countries' values it spans (panels/ramp-menu.ts), unless the map
  * has a fixed range (a share, 0–100%).
  *
@@ -20,7 +22,7 @@ import type { WaterMap } from "../map/map";
 import { flyTo, type Box } from "../map/fly-to";
 import { mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
-import { fmt, hexToColor, rampScale, type ColorScale } from "../basin/variables";
+import { fmt, hexToColor, rampScale } from "../basin/variables";
 import { SLOT_HINTS, initLayerLegend, nice, onePerSlot, toggled, type LegendKey } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import { dkY } from "../toolbar/dekads";
@@ -29,6 +31,9 @@ import { TOPICS, type Card, type Ctx, type MapClass, type MapSpec, type Region, 
 import { WORLD, latestYear, loadTopic, periodLabel, type Period, type Topic } from "./data";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { slideSelection } from "../panels/segmented";
+import { SHAPE_NOTES, SHAPES, initShapeSwitch, shapeSizes, type Shape } from "../panels/shape-switch";
+import type { Bar } from "../map/layers/bars";
+import type { CountrySymbol } from "../map/layers/countries";
 
 export interface CountryInfo {
   regions: { code: number; name: string }[];
@@ -54,16 +59,18 @@ export interface CountryPanel {
   setSelection(selection: Selection): void;
   /** The country under the pointer on the map (null: none). */
   hover(m49: number | null): void;
+  /** Lock the legend's ranges (when a range starts playing, so the years compare). */
+  lockLegend(): void;
 }
 
-/** How the maps are drawn, in the legend's order: fills, circles of amounts. */
-const SLOTS = ["fill", "circles"];
+/** How the maps are drawn, in the legend's order: fills, circles, bars (each a Shape). */
+const SLOTS: Shape[] = ["fill", "circles", "bars"];
 
 /** A map on the map: its tile or card, and how it's drawn (the legend's slot). */
 interface Layer {
   d: Driver;
   spec: MapSpec;
-  slot: string;
+  slot: Shape;
 }
 
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
@@ -100,8 +107,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     /** The maps checked in the legend, oldest first, per topic (none: the topic's first tile's). */
     chosen: new Map<Topic, string[]>(),
     mapHover: null as number | null,
-    /** Classes (or categories) switched off in the map legend, for the map with this id. */
-    hiddenClasses: { id: "", set: new Set<number>() },
+    /** Classes (or categories) switched off in the map legend, per map on the map (by id). */
+    hiddenClasses: new Map<string, Set<number>>(),
     /** How much of the countries' values a colour ramp spans (% cut at either end). */
     stretch: DEFAULT_STRETCH,
   };
@@ -191,11 +198,13 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       },
     },
     // Clicking a class's swatch hides that class on the map, or shows it again.
-    onClass(_slot, index) {
-      const set = state.hiddenClasses.set;
+    onClass(slot, index) {
+      const set = state.hiddenClasses.get(current?.layers.find((l) => l.slot === slot)?.spec.id ?? "");
+      if (!set) return;
       if (!set.delete(index)) set.add(index);
       drawMap();
     },
+    onLock: () => drawMap(),
   });
 
   /** The topic's maps, each once, in the order of the tiles and cards. */
@@ -209,8 +218,20 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: Ctx, spec: MapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
-  /** How a map is drawn: circles of the amounts, or fills. */
-  const slotOf = (spec: MapSpec) => (spec.style.kind === "circles" ? "circles" : "fill");
+  // Each map's shape (colours, circles, bars): a switch in its legend section. Switched, it
+  // goes last in the checklist, so it takes its new slot from the map there.
+  const shapes = initShapeSwitch(legend, (title) => {
+    const ctx = current?.ctx;
+    const ids = state.chosen.get(state.topic);
+    const moved = ctx && ids?.find((id) => specFor(ctx, { id, sub: null }).title === title);
+    if (moved) state.chosen.set(state.topic, [...ids!.filter((id) => id !== moved), moved]);
+    drawMap();
+  });
+  /** The shapes a map can take: an amount's circles or bars, any value's colours too (not a mix of categories). */
+  const shapesOf = (spec: MapSpec): Shape[] =>
+    spec.style.kind === "circles" ? ["circles", "bars"] : spec.style.kind === "categories" ? ["fill"] : SHAPES;
+  /** How a map is drawn (its slot). */
+  const slotOf = (spec: MapSpec): Shape => shapes.shape(spec.title, shapesOf(spec));
 
   // The map tooltip follows the pointer (to its right).
   const mapEl = map.map.getContainer();
@@ -258,6 +279,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       current = null;
       map.setCountryFills(null);
       map.setCountrySymbols(null);
+      map.setBars("country", null);
       return;
     }
     for (const b of $("cp-topics").querySelectorAll<HTMLElement>("[data-topic]")) {
@@ -278,6 +300,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       legend.show(null);
       map.setCountryFills(null);
       map.setCountrySymbols(null);
+      map.setBars("country", null);
       current = null;
       return;
     }
@@ -359,92 +382,87 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   // --- The map ---------------------------------------------------------------------------------
+  /** The reference bar's height in the legend, px. */
+  const BAR_KEY_PX = 24;
+
   function drawMap() {
     if (!current) return;
     const { ctx } = current;
     const layers = shownLayers(ctx);
     current.layers = layers;
-    const fill = layers.find((l) => l.slot === "fill")?.spec ?? null;
-    const sized = layers.find((l) => l.slot === "circles")?.spec ?? null;
     // A series hovered in the pinned card keeps the pinned row's countries picked out.
     const area = areaOf(drivers.preview()) ?? areaOf(state.pinned.get(state.topic));
     // A row of a regional chart picks out its countries.
     const picked = area === null || area === WORLD ? null : new Set(regions.find((r) => r.code === area)?.members ?? [area]);
-    // Classes switched off in the legend stay off only while the same map is shown.
-    const fillId = fill?.id ?? "";
-    if (state.hiddenClasses.id !== fillId) state.hiddenClasses = { id: fillId, set: new Set(fill?.hidden) };
-    const hidden = state.hiddenClasses.set;
-    const key = `${fillId}:${sized?.id ?? ""}:${state.stretch}:${ctx.label}:${area ?? ""}:${ctx.country?.m49 ?? ""}:${[...hidden].sort().join(",")}`;
+    // Classes switched off in the legend stay off only while their map is shown.
+    for (const id of state.hiddenClasses.keys()) if (!layers.some((l) => l.spec.id === id)) state.hiddenClasses.delete(id);
+    for (const { spec } of layers) if (!state.hiddenClasses.has(spec.id)) state.hiddenClasses.set(spec.id, new Set(spec.hidden));
+    const hiddenKey = layers.map((l) => [...state.hiddenClasses.get(l.spec.id)!].sort().join(",")).join("|");
+    const key =
+      `${layers.map((l) => `${l.spec.id}:${l.slot}`).join()}:${state.stretch}:${ctx.label}:${area ?? ""}:` +
+      `${ctx.country?.m49 ?? ""}:${hiddenKey}:${legend.lockKey()}`;
     const theme = map.theme;
     // Countries outside the rows' countries are hidden (plain land), like a class switched
     // off in the legend. The selected country keeps its colour, in either case.
     const outside = (m49: number) => !!picked && !picked.has(m49) && m49 !== ctx.country?.m49;
 
-    let scale: ColorScale | null = null;
     const fills = new Map<number, Color>();
-    const symbols: { position: [number, number]; radius: number; fill: Color; line: Color }[] = [];
-    // The classes (or categories) of the countries a picked row leaves on the map.
-    const present = picked ? new Set<number>() : null;
+    const symbols: CountrySymbol[] = [];
+    const bars: Bar[] = [];
+    const keys = new Map<string, LegendKey | null>();
 
-    // Circle area proportional to the value; the largest gets MAX_R pixels.
-    const MAX_R = 30;
-    let circles: { max: number; radius: (v: number) => number; color: string } | null = null;
-    if (sized?.style.kind === "circles") {
-      const values = countries.map((m49) => sized.value(m49));
-      const max = Math.max(...values.filter(Number.isFinite), 0) || 1;
-      const radius = (v: number) => Math.max(1.5, MAX_R * Math.sqrt(v / max));
-      const color = hexToColor(sized.style.color);
-      circles = { max, radius, color: `rgb(${color[0]} ${color[1]} ${color[2]} / 0.6)` };
+    for (const { spec, slot } of layers) {
+      const p = paint(spec, picked ? new Set<number>() : null, outside);
+      keys.set(slot, p.key);
+      if (slot === "fill") {
+        for (const m49 of countries) {
+          const c = p.color(m49);
+          fills.set(m49, c === "off" ? theme.land : c ?? theme.noData);
+        }
+        continue;
+      }
+      // Circles (area) or bars (height) by the value: an amount's largest circle at full
+      // size, else the 98th percentile (locked: as when the lock was put on).
+      const values = countries.map((m49) => Math.abs(spec.value(m49)));
+      const size = shapeSizes(values, spec.style.kind === "circles" && slot === "circles" ? 1 : 0.98, (ref) => legend.hold(`${spec.title}:${spec.unit}:${slot}`, ref));
       countries.forEach((m49, i) => {
         const v = values[i];
         const center = centerOf.get(m49);
-        if (!center || !(v > 0) || outside(m49)) return;
-        symbols.push({ position: center, radius: radius(v), fill: [color[0], color[1], color[2], 150], line: [255, 255, 255, 220] });
+        const c = p.color(m49);
+        if (!center || !(v > 0) || !c || c === "off") return;
+        if (slot === "circles") {
+          // (An amount's in white, as before; others in a darker shade, as their colours can be pale.)
+          const line: Color = spec.style.kind === "circles" ? [255, 255, 255, 220] : [c[0] * 0.6, c[1] * 0.6, c[2] * 0.6, 230];
+          symbols.push({ id: `${m49}`, position: center, radius: size.radius(v), fill: [c[0], c[1], c[2], 170], line });
+        } else bars.push({ position: center, height: size.height(v), color: [c[0], c[1], c[2], 255] });
       });
-      // Small ones on top of big ones.
-      symbols.sort((a, b) => b.radius - a.radius);
+      // An amount's key is of its sizes (other maps keep their colours' key).
+      if (spec.style.kind === "circles") {
+        const top = nice(size.ref);
+        const color = hexToColor(spec.style.color);
+        const css = `rgb(${color[0]} ${color[1]} ${color[2]} / ${slot === "circles" ? 0.6 : 1})`;
+        const px = (v: number) => (slot === "circles" ? size.radius(v) : BAR_KEY_PX * size.height(v));
+        keys.set(slot, { kind: slot, items: [top / 10, top / 2, top].map((v) => ({ value: v, size: px(v), color: css })) });
+      }
     }
-
-    const style = fill?.style;
-    if (!fill || !style || style.kind === "circles") {
-      if (picked) for (const m49 of picked) fills.set(m49, theme.selected);
-    } else {
-      const values = countries.map((m49) => fill.value(m49));
-      if (style.kind === "ramp") scale = rampScale(style, values, style.domain, state.stretch);
-      countries.forEach((m49, i) => {
-        if (outside(m49)) return fills.set(m49, theme.land);
-        const v = values[i];
-        let c: Color | null = null;
-        if (style.kind === "ramp") c = scale!.color(v);
-        else if (style.kind === "classes") {
-          if (Number.isFinite(v)) {
-            const index = classIndex(style.classes, v);
-            present?.add(index);
-            if (hidden.has(index) && m49 !== ctx.country?.m49) return fills.set(m49, theme.land);
-            c = hexToColor(style.classes[index].color);
-          }
-        } else if (style.kind === "categories") {
-          const cat = style.category(m49);
-          if (cat) present?.add(cat.index);
-          if (cat && hidden.has(cat.index) && m49 !== ctx.country?.m49) return fills.set(m49, theme.land);
-          // A third (a tie of all three) is palest, all of it is the full colour.
-          if (cat) c = mix(hexToColor(style.categories[cat.index].color), theme.land, 0.7 * (1 - Math.min(1, (cat.share - 1 / 3) / (2 / 3))));
-        }
-        fills.set(m49, c ?? theme.noData);
-      });
-    }
+    // Small circles on top of big ones.
+    symbols.sort((a, b) => b.radius - a.radius);
+    // Without a map in colours, the picked countries are filled.
+    if (!layers.some((l) => l.slot === "fill") && picked) for (const m49 of picked) fills.set(m49, theme.selected);
     // Rings around the countries a ranking names (most are too small to see).
     for (const m49 of new Set(layers.flatMap((l) => l.spec.listed ?? []))) {
       const center = centerOf.get(m49);
-      if (center) symbols.push({ position: center, radius: 7, fill: [0, 0, 0, 0], line: theme.outline });
+      if (center) symbols.push({ id: `listed:${m49}`, position: center, radius: 7, fill: [0, 0, 0, 0], line: theme.outline });
     }
     // …and a bigger one in the marker colour around a country picked in a chart.
     if (picked && picked.size === 1) {
-      const center = centerOf.get([...picked][0]);
-      if (center) symbols.push({ position: center, radius: 12, fill: [0, 0, 0, 0], line: theme.marker });
+      const m49 = [...picked][0];
+      const center = centerOf.get(m49);
+      if (center) symbols.push({ id: `picked:${m49}`, position: center, radius: 12, fill: [0, 0, 0, 0], line: theme.marker });
     }
     map.setCountryFills({ key, colors: fills });
     map.setCountrySymbols(symbols.length ? { key: `${key}:${symbols.length}`, items: symbols } : null);
+    map.setBars("country", bars.length ? { key, items: bars } : null);
 
     const latest = latestYear();
     const status = state.period.to > latest ? `AQUASTAT's latest data are for ${latest}.` : "";
@@ -453,45 +471,79 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
         slot,
         id: optionId(ctx, spec),
         title: spec.title,
-        note: spec.note ?? "",
+        note: noteOf(spec, slot),
         period: shownPeriod(ctx),
         unit: spec.unit,
-        key: legendKey(spec, scale, circles, present),
+        key: keys.get(slot) ?? null,
         // Once, under the last section.
         status: slot === layers.at(-1)!.slot ? status : "",
       })),
     );
+    shapes.show(layers.map(({ spec, slot }) => ({ title: spec.title, slot, shapes: shapesOf(spec) })));
     showMapTooltip();
   }
 
-  /** `present`: with a row picked, the classes its countries fall in; the others show as off. */
-  function legendKey(
-    spec: MapSpec,
-    scale: ColorScale | null,
-    circles: { max: number; radius: (v: number) => number; color: string } | null,
-    present: Set<number> | null,
-  ): LegendKey | null {
+  /** A map's note, for the shape it's drawn in. */
+  function noteOf(spec: MapSpec, slot: Shape) {
+    const note = spec.note ?? "";
+    if (spec.style.kind === "circles") return slot === "bars" ? note.replace("Circle area", "Bar height") : note;
+    return slot === "fill" ? note : [note, SHAPE_NOTES[slot]].filter(Boolean).join(" · ");
+  }
+
+  /**
+   * A map's colour per country (null: no value; "off": its class is switched off in the
+   * legend, or it's outside the picked row's countries), and the key to its colours.
+   * `present`: with a row picked, collects the classes its countries fall in (the others
+   * show as absent in the legend).
+   */
+  function paint(spec: MapSpec, present: Set<number> | null, outside: (m49: number) => boolean) {
     const style = spec.style;
-    const off = state.hiddenClasses.set;
+    const ctx = current!.ctx;
+    const off = state.hiddenClasses.get(spec.id) ?? new Set<number>();
+    // The selected country keeps its colour, even in a class switched off.
+    const hides = (m49: number, index: number) => off.has(index) && m49 !== ctx.country?.m49;
     const classState = (i: number) => (present && !present.has(i) ? "absent" : off.has(i) ? "off" : "on");
-    if (style.kind === "ramp" && scale) {
+    let color: (m49: number) => Color | null | "off";
+    let key: LegendKey | null = null;
+    if (style.kind === "ramp") {
+      const values = countries.map((m49) => spec.value(m49));
+      let scale = rampScale(style, values, style.domain, state.stretch);
+      // Locked, the colours keep their range (a fixed one stays anyway).
+      const domain = style.domain || !scale.ticks.length ? scale.domain : legend.hold(`${spec.title}:${spec.unit}`, scale.domain);
+      if (domain !== scale.domain) scale = rampScale(style, values, domain);
+      color = (m49) => scale.color(spec.value(m49));
       // A fixed range (a share): nothing to pick.
-      return { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, fixed: !!style.domain };
-    }
-    if (style.kind === "classes") {
-      return { kind: "classes", items: style.classes.map((k, i) => ({ label: k.label, background: k.color, state: classState(i) })) };
-    }
-    if (style.kind === "categories") {
-      return {
+      key = { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, fixed: !!style.domain };
+    } else if (style.kind === "classes") {
+      color = (m49) => {
+        const v = spec.value(m49);
+        if (!Number.isFinite(v)) return null;
+        const index = classIndex(style.classes, v);
+        present?.add(index);
+        return hides(m49, index) ? "off" : hexToColor(style.classes[index].color);
+      };
+      key = { kind: "classes", items: style.classes.map((k, i) => ({ label: k.label, background: k.color, state: classState(i) })) };
+    } else if (style.kind === "categories") {
+      color = (m49) => {
+        const cat = style.category(m49);
+        if (!cat) return null;
+        present?.add(cat.index);
+        if (hides(m49, cat.index)) return "off";
+        // A third (a tie of all three) is palest, all of it is the full colour.
+        return mix(hexToColor(style.categories[cat.index].color), map.theme.land, 0.7 * (1 - Math.min(1, (cat.share - 1 / 3) / (2 / 3))));
+      };
+      key = {
         kind: "classes",
         items: style.categories.map((k, i) => ({ label: k.label, background: `linear-gradient(to right, ${k.color}55, ${k.color})`, state: classState(i) })),
       };
+    } else {
+      const c = hexToColor(style.color);
+      color = () => c;
     }
-    if (style.kind === "circles" && circles) {
-      const top = nice(circles.max);
-      return { kind: "circles", items: [top / 10, top / 2, top].map((v) => ({ value: v, size: circles.radius(v), color: circles.color })) };
-    }
-    return null;
+    // The classes' states are only known once every country's colour is: work them all out now.
+    const colors = new Map(countries.map((m49) => [m49, outside(m49) ? ("off" as const) : color(m49)]));
+    if (key?.kind === "classes") key.items.forEach((item, i) => (item.state = classState(i)));
+    return { color: (m49: number) => colors.get(m49) ?? null, key };
   }
 
   function showMapTooltip() {
@@ -537,6 +589,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }).observe(cardsEl);
 
   return {
+    lockLegend: () => legend.lock(),
     setView(view) {
       state.view = view;
       if (view === "country") load();

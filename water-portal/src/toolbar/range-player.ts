@@ -18,7 +18,7 @@ export interface RangePlayer {
 
 /**
  * `getView` and `getRange` are what the toolbar shows; `show` sets a frame's range on
- * it; `onState` follows the play button.
+ * it; `onState` follows the play button (with how long a step shows, while playing).
  */
 export function initRangePlayer({
   getView,
@@ -29,27 +29,27 @@ export function initRangePlayer({
   getView: () => View;
   getRange: () => DayRange;
   show: (range: DayRange) => void;
-  onState: (status: PlaybackStatus) => void;
+  onState: (status: PlaybackStatus, stepMs: number | null) => void;
 }): RangePlayer {
   let timer = 0;
 
   function play() {
     const view = getView();
     if (view === "local") return;
+    onState("playing", FRAME_MS[view]);
     if (!stepRange(view, getRange())) show(firstRange(view, getRange()));
     timer = window.setInterval(() => {
       const next = stepRange(view, getRange());
       if (next) show(next);
       if (!next || !stepRange(view, next)) stop();
     }, FRAME_MS[view]);
-    onState("playing");
   }
 
   function stop() {
     if (!timer) return;
     clearInterval(timer);
     timer = 0;
-    onState("stopped");
+    onState("stopped", null);
   }
 
   return {

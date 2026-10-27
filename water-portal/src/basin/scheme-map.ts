@@ -16,7 +16,8 @@
  * or storage change per sub-basin), and a switch in each one's legend section picks
  * between them and the fills. The legend shows a key to the widths or sizes in place of
  * the colour ramp. Sizes are set per map: the widest line is the basin's largest outflow
- * in the period, a dot of DS_PX the 98th percentile of the sub-basins' |ΔS|.
+ * in the period, a dot of DS_PX the 98th percentile of the sub-basins' |ΔS| (with the
+ * legend's lock on, those when it was put on: LayerLegend.hold).
  */
 import type { SchemeArrow, SchemeDot, SchemeLineStyle, SchemeParticles } from "../map/layers/basin-scheme";
 import type { WaterMap } from "../map/map";
@@ -32,11 +33,12 @@ export type SchemeKind = "Q" | "dS";
 /** The legend's slot of each kind drawn as the scheme. */
 export const SCHEME_SLOT: Record<SchemeKind, "lines" | "dots"> = { Q: "lines", dS: "dots" };
 
-/** A map to draw as the scheme: its value per sub-basin, and `key` names those (for the cache). */
+/** A map to draw as the scheme: its value per sub-basin, `key` names those (for the cache), and `range` the map and its unit (for the lock). */
 export interface SchemeLayer {
   kind: SchemeKind;
   value(id: number): number;
   key: string;
+  range: string;
 }
 
 interface Options {
@@ -325,7 +327,8 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       drawnScheme = scheme;
       const mapKey =
         `${major}:${layers.map((l) => `${l.kind}:${mode[l.kind]}:${l.key}`).join("|")}:` +
-        (particles ? Object.values(tune).join() : input.value);
+        (particles ? Object.values(tune).join() : input.value) +
+        `:${legend.lockKey()}`;
       if (mapKey === drawn) return drawnKeys;
       drawn = mapKey;
       showSimplify();
@@ -338,14 +341,14 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       let layer: SchemeParticles | undefined;
 
       if (q && particles) {
-        const p = riverParticles(major, net, scheme, q.value, theme, tune);
+        const p = riverParticles(major, net, scheme, q.value, theme, tune, (ref) => legend.hold(`${q.range}:particles`, ref));
         layer = p.layer ?? undefined;
         const top = nice(p.ref);
         const color = rgb(theme.particleRiver);
         const fractions = tune.decades >= 2 ? [100, 10, 1] : [10, 3, 1];
         out.set("Q", { status: "", key: { kind: "lines", items: fractions.map((f) => ({ value: top / f, size: p.width(top / f), color })) } });
       } else if (q) {
-        const ref = Math.max(0, ...ids.map(q.value).filter(Number.isFinite)) || 1;
+        const ref = legend.hold(q.range, Math.max(0, ...ids.map(q.value).filter(Number.isFinite)) || 1);
         const width = (v: number) => (v > 0 ? Math.max(Q_MIN_PX, (v / ref) * Q_PX) : 0);
         for (const line of scheme.lines) {
           const v = lineQ(line, q.value, scheme);
@@ -365,7 +368,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       const ds = layers.find((l) => l.kind === "dS");
       if (ds) {
         const values = ids.map(ds.value).filter(Number.isFinite);
-        const ref = quantile(values.map(Math.abs), 0.98) || 1;
+        const ref = legend.hold(ds.range, quantile(values.map(Math.abs), 0.98) || 1);
         const radius = (v: number) => Math.min(DS_MAX_PX, Math.max(DS_MIN_PX, Math.sqrt(Math.abs(v) / ref) * DS_PX));
         dots = ids
           .map((id) => ({ id, v: ds.value(id) }))
@@ -426,6 +429,8 @@ function riverParticles(
   value: (id: number) => number,
   theme: WaterMap["theme"],
   tune: ParticleSettings,
+  /** The largest discharge as it is, or as it was locked (LayerLegend.hold). */
+  hold: (ref: number) => number,
 ) {
   if (!net) return { layer: null, ref: 1, width: () => 0 };
   const maxArea = new Map<number, number>();
@@ -439,7 +444,7 @@ function riverParticles(
     const v = max ? value(net.subBasin[a]) : NaN;
     if (Number.isFinite(v) && v > 0) q[a] = (v * net.area[a]) / max!;
   }
-  const ref = q.reduce((m, v) => Math.max(m, v), 0) || 1;
+  const ref = hold(q.reduce((m, v) => Math.max(m, v), 0) || 1);
   /** 0 at 10^-decades of the largest discharge, 1 at it (below 0: not drawn). */
   const level = (v: number) => (v > 0 ? 1 + Math.log10(v / ref) / tune.decades : -1);
   const width = (v: number) => (level(v) >= 0 ? tune.minWidth + level(v) * (tune.maxWidth - tune.minWidth) : 0);

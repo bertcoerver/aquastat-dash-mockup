@@ -13,13 +13,15 @@ import { bordersLayer } from "./layers/borders";
 import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
-import { basinSchemeLayers, PARTICLES_ID, type BasinScheme } from "./layers/basin-scheme";
+import { barsLayer, type Bar } from "./layers/bars";
+import { basinSchemeLayers, PARTICLES_ID, type BasinScheme, type SchemeArrow, type SchemeDot, type SchemeLineStyle } from "./layers/basin-scheme";
 import { EFFECTS_ID, effectGroundLayers, effectLayers, type BasinEffects } from "./layers/basin-effects";
 import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat } from "./places";
 import { THEMES, type Color, type MapTheme } from "./theme";
+import { createTween, easeOut, linear, type Timing } from "./tween";
 
 /** Layers the user can switch on and off (see the layers menu). */
 export type ToggleableLayer = "rivers" | "lakes";
@@ -79,6 +81,19 @@ export interface WaterMap {
   setCountryFills(fills: { key: string; colors: Map<number, Color> } | null): void;
   /** Country view: circles on countries (proportional symbols, rings), by `key` as above. */
   setCountrySymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
+  /** Basin view: circles on basins (a statistics map drawn as circles), by `key` as above. */
+  setBasinSymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
+  /**
+   * The Country or Basin view: 3D bars on the areas (a statistics map drawn as bars), by
+   * `key` as above. While a view's bars are shown, the map is tilted, to see them stand.
+   */
+  setBars(view: "country" | "basin", bars: { key: string; items: Bar[] } | null): void;
+  /**
+   * A range playing in the Country or Basin view, a step every `stepMs` (null: not
+   * playing): the map's changes are then eased over the whole step, evenly, so they flow
+   * on from one step to the next (else, quicker, slowing at the end).
+   */
+  setPlayback(stepMs: number | null): void;
   theme: MapTheme;
 }
 
@@ -120,6 +135,9 @@ interface MapOptions {
   onMarkerDrop?: (lngLat: LngLat) => void;
 }
 
+/** How long a change of the map's colours and sizes is eased over (when not playing). */
+const EASE_MS = 400;
+
 /** How near the marker a press picks it up, in pixels. */
 const MARKER_GRAB = 10;
 
@@ -138,10 +156,38 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     outlined: [] as number[],
     countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
+    basinSymbols: null as { key: string; items: CountrySymbol[] } | null,
+    bars: { country: null, basin: null } as Record<"country" | "basin", { key: string; items: Bar[] } | null>,
     basinStats: null as BasinStatFills | null,
     scheme: null as BasinScheme | null,
     effects: null as BasinEffects | null,
     dragged: null as LngLat | null, // the marker while it is dragged
+  };
+
+  // Changes eased in (tween.ts): the fills by deck.gl, the rest here, paired by key.
+  // (The same object until the playback changes: a new one is a changed prop to deck.gl.)
+  const EASED: Timing = { duration: EASE_MS, easing: easeOut };
+  let playing: Timing | null = null;
+  const timing = () => playing ?? EASED;
+  const tween = <T extends object>(keyOf: (item: T) => unknown, zero: Partial<T>) =>
+    createTween<T>({ keyOf, zero, timing, onFrame: () => render() });
+  const symbolTweens = {
+    country: tween<CountrySymbol>((s) => s.id, { radius: 0 }),
+    basin: tween<CountrySymbol>((s) => s.id, { radius: 0 }),
+  };
+  const barTweens = {
+    country: tween<Bar>((b) => b.position.join(), { height: 0 }),
+    basin: tween<Bar>((b) => b.position.join(), { height: 0 }),
+  };
+  const schemeTweens = {
+    // (A line's path is the scheme's own: the same array as long as the scheme is.)
+    lines: tween<SchemeLineStyle>((l) => l.path, { width: 0 }),
+    arrows: tween<SchemeArrow>((a) => a.subBasin, { size: 0 }),
+    dots: tween<SchemeDot>((d) => d.subBasin, { radius: 0 }),
+  };
+  const schemeShown = () => {
+    const shown = <T>(t: { get(): { key: string; items: T[] } | null }) => t.get() ?? { key: "", items: [] };
+    return { lines: shown(schemeTweens.lines), arrows: shown(schemeTweens.arrows), dots: shown(schemeTweens.dots), transition: timing() };
   };
 
   const map = new maplibregl.Map({
@@ -193,6 +239,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       selected: state.selection.subBasin || stats ? null : state.selection.majorBasin,
       selectedColor: theme.selected,
       fills: stats?.level === "major" ? stats : undefined,
+      transition: timing(),
     });
     // Sub-basins are only drawn to fill the selected one, to shade the hovered one
     // and those upstream of it, or to show the water balance model's values or a
@@ -205,6 +252,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       selected: values ? null : state.selection.subBasin,
       selectedColor: theme.selectedSubBasin,
       fills: values ?? state.hoverFills,
+      // (The shading under the pointer follows it at once.)
+      transition: values ? timing() : undefined,
     });
     const scheme = basins ? state.scheme : null;
     const effects = basins ? state.effects : null;
@@ -218,6 +267,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         selectedColor: theme.selected,
         visible: !basins,
         fills: state.view === "country" ? state.countryFills : undefined,
+        transition: timing(),
       }),
       ...[state.wapor, state.waporNext].flatMap((entry) => (entry ? waporLayers(entry) : [])),
       major.areas,
@@ -232,7 +282,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       }),
       lakesLayer({ color: theme.water, visible: state.visible.lakes }),
       subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
-      ...basinSchemeLayers(scheme),
+      ...basinSchemeLayers(scheme, schemeShown()),
       ...effectLayers(effects),
       countryOutlineLayer({
         m49: state.selection.country,
@@ -240,7 +290,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         halo: theme.markerRing,
         visible: state.view === "country" && Boolean(state.countryFills),
       }),
-      countrySymbolsLayer({ symbols: state.view === "country" ? visibleSymbols() : null }),
+      barsLayer({ bars: shownBars(), zoom: barsZoom }),
+      countrySymbolsLayer({ symbols: visibleSymbols() }),
       // The clicked point: only the Local view is about a point.
       markerLayer({
         position: state.view === "local" ? (state.dragged ?? state.selection.lngLat) : null,
@@ -253,8 +304,9 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   // Only the circles on the near side of the globe: they are drawn without a depth
   // test (like everything here), so the far side's would show through.
   let symbolsKey = "";
+  const shownSymbols = () => (state.view === "country" || state.view === "basin" ? symbolTweens[state.view].get() : null);
   function visibleSymbols() {
-    const symbols = state.countrySymbols;
+    const symbols = shownSymbols();
     if (!symbols) return null;
     const { lng, lat } = map.getCenter();
     const zoom = map.getZoom();
@@ -265,11 +317,34 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     return { key, items: near };
   }
   map.on("move", () => {
-    if (!state.countrySymbols || state.view !== "country") return;
+    // The bars keep their height in pixels: drawn again as the zoom changes.
+    const zoom = Math.round(map.getZoom() * 20) / 20;
+    if (shownBars() && zoom !== barsZoom) {
+      barsZoom = zoom;
+      return render();
+    }
+    if (!shownSymbols()) return;
     const before = symbolsKey;
     visibleSymbols();
     if (symbolsKey !== before) render();
   });
+
+  const shownBars = () => (state.view === "country" || state.view === "basin" ? barTweens[state.view].get() : null);
+  let barsZoom = Math.round(map.getZoom() * 20) / 20;
+  // Tilted for the bars (and back flat when they go), unless it was tilted already.
+  const TILT = 40;
+  let tilted = false;
+  function tilt() {
+    // (The bars set, not those still shrinking away.)
+    const want = (state.view === "country" || state.view === "basin") && Boolean(state.bars[state.view]);
+    if (want && !tilted && map.getPitch() < 15) {
+      tilted = true;
+      map.easeTo({ pitch: TILT, duration: 800 });
+    } else if (!want && tilted) {
+      tilted = false;
+      map.easeTo({ pitch: 0, duration: 800 });
+    }
+  }
 
   function handleClick(info: PickingInfo) {
     onClick?.(toLngLat(info.coordinate), Boolean(info.object));
@@ -424,6 +499,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       state.view = view;
       render();
       animate();
+      tilt();
     },
     setLayerVisible(layer, visible) {
       state.visible[layer] = visible;
@@ -494,6 +570,9 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     setBasinScheme(scheme) {
       if (scheme?.key === state.scheme?.key) return;
       state.scheme = scheme;
+      schemeTweens.lines.set(scheme && { key: scheme.key, items: scheme.lines });
+      schemeTweens.arrows.set(scheme && { key: scheme.key, items: scheme.arrows });
+      schemeTweens.dots.set(scheme && { key: scheme.key, items: scheme.dots });
       render();
       animate();
     },
@@ -505,7 +584,25 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     setCountrySymbols(symbols) {
       if (symbols?.key === state.countrySymbols?.key) return;
       state.countrySymbols = symbols;
+      symbolTweens.country.set(symbols);
       render();
+    },
+    setBasinSymbols(symbols) {
+      if (symbols?.key === state.basinSymbols?.key) return;
+      state.basinSymbols = symbols;
+      symbolTweens.basin.set(symbols);
+      render();
+    },
+    setPlayback(stepMs) {
+      playing = stepMs ? { duration: stepMs, easing: linear } : null;
+    },
+    setBars(view, bars) {
+      if (bars?.key === state.bars[view]?.key) return;
+      state.bars[view] = bars;
+      barTweens[view].set(bars);
+      barsZoom = Math.round(map.getZoom() * 20) / 20;
+      render();
+      tilt();
     },
     setWapor(period, onLoad, seamless = false) {
       const same = (entry: WaporEntry | null) =>
