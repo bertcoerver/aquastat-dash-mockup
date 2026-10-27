@@ -37,7 +37,7 @@ import { MultiCOGLayer } from "@developmentseed/deck.gl-geotiff";
 import { GeoTIFF, PerOriginSemaphore, defaultDecoderPool, type RasterArray, type RasterTypedArray } from "@developmentseed/geotiff";
 import type { Texture } from "@luma.gl/core";
 import { MONTHS, dkD, dkFirstDay, dkLastDay, dkM, dkY, fmtDay } from "../../toolbar/dekads";
-import { isDekads, type DayRange } from "../../toolbar/range-rules";
+import { type DayRange } from "../../toolbar/range-rules";
 import { cogImage, cogTile } from "../../local/cog-pixel";
 import { boxInL2 } from "./wapor-l2";
 import { block, blockName, formatPlan, planRange, type Block, type BlockKind } from "./wapor-plan";
@@ -475,8 +475,7 @@ export function waporPeriod(
     cost: plan.cost,
     unpublished: skipped,
     qualityUrl: null,
-    // A range that starts or ends within a dekad.
-    note: isDekads(range) ? null : "Part of a dekad: counted at its average per day.",
+    note: null,
     key,
     level,
     l2: null,
