@@ -16,8 +16,8 @@
  * whole multiples of their length, so the ranges don't overlap. Below MIN_OTHERS such
  * years there is no average to compare with.
  *
- * The variables: precipitation (PCP), actual evapotranspiration (AETI), the share of
- * PCP that evaporates (AETI/PCP), PCP − AETI, all from WaPOR v3 L1 (stats-data.ts), in
+ * The variables: precipitation (PCP), actual evapotranspiration (AETI), the evaporative
+ * index (AETI/PCP), PCP − AETI, all from WaPOR v3 L1 (stats-data.ts), in
  * the units picked in the legend (per day, month or year, or the total over the period;
  * per m² (mm) or over the basin (km³)); and the model's discharge (Q, at the outlets)
  * and storage change (ΔS), precomputed (model.ts), in m³/s.
@@ -153,7 +153,7 @@ const RATIO_RAMP = ["#fff5eb", "#fee6ce", "#fdd0a2", "#fdae6b", "#fd8d3c", "#f16
 const MEASURES: Record<MeasureKey, Measure> = {
   pcp: { label: V.pcp.label, short: "PCP", color: C.pcp, ramp: STYLES.PCP.ramp, scale: "linear", anomaly: "relative" },
   aeti: { label: V.aeti.label, short: "AETI", color: C.aeti, ramp: STYLES.AETI.ramp, scale: "linear", anomaly: "relative" },
-  ratio: { label: "Share of precipitation evaporated", short: "AETI/PCP", color: "#d94801", ramp: RATIO_RAMP, scale: "linear", anomaly: "absolute" },
+  ratio: { label: "Evaporative index", short: "AETI/PCP", color: "#d94801", ramp: RATIO_RAMP, scale: "linear", anomaly: "absolute" },
   balance: { label: V.balance.label, short: V.balance.short, color: C.balance, ramp: BALANCE_RAMP, scale: "diverging", anomaly: "absolute" },
   Q: { label: STYLES.Q.label, short: "Q", color: STYLES.Q.color, ramp: STYLES.Q.ramp, scale: "log", flux: { v: "Q" }, anomaly: "relative" },
   dS: { label: STYLES.dS.label, short: "ΔS", color: STYLES.dS.color, ramp: STYLES.dS.ramp, scale: "diverging", flux: { v: "dS" }, anomaly: "absolute" },
@@ -731,7 +731,7 @@ export const TOPICS: TopicDef[] = [
     tiles: [
       { id: "t-pcp", label: "Precipitation", color: STYLES.PCP.color, measure: "pcp" },
       { id: "t-aeti", label: "Evapotranspiration", color: STYLES.AETI.color, measure: "aeti" },
-      { id: "t-ratio", label: "Share evaporated", color: MEASURES.ratio.color, measure: "ratio" },
+      { id: "t-ratio", label: "Evaporative index", color: MEASURES.ratio.color, measure: "ratio" },
     ],
     cards: [
       groupCard("pcp"),
