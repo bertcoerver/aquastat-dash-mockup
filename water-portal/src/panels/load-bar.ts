@@ -122,7 +122,9 @@ export function initLoadBar() {
     const end = begin();
     try {
       const response = await quietFetch(input, init);
-      if (!response.body) {
+      // (Chrome gives a HEAD response an empty body, which nobody reads.)
+      const method = init?.method ?? (input instanceof Request ? input.method : "GET");
+      if (!response.body || method.toUpperCase() === "HEAD") {
         end();
         return response;
       }
