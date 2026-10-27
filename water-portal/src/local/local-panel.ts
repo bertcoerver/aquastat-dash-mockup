@@ -41,6 +41,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   const message = $("lp-message");
   const section = $("lp-series");
   const caption = $("lp-ts-caption");
+  const empty = $("lp-ts-empty");
   const updateChart = initTimeseries($("lp-overview"), $("lp-zoom"), (range) => setRange(range));
   // A ratio (WP): its value over the selected days matters most, so first by year.
   const barsSection = $("lp-bars");
@@ -150,17 +151,14 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
     frame = 0;
     const { variable } = state;
     message.classList.toggle("error", status.kind === "error");
-    message.textContent =
-      status.kind === "error"
-        ? status.message
-        : status.kind === "idle"
-            ? "Click the map to see the time series at that point of the variable picked in the legend."
-            : "";
+    message.textContent = status.kind === "error" ? status.message : "";
     message.hidden = !message.textContent;
     // How many of the dekads have been read, on the load bar.
     setProgress("local-series", status.kind === "loading" && series ? series.loaded / series.dekads.length : null);
 
-    section.hidden = !series;
+    // The series card is always there; until there's a point, just a word to pick one.
+    empty.hidden = status.kind !== "idle";
+    for (const el of [caption, $("lp-overview"), $("lp-zoom")]) el.hidden = !series;
     const ratio = series?.ratio && state.days ? yearBars(series, state.days) : null;
     barsSection.hidden = !ratio;
     markPinned(); // (only a card on show)
@@ -241,6 +239,8 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
 
   return {
     setView(view) {
+      // Opening the Local view pins the series card.
+      if (view === "local" && state.view !== "local") setPinned("series");
       state.view = view;
       sync();
     },

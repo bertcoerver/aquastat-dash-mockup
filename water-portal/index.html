@@ -262,7 +262,6 @@
               </form>
             </div>
           </div>
-          <p id="lp-subtitle">Click the map, or the title to type coordinates.</p>
         </div>
       </header>
       <div class="wb-body" id="lp-body">
@@ -276,9 +275,11 @@
           <div id="lp-bars-chart"></div>
           <p id="lp-bars-caption"></p>
         </section>
-        <section class="wb-section lp-section cp-card" id="lp-series" data-pin="series" tabindex="0" aria-label="Time series" hidden>
+        <section class="wb-section lp-section cp-card" id="lp-series" data-pin="series" tabindex="0" aria-label="Time series">
           <h3><span id="lp-ts-title">Time series</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin
                 type="button" title="Remove pin" aria-label="Remove pin">×</button></span></h3>
+          <!-- No point yet: this instead of the charts. -->
+          <p class="ch-empty" id="lp-ts-empty" hidden>Click the map, or the title to type coordinates, to see the time series there.</p>
           <p id="lp-ts-caption"></p>
           <div class="wb-overview" id="lp-overview"></div>
           <div class="wb-zoom" id="lp-zoom"></div>
