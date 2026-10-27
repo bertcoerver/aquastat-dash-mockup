@@ -5,8 +5,9 @@
  * evapotranspiration (RET, about 30 km: 0.3125° × 0.25°, AgERA5's grid). They're
  * read straight from FAO's bucket (it sends CORS headers). WaPOR publishes one COG per
  * dekad, and for some variables per calendar month and calendar year too (see
- * WAPOR_VARIABLES). A range is added up from one or more of them (see wapor-plan.ts for
- * which), tile by tile as they load, and always shown as the average per day over the
+ * WAPOR_VARIABLES; NPP's years are total biomass production's, converted). A range is
+ * added up from one or more of them (see wapor-plan.ts for which), tile by tile as
+ * they load, and always shown as the average per day over the
  * range, e.g. in mm/day. A range can start and end on any day: of a dekad it only
  * partly covers, it takes those days' share of the dekad's raster.
  *
@@ -70,6 +71,11 @@ export interface WaporVariable {
   scale: number;
   /** The periods WaPOR publishes it for (mapset L1-<id>-<kind>); none if made from `parts`. */
   kinds: BlockKind[];
+  /**
+   * Kinds read from another variable's mapset (L1-<id>-<kind>), times `scale` instead of
+   * this one's: NPP's years are total biomass production's (see WAPOR_VARIABLES).
+   */
+  from?: Partial<Record<BlockKind, { id: string; scale: number }>>;
   /** Published at level 2 too, for the same periods (see waporHasL2 for one made from `parts`). */
   l2?: boolean;
   /** Whether L1-QUAL-NDVI-D goes with its dekads (same grid, modelled from NDVI). */
@@ -125,6 +131,11 @@ const STYLES = {
   PCP_A: { quantities: [0, 100, 250, 500, 750, 1000, 1250, 1500, 2000, 2500, 3000], colors: PCP11 },
   NPP: { quantities: [0, 0.5, 1.5, 3, 6], colors: NPP5 },
   NPP_M: { quantities: [0, 15, 45, 90, 180], colors: NPP5 },
+  // TBP-A's (kg DM/ha) as NPP: × 0.045 gC/m² (see NPP in WAPOR_VARIABLES).
+  NPP_A: {
+    quantities: [0, 1000, 3000, 6000, 9000, 12000, 15000, 18000, 21000].map((q) => q * 0.045),
+    colors: ["#f7fcf5", "#e5f5e0", "#c9e9c2", "#a5da9f", "#7ac77b", "#4aaf61", "#29924a", "#077331", "#00441b"],
+  },
 } satisfies Record<string, WaporRamp>;
 
 /** In the order of the legend's menu. Published periods as in WaPOR's catalogue. */
@@ -219,11 +230,16 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     perPixel: "kgC/day",
     pixel: "300 m",
     scale: 0.001,
-    kinds: ["D", "M"],
+    // WaPOR has no annual NPP, but its annual total biomass production (L1-TBP-A, kg
+    // DM/ha) is the year's NPP converted: × 10 (gC/m² → kg/ha) / 0.45 (carbon in dry
+    // matter). So the year's NPP (gC/m²) = TBP × 0.045, to within TBP's rounding to whole
+    // kg/ha (checked against the sum of NPP-M at four points, 2023: TBP / NPP = 22.2217).
+    kinds: ["D", "M", "A"],
+    from: { A: { id: "TBP", scale: 0.045 } },
     l2: true,
     quality: true,
     ramp: { quantities: [0, 1, 2, 3, 4], colors: ["#ffffcc", "#d9f0a3", "#78c679", "#238443", "#004529"] },
-    styles: { D: STYLES.NPP, M: STYLES.NPP_M },
+    styles: { D: STYLES.NPP, M: STYLES.NPP_M, A: STYLES.NPP_A },
   },
   {
     id: "PCP-AETI",
@@ -350,7 +366,15 @@ export const fmtArea = (m2: number) => (m2 < 1e6 ? `${+(m2 / 1e4).toFixed(1)} ha
 /** AETI's: the map's colours before any variable is picked. */
 export const DEFAULT_RAMP: WaporRamp = WAPOR_VARIABLES[0].ramp;
 
-const mapsetOf = (variable: WaporVariable, kind: BlockKind, level: WaporLevel = "L1") => `${levelOf(variable, level)}-${variable.id}-${kind}`;
+const mapsetOf = (variable: WaporVariable, kind: BlockKind, level: WaporLevel = "L1") =>
+  `${levelOf(variable, level)}-${variable.from?.[kind]?.id ?? variable.id}-${kind}`;
+/** Physical value = raw * this, for a variable's rasters of a kind. */
+const scaleOf = (variable: WaporVariable, kind: BlockKind) => variable.from?.[kind]?.scale ?? variable.scale;
+/** A raster in an equation: "M[2025-01]", or from another variable's mapset "TBP[2025]×0.045". */
+const termName = (variable: WaporVariable, b: Block) => {
+  const from = variable.from?.[b.kind];
+  return from ? `${from.id}[${b.code}]×${from.scale}` : blockName(b);
+};
 const rasterUrl = (mapset: string, code: string) => `${BUCKET}/${mapset}/WAPOR-3.${mapset}.${code}.tif`;
 
 /** A variable's raster for one dekad (of a variable with rasters of its own), at a level (L1 if it has no L2). */
@@ -427,8 +451,8 @@ export function waporPeriod(
   // The total (a dekadal raster is per day, so times its days), over the days.
   const terms = plan.terms.map(({ block: b, coef, days: n }) => ({
     url: url(b),
-    name: blockName(b),
-    factor: (variable.scale * (n ?? coef)) / days,
+    name: termName(variable, b),
+    factor: (scaleOf(variable, b.kind) * (n ?? coef)) / days,
   }));
   const key = termsKey(terms);
 
@@ -452,7 +476,7 @@ export function waporPeriod(
       range,
       days,
       terms,
-      equation: `${equation} ${blockName(b)}${b.kind === "D" ? "" : ` / ${days}`}`,
+      equation: `${equation} ${termName(variable, b)}${b.kind === "D" ? "" : ` / ${days}`}`,
       cost: plan.cost,
       unpublished: skipped,
       qualityUrl: b.kind === "D" && variable.quality ? rasterUrl(qualityOf(levelOf(variable, level)), b.code) : null,
@@ -471,7 +495,7 @@ export function waporPeriod(
     range,
     days,
     terms,
-    equation: `${equation} (${formatPlan(plan)}) / ${days}`,
+    equation: `${equation} (${formatPlan(plan, (b) => termName(variable, b))}) / ${days}`,
     cost: plan.cost,
     unpublished: skipped,
     qualityUrl: null,

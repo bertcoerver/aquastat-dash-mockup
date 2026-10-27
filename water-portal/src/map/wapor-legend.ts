@@ -72,6 +72,7 @@ const BLOCK_KINDS: Record<string, string> = {
   D: "D[…]: a dekadal raster, per day (n·D: n of its days)",
   M: "M[…]: a monthly raster, the month's total",
   A: "A[…]: an annual raster, the year's total",
+  TBP: "TBP[…]×0.045: WaPOR has no annual NPP; its annual total biomass production (kg DM/ha) × 0.045 is the year's NPP (gC/m²)",
 };
 
 /** The period's tooltip: how the map is made from WaPOR's rasters, and what they are. */

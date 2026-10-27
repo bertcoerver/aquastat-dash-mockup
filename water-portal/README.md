@@ -280,7 +280,11 @@ water-portal/
   newest periods are published with a delay; the legend then says so. The files are
   written with `INTERLEAVE=BAND`, which `MultiCOGLayer` 0.9 rejects even for one band;
   [patches/](patches/) fixes that and is applied by `npm install` (patch-package).
-- **WaPOR level 2** (`L2-AETI-D`, `-M`, `-A`, `L2-T-`, `-E-`, `-I-`, `-NPP-`,
+  WaPOR has no annual NPP, so NPP's years come from `L1-TBP-A` (total biomass
+  production, kg DM/ha), which is the year's NPP × 22.222: NPP (gC/m²) = TBP × 0.045,
+  shown in the equation as `TBP[2025]×0.045`. That makes a year of NPP (and of WP) one
+  raster instead of twelve monthly ones.
+- **WaPOR level 2** (`L2-AETI-D`, `-M`, `-A`, `L2-T-`, `-E-`, `-I-`, `-NPP-`, `L2-TBP-A`,
   `L2-QUAL-NDVI-D`: 100 m) covers Africa, the Near East, Pakistan, Afghanistan, Sri
   Lanka and Colombia, for the same periods as L1 and published in step with it. Each
   file spans 60° N – 60° S on a grid three times as fine as L1's, lined up with it, with

@@ -125,12 +125,12 @@ export function planRange(days: DayRange, unpublished: (b: Block) => boolean = (
  * The plan as an equation of totals in mm, e.g. "A[2025] − M[2025-01] − M[2025-12]".
  * A dekadal raster is in mm/day, so it's multiplied by its days: "11·D[2025-03-D3]".
  */
-export function formatPlan({ terms }: Plan) {
+export function formatPlan({ terms }: Plan, name: (b: Block) => string = blockName) {
   return terms
     .map(({ block: b, coef, days }, i) => {
       const factor = Math.abs(days ?? coef);
       const sign = coef < 0 ? (i ? " − " : "−") : i ? " + " : "";
-      return `${sign}${factor === 1 && days === undefined ? "" : `${factor}·`}${blockName(b)}`;
+      return `${sign}${factor === 1 && days === undefined ? "" : `${factor}·`}${name(b)}`;
     })
     .join("");
 }
