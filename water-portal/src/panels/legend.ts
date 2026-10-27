@@ -17,7 +17,8 @@
  *     <div class="legend-title"><button class="title-menu" …>…</button></div>
  *   </aside>
  *
- * Also the ticks of a colour ramp, for the WaPOR legend and the water balance's (ticksHtml).
+ * Also the ticks of a colour ramp, for the WaPOR legend and the water balance's (ticksHtml),
+ * and the padlock, for the WaPOR legend's (initLock).
  */
 import type { WaporStretch } from "../map/layers/wapor";
 import { fmtStop, initRampMenu, type RampMenu } from "./ramp-menu";
@@ -101,6 +102,40 @@ export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lin
 export function nice(x: number) {
   const p = 10 ** Math.floor(Math.log10(x));
   return [5, 2, 1].map((m) => m * p).find((v) => v <= x) ?? p;
+}
+
+const LOCK_SVG =
+  `<svg viewBox="0 0 12 14" width="12" height="14" aria-hidden="true"><path class="lock-shackle" fill="none" stroke="currentColor" ` +
+  `stroke-width="1.5"/><rect x="1" y="6.5" width="10" height="7" rx="1.5" fill="currentColor"/></svg>`;
+
+/** A padlock at the end of a legend's title; `onToggle` runs when it's clicked, with whether it's now locked. */
+export function initLock(aside: HTMLElement, onToggle: (locked: boolean) => void) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "legend-lock";
+  button.innerHTML = LOCK_SVG;
+  aside.querySelector(".legend-title")!.append(button);
+  let locked = false;
+  function set(on: boolean) {
+    locked = on;
+    button.setAttribute("aria-pressed", String(on));
+    // Open: the shackle raised, its right leg out of the body.
+    button.querySelector(".lock-shackle")!.setAttribute("d", on ? "M3.5 6.5V4a2.5 2.5 0 0 1 5 0v2.5" : "M3.5 6.5V2.5a2.5 2.5 0 0 1 5 0V3.5");
+    const what = "the colour ranges and sizes";
+    button.title = on ? `Unlock ${what}: fit them to the values again` : `Lock ${what} as they are, so other periods and places compare`;
+    button.setAttribute("aria-label", on ? "Unlock the ranges" : "Lock the ranges");
+  }
+  set(false);
+  button.addEventListener("click", () => {
+    set(!locked);
+    onToggle(locked);
+  });
+  return {
+    get locked() {
+      return locked;
+    },
+    set,
+  };
 }
 
 /** The ticks under a colour ramp, with as many decimals as their range needs. */

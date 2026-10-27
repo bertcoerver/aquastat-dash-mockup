@@ -4,10 +4,11 @@
  * yet, a menu for the unit (per day, month or year, or the period's total; per m² or
  * over a pixel: only the numbers change), and on the ramp itself, one for how much of
  * the values in view the colours span. For a dekad of a 300 m variable it also has the quality slider,
- * which hides pixels whose NDVI input is gap-filled over more dekads. The markup lives
- * in index.html.
+ * which hides pixels whose NDVI input is gap-filled over more dekads. A padlock in the
+ * title locks the colours' range as it is (until it's unlocked or another variable is
+ * picked). The markup lives in index.html.
  */
-import { ticksHtml } from "../panels/legend";
+import { initLock, ticksHtml } from "../panels/legend";
 import { DEFAULT_STRETCH, initRampMenu } from "../panels/ramp-menu";
 import { initTitleMenu } from "../panels/title-menu";
 import { fmtDay } from "../toolbar/dekads";
@@ -101,6 +102,7 @@ export interface WaporLegend {
  * `onStretch` runs when a colour range is picked from the ramp's menu, and once at the start.
  * `onVariable` runs when another variable is picked from the title's menu.
  * `onUnits` runs when the unit button is pressed.
+ * `onLock` runs when the colours' range is locked or unlocked.
  */
 export function initWaporLegend({
   variable: initial,
@@ -108,14 +110,17 @@ export function initWaporLegend({
   onStretch,
   onVariable,
   onUnits,
+  onLock,
 }: {
   variable: WaporVariable;
   onMaxGap: (maxGap: number | null) => void;
   onStretch: (cut: WaporStretch) => void;
   onVariable: (variable: WaporVariable) => void;
   onUnits: (units: WaporUnits) => void;
+  onLock: (locked: boolean) => void;
 }): WaporLegend {
   const legend = $("wapor-legend");
+  const lock = initLock(legend, (locked) => lockRamp(locked));
 
   let variable = initial;
   let level: WaporLevel = "L1";
@@ -124,6 +129,11 @@ export function initWaporLegend({
     () => ({ options: WAPOR_VARIABLES.map((v) => ({ id: v.id, label: v.label })), current: variable.id }),
     (id) => {
       if (id === variable.id) return;
+      // Another variable's values: its own range.
+      if (lock.locked) {
+        lock.set(false);
+        lockRamp(false);
+      }
       showVariable(waporVariable(id));
       onVariable(variable);
       // Not every variable has every unit (a ratio has no per month, year or pixel).
@@ -219,9 +229,13 @@ export function initWaporLegend({
   input.addEventListener("input", () => onMaxGap(update()));
   update(); // starts at "all", as the map does
 
-  // How much of the values in view the colours span: a menu on the ramp.
-  initRampMenu($("wapor-ramp") as HTMLButtonElement, "the values in view", DEFAULT_STRETCH, onStretch);
+  // How much of the values in view the colours span: a menu on the ramp (none while locked).
+  const rampMenu = initRampMenu($("wapor-ramp") as HTMLButtonElement, "the values in view", DEFAULT_STRETCH, onStretch);
   onStretch(DEFAULT_STRETCH);
+  function lockRamp(locked: boolean) {
+    rampMenu.setEnabled(!locked);
+    onLock(locked);
+  }
 
   function showRamp(ramp: WaporRamp) {
     lastRamp = ramp;

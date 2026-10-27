@@ -250,6 +250,7 @@ const layersMenu = initLayersMenu(setLayerVisible);
 let waporVariable = WAPOR_VARIABLES[0];
 let waporMaxGap: number | null = null;
 let waporStretch: WaporStretch = 1;
+let waporLocked = false; // the legend's lock: the colour map stays as it is
 let stretchTimer = 0; // (before initWaporLegend, which calls onStretch)
 const waporLegend = initWaporLegend({
   variable: waporVariable,
@@ -274,6 +275,10 @@ const waporLegend = initWaporLegend({
     showWapor(view === "local" ? waporRange : null);
   },
   onUnits: (units) => localPanel.setUnits(units),
+  onLock(locked) {
+    waporLocked = locked;
+    stretchWapor();
+  },
 });
 waporLegend.ramp(waporVariable.ramp);
 // Local view: the legend's variable at the selected point, over WaPOR's whole record.
@@ -335,13 +340,14 @@ function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boo
 /**
  * The colour map spans the values on screen (see the stretch button in the legend):
  * worked out again when the view moves, a tile loads, or the period, quality filter or
- * stretch changes, at most every so often. While playing it's kept, so frames compare.
+ * stretch changes, at most every so often. While playing it's kept, so frames compare,
+ * and while the legend's lock is on.
  * Until there's a value in view, the last colour map stays.
  */
 function stretchWapor() {
   clearTimeout(stretchTimer);
   stretchTimer = window.setTimeout(() => {
-    if (!waporShown || playback !== "stopped") return;
+    if (!waporShown || playback !== "stopped" || waporLocked) return;
     const range = waporViewRange(waporShown, waporMaxGap, waporStretch);
     if (!range) return;
     let lo = range[0];
