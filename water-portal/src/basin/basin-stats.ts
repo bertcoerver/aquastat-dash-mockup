@@ -742,11 +742,13 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       if (!middles || typeof river === "string") continue;
       const where = (id: number) => river?.get(id) ?? middles.get(id);
       const size = shapeSizes(values, style.full, (ref) => legend.hold(`${spec.title}:${spec.unit}:${spec.level}:${slot}:${style.full}`, ref), spec.level === "sub");
-      sizes.set(slot, sizeKey(slot as "circles" | "bars", size, style, { one: css(theme.border, 0.6), rise: css(theme.storageRise), fall: css(theme.storageFall) }));
+      const colorOf = (v: number) => (style.colours === "sign" ? signColor(v, theme.storageRise, theme.storageFall) : scale.color(v));
+      // Their key, in their colours (in place of a ramp).
+      sizes.set(slot, sizeKey(slot as "circles" | "bars", size, (v) => css(colorOf(v) ?? theme.border, slot === "circles" ? 0.8 : 1), signed(spec)));
       ids.forEach((id, i) => {
         const v = Math.abs(values[i]);
         const position = where(id);
-        const c = style.colours === "sign" && Number.isFinite(values[i]) ? signColor(values[i], theme.storageRise, theme.storageFall) : scale.color(values[i]);
+        const c = Number.isFinite(values[i]) ? colorOf(values[i]) : null;
         if (!position || !(v > 0) || !c) return;
         const [r, g, b] = shown(id) ? c : mixColor(c, theme.land, 0.78);
         if (slot === "circles") symbols.push({ id: `${spec.level}:${id}`, position, radius: size.radius(v), fill: [r, g, b, 200], line: [r * 0.6, g * 0.6, b * 0.6, 230] });
@@ -771,8 +773,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
         if (slot === "fill" || isShape({ slot })) {
           const scale = scales.get(slot);
           const bySign = slot !== "fill" && styleOf(spec).colours === "sign";
-          // (Only the fill's ramp is a menu. By sign, the sizes' key has the colours.)
-          const key: LegendKey | null = scale?.ticks.length && !bySign ? { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, fixed: slot !== "fill" } : null;
+          // (Circles and bars have their colours in the key of their sizes.)
+          const key: LegendKey | null = slot === "fill" && scale?.ticks.length ? { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks } : null;
           const sized = sizes.get(slot) ?? null;
           const where = spec.onRivers && slot !== "fill" ? spec.note.replace(/per sub-basin$/, "per sub-basin, on its river") : spec.note;
           const note = [where, spec.scale === "log" && !bySign ? "Log scale" : "", slot === "fill" ? "" : SHAPE_NOTES[slot as "circles" | "bars"]].filter(Boolean).join(" · ");

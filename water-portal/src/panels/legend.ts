@@ -10,8 +10,8 @@
  * - classes, whose swatches switch them on and off on the map;
  * - sizes: three line widths, circles or bars, labelled with their values.
  *
- * Circles and bars have a key of sizes too, under their colours' (if any), which is a
- * menu of how they look (shape-style.ts).
+ * Circles and bars have a key of sizes, in their colours (under their classes', if
+ * any), which is a menu of how they look (shape-style.ts).
  *
  * The checklist has, to the right of each map, the icons of how it can be drawn (its
  * slot: shape-switch.ts); a click on one switches it, or adds it in that shape.

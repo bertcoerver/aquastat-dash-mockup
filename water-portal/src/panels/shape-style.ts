@@ -4,8 +4,8 @@
  * values either side of zero (a diverging ramp), green above zero and red below; and
  * which value is at full size, the 98th percentile (so a few outliers don't shrink the
  * rest) or the largest. A menu on their key of sizes in the legend (legend.ts) picks
- * them, and each map keeps its own (by its title). Also that key: three sizes, labelled
- * with their values.
+ * them, and each map keeps its own (by its title). Also that key: sizes in their colours,
+ * labelled with their values, in place of a colour ramp.
  */
 import type { Color } from "../map/theme";
 import { nice, type SizesKey } from "./legend";
@@ -77,20 +77,18 @@ export const signColor = (v: number, rise: Color, fall: Color) => (v >= 0 ? rise
 
 /**
  * The key of a map's circles or bars (`size`: shapeSizes's), round values up to the
- * reference: three sizes in `one` colour, or by sign a small and a big one above zero
- * and a big one below.
+ * reference, each in the colour it has on the map (`color`): three sizes, or for values
+ * either side of zero (`signed`) big to small below zero, then small to big above it.
  */
 export function sizeKey(
   slot: "circles" | "bars",
   size: { ref: number; radius(v: number): number; height(v: number): number },
-  style: ShapeStyle,
-  colors: { one: string; rise: string; fall: string },
+  color: (v: number) => string,
+  signed: boolean,
 ): SizesKey {
   const top = nice(size.ref);
   const px = (v: number) => (slot === "circles" ? size.radius(v) : BAR_KEY_PX * size.height(v));
-  const items =
-    style.colours === "sign"
-      ? ([[top / 4, colors.rise, "+"], [top, colors.rise, "+"], [top, colors.fall, "−"]] as const).map(([v, color, sign]) => ({ value: v, size: px(v), color, sign }))
-      : [top / 10, top / 2, top].map((v) => ({ value: v, size: px(v), color: colors.one }));
+  const values = signed ? [-top, -top / 4, top / 4, top] : [top / 10, top / 2, top];
+  const items = values.map((v) => ({ value: Math.abs(v), size: px(v), color: color(v), sign: signed ? (v < 0 ? "−" : "+") : undefined }));
   return { kind: slot, items };
 }

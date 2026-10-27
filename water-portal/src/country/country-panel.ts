@@ -507,10 +507,11 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
           symbols.push({ id: `${m49}`, position: center, radius: size.radius(v), fill: [c[0], c[1], c[2], 170], line });
         } else bars.push({ position: center, height: size.height(v), color: [c[0], c[1], c[2], 255] });
       });
-      // The key of their sizes; by sign, or an amount's (in one colour), in place of the colours'.
-      const one = spec.style.kind === "circles" ? css(hexToColor(spec.style.color), slot === "circles" ? 0.6 : 1) : css(theme.border, 0.6);
-      sizes.set(slot, sizeKey(slot, size, style, { one, rise: css(theme.storageRise), fall: css(theme.storageFall) }));
-      if (bySign || spec.style.kind === "circles") keys.set(slot, null);
+      // The key of their sizes, in their colours, in place of a ramp (classes keep theirs, and grey sizes).
+      const colorAt = (v: number) => (bySign ? signColor(v, theme.storageRise, theme.storageFall) : p.colorOf?.(v)) ?? null;
+      const tint = (c: Color | null) => (c ? css(c, slot === "circles" ? 0.7 : 1) : css(theme.border, 0.6));
+      sizes.set(slot, sizeKey(slot, size, (v) => tint(colorAt(v)), signed(spec)));
+      if (p.colorOf) keys.set(slot, null);
     }
     // Small circles on top of big ones.
     symbols.sort((a, b) => b.radius - a.radius);
@@ -572,6 +573,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const classState = (i: number) => (present && !present.has(i) ? "absent" : off.has(i) ? "off" : "on");
     let color: (m49: number) => Color | null | "off";
     let key: LegendKey | null = null;
+    // A value's colour (not for classes: their key stays, a menu of which are shown).
+    let colorOf: ((v: number) => Color | null) | null = null;
     if (style.kind === "ramp") {
       const values = countries.map((m49) => spec.value(m49));
       let scale = rampScale(style, values, style.domain, state.stretch);
@@ -579,6 +582,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const domain = style.domain || !scale.ticks.length ? scale.domain : legend.hold(`${spec.title}:${spec.unit}`, scale.domain);
       if (domain !== scale.domain) scale = rampScale(style, values, domain);
       color = (m49) => scale.color(spec.value(m49));
+      colorOf = (v) => scale.color(v);
       // A fixed range (a share): nothing to pick.
       key = { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, fixed: !!style.domain };
     } else if (style.kind === "classes") {
@@ -606,11 +610,12 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     } else {
       const c = hexToColor(style.color);
       color = () => c;
+      colorOf = () => c;
     }
     // The classes' states are only known once every country's colour is: work them all out now.
     const colors = new Map(countries.map((m49) => [m49, outside(m49) ? ("off" as const) : color(m49)]));
     if (key?.kind === "classes") key.items.forEach((item, i) => (item.state = classState(i)));
-    return { color: (m49: number) => colors.get(m49) ?? null, key };
+    return { color: (m49: number) => colors.get(m49) ?? null, key, colorOf };
   }
 
   function showMapTooltip() {
