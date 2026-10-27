@@ -295,7 +295,8 @@ water-portal/
   difference of 0.1–0.4 mm/day in July 2025, and a bias in places), so colours can
   shift at the switch. The Local panel's time series stay L1 (a series from L2's
   512-pixel tiles is 70 MB against 20 MB, for the same time; FAO's zonalstats API
-  would be 113 KB but 14–20 s with nothing shown until the end), as do the basin
+  is 113 KB but 14–20 s with nothing shown until the end, so it's only asked alongside,
+  and wins when the bucket is slow: docs/point-timeseries.md), as do the basin
   statistics (precomputed zonal statistics).
 - **Any range in the Local view** is a sum of published rasters with signs, e.g.
   Feb–Nov 2025 = `A[2025] − M[2025-01] − M[2025-12]`

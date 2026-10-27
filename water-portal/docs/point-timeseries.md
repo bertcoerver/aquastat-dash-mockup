@@ -123,6 +123,19 @@ tiles themselves are the bulk.
 
 ### 2. Hybrid: COG reads for the period, the API for the rest (no infrastructure)
 
+*Done as a race (27 October 2026).* The API is asked for the whole record alongside
+the reads, not for the rest only. What it returns that isn't read yet is filled in, and
+the reads stop; if the reads finish first, its request is dropped. A raster the reads
+can't get isn't an error if the API has it. Its values matched GDAL's for every dekad
+tried (AETI and NPP, Jan–Feb 2023, five points). Measured in the app (AETI, Kenya):
+
+- normal connection: the reads finish in 8.1 s and the API request is dropped;
+- every bucket request delayed by 1.5 s (as with the slow DNS of `slow-server.ts`):
+  the API answers at 16 s, when 168 of the 1,267 reads are done, and the rest stop.
+  WP (two API requests, for NPP and AETI) is complete at 18 s.
+
+Each point costs FAO's server one request per part, even when it's dropped.
+
 - Read the selected period's dekads from the COGs, as now, so they show in ~1–2 s.
 - Ask the API for the whole record in one background request (~113 KB), and fill in
   the rest of the chart when it arrives.
