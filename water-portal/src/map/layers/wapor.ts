@@ -1334,6 +1334,7 @@ export function waporLayer({
   onLoad,
   id = "wapor-aeti",
   hidden = false,
+  opacity = 1,
   onViewportLoad,
 }: {
   period: WaporPeriod | null;
@@ -1343,6 +1344,8 @@ export function waporLayer({
   id?: string;
   /** Loads its tiles, but doesn't draw them (the next period while playing). */
   hidden?: boolean;
+  /** How opaque it's drawn (fading in over the period before, see map.ts). */
+  opacity?: number;
   /** Runs when every tile in view has loaded. */
   onViewportLoad?: () => void;
 }) {
@@ -1360,6 +1363,7 @@ export function waporLayer({
   return new GlobeMultiCOGLayer({
     id,
     visible: !hidden,
+    opacity,
     sources: sources as Record<string, { url: string }>,
     concurrencyLimiter: LIMITER,
     composite: period.qualityUrl ? { r: "aeti", g: "quality" } : { r: "aeti" },

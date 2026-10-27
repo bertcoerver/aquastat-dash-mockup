@@ -3,7 +3,7 @@ import { MVTLayer, type GeoBoundingBox } from "@deck.gl/geo-layers";
 import { PathLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { Feature, Position } from "geojson";
 import type { Color } from "../theme";
-import type { Timing } from "../tween";
+import type { Copy } from "../tween";
 import { LOCAL_BOUNDS, geoBounds, tileOutlines } from "./basins";
 import { localTiles, ignoreMissingTile } from "./tile-urls";
 
@@ -17,40 +17,47 @@ export interface CountryProperties {
  * it's what a click on the map hits. The borders are a separate layer (borders.ts).
  * The selected country (by M49 code) is filled with `selectedColor`, unless the
  * countries have their own colours (`fills`: the Country view's map), which `key`
- * names (deck.gl only redraws the colours when it changes), eased in by `transition`.
+ * names (deck.gl only redraws the colours when it changes). A layer per copy (see
+ * createFade).
  */
 export function countriesLayer({
   color,
   selected,
   selectedColor,
   visible,
-  fills,
-  transition,
+  fills: copies,
 }: {
   color: Color;
   selected: number | null;
   selectedColor: Color;
   visible: boolean;
-  fills?: { key: string; colors: Map<number, Color> };
-  transition?: Timing;
+  fills: Copy<CountryFills | undefined>[];
 }) {
-  return new MVTLayer<CountryProperties>({
-    id: "m49-countries",
-    data: localTiles("m49"),
-    visible,
-    pickable: visible,
-    minZoom: 0,
-    maxZoom: 5,
-    onTileError: ignoreMissingTile,
-    stroked: false,
-    getFillColor: fills ? (f: { properties: CountryProperties }) => fills.colors.get(f.properties.m49) ?? color : color,
-    updateTriggers: { getFillColor: fills?.key },
-    transitions: transition && { getFillColor: transition },
-    uniqueIdProperty: "m49",
-    highlightedFeatureId: fills ? null : selected,
-    highlightColor: selectedColor,
-    parameters: { depthCompare: "always" },
-  });
+  return copies.map(
+    ({ slot, fills, opacity, visible: shown }) =>
+      new MVTLayer<CountryProperties>({
+        id: slot ? "m49-countries-1" : "m49-countries",
+        data: localTiles("m49"),
+        visible: visible && shown,
+        pickable: visible && shown,
+        opacity,
+        minZoom: 0,
+        maxZoom: 5,
+        onTileError: ignoreMissingTile,
+        stroked: false,
+        getFillColor: fills ? (f: { properties: CountryProperties }) => fills.colors.get(f.properties.m49) ?? color : color,
+        updateTriggers: { getFillColor: fills?.key },
+        uniqueIdProperty: "m49",
+        highlightedFeatureId: fills ? null : selected,
+        highlightColor: selectedColor,
+        parameters: { depthCompare: "always" },
+      }),
+  );
+}
+
+export interface CountryFills {
+  key: string;
+  colors: Map<number, Color>;
 }
 
 /** A thick outline around one country (by M49 code), drawn like the basin outlines. */

@@ -2,11 +2,14 @@
  * Changes on the map eased in, rather than jumping (mostly for playing a range: the
  * Country and Basin views' maps change at every step).
  *
- * The areas' fills use deck.gl's own transitions (`transitions` on the layer): they
- * pair the values by index, which is fine for them, as each tile's features keep their
- * order. The circles, bars and scheme lines don't: they're sorted by size, so
- * a step reorders them, and deck.gl would slide them from one place to another. Those
- * are eased here instead, paired by a key of each (its area, say).
+ * The circles, bars and scheme lines are eased item by item, paired by a key
+ * of each (its area, say): they're sorted by size, so a step reorders them, and
+ * deck.gl's own transitions, which pair values by index, would slide them from one
+ * place to another (createTween).
+ *
+ * The areas' fills fade: the layer is drawn twice, the new fills over the last, coming
+ * in by its opacity (createFade). Not deck.gl's transitions: for polygons, those read
+ * the colours back from the GPU at every change, which stalls each step.
  */
 
 export interface Timing {
@@ -93,6 +96,73 @@ export function createTween<T extends object>({
     },
     get: () => target && { key: `${target.key}:${frame}`, items: shown },
   };
+}
+
+/** One of a fading layer's two copies: its fills, how opaque it is, and whether it's drawn. */
+export interface Copy<F> {
+  slot: 0 | 1;
+  fills: F;
+  opacity: number;
+  visible: boolean;
+}
+
+export interface Fade<F> {
+  /** The fills to show: a change fades in over the last (with no timing: at once). */
+  to(fills: F, timing: Timing | null): void;
+  /** The copies to draw, bottom to top. Both always (hidden, the one under keeps its tiles). */
+  copies(): Copy<F>[];
+}
+
+/**
+ * Fills (anything with a `key` naming them, or undefined) faded in over the last. Each
+ * copy keeps its fills until it's the one to fade in again, so deck.gl only recomputes
+ * a copy's colours once per change; while fading, only the top one's opacity changes.
+ * A change while fading puts the new fills over the last ones as set, not as blended.
+ */
+export function createFade<F extends { key: unknown } | undefined>(onFrame: () => void): Fade<F> {
+  const fills = [undefined, undefined] as [F, F];
+  let top: 0 | 1 = 0;
+  let t = 1; // the top copy's opacity
+  let cancel = () => {};
+
+  return {
+    to(next, timing) {
+      if (next?.key === fills[top]?.key) return;
+      cancel();
+      if (!timing?.duration) {
+        fills[top] = next;
+        t = 1;
+        return;
+      }
+      top = top ? 0 : 1;
+      fills[top] = next;
+      t = 0;
+      cancel = animate(timing, (e) => {
+        t = e;
+        onFrame();
+      });
+    },
+    copies() {
+      const under = top ? 0 : 1;
+      return [
+        { slot: under, fills: fills[under], opacity: 1, visible: t < 1 },
+        { slot: top, fills: fills[top], opacity: t, visible: true },
+      ];
+    },
+  };
+}
+
+/** Runs `onStep` at every frame with the eased time, 0 to 1 (1 last); returns a cancel. */
+export function animate({ duration, easing }: Timing, onStep: (t: number) => void): () => void {
+  let raf = 0;
+  const start = performance.now();
+  const step = () => {
+    const p = Math.min(1, (performance.now() - start) / duration);
+    if (p < 1) raf = requestAnimationFrame(step);
+    onStep(easing(p));
+  };
+  raf = requestAnimationFrame(step);
+  return () => cancelAnimationFrame(raf);
 }
 
 function mix<T extends object>(out: T, from: T, to: T, t: number) {

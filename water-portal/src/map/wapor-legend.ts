@@ -97,6 +97,8 @@ export interface WaporLegend {
   level(level: WaporLevel): void;
   /** Show these units (picked elsewhere: the Local panel's chart). */
   setUnits(units: WaporUnits): void;
+  /** Lock the colours' range as it is, as the padlock does (if not locked yet). */
+  lock(): void;
 }
 
 /**
@@ -293,6 +295,11 @@ export function initWaporLegend({
       $("wapor-note").textContent = period.note ?? "";
     },
     ramp: showRamp,
+    lock() {
+      if (lock.locked) return;
+      lock.set(true);
+      lockRamp(true);
+    },
     setUnits(picked) {
       units = fitUnits(variable, picked);
       showPer();

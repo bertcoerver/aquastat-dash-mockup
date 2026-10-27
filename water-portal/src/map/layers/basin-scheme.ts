@@ -54,6 +54,8 @@ export interface BasinScheme {
   casing: Color;
   /** Sub-basins whose rivers the lines replace: the river tiles leave them out there. */
   subBasins: Set<number>;
+  /** Names that set (not `key`: a step of the range changes the lines, not where they are). */
+  subBasinsKey: string;
   /** The line or arrow under the pointer: its sub-basin and value (null: none). */
   onHover?(hovered: { subBasin: number; value: number } | null): void;
 }

@@ -24,7 +24,7 @@ import { placeAt, type LngLat } from "./map/places";
 import { upstreamFinder, type SubBasin } from "./map/sub-basin-network";
 import { NOTHING, selection, type SelectionSource } from "./selection";
 import { initLocalPanel } from "./local/local-panel";
-import { waporPixelArea } from "./local/point-series";
+import { setPointSeriesYield, waporPixelArea } from "./local/point-series";
 import { initWaporLegend } from "./map/wapor-legend";
 import { initWaporPlayer, type PlaybackStatus } from "./map/wapor-player";
 import { makeResizable } from "./panels/floating";
@@ -417,18 +417,25 @@ let playback: PlaybackStatus = "stopped";
 const player = initWaporPlayer({
   getRange: () => waporRange!,
   getVariable: () => waporVariable,
-  show(range, checked) {
+  show(range, checked, ms) {
     playing = true;
     toolbarApi!.setDays(range);
     playing = false;
     clearTimeout(waporTimer);
     waporWanted = waporKey(range);
+    // (Its period fades in over the frame's time.)
+    waterMap.setPlayback(ms);
     showCheckedWapor(checked, true);
   },
   onState(state) {
+    // (Locked as play is pressed: the colours of the range shown are the ones held.)
+    if (playback === "stopped" && state.status !== "stopped") waporLegend.lock();
     playback = state.status;
     if (playback === "stopped") stretchWapor();
     toolbarApi?.setPlayback(state);
+    // The frames load first.
+    setPointSeriesYield(playback !== "stopped");
+    if (playback === "stopped") waterMap.setPlayback(null);
   },
 });
 

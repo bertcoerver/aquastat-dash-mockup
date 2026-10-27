@@ -8,10 +8,10 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { View } from "../toolbar/range-rules";
-import { majorBasinsLayers, subBasinOutlinesLayer, subBasinsLayers } from "./layers/basins";
+import { majorBasinsLayers, subBasinOutlinesLayer, subBasinsLayers, type BasinFills } from "./layers/basins";
 import { bordersLayer } from "./layers/borders";
 import { HorizonExtension } from "./layers/horizon";
-import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
+import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountryFills, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
 import { barsLayer, type Bar } from "./layers/bars";
 import { basinSchemeLayers, PARTICLES_ID, type BasinScheme, type SchemeArrow, type SchemeLineStyle } from "./layers/basin-scheme";
@@ -21,7 +21,7 @@ import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat } from "./places";
 import { THEMES, type Color, type MapTheme } from "./theme";
-import { createTween, easeOut, linear, type Timing } from "./tween";
+import { animate as ease, createFade, createTween, easeOut, linear, type Fade, type Timing } from "./tween";
 
 /** Layers the user can switch on and off (see the layers menu). */
 export type ToggleableLayer = "rivers" | "lakes";
@@ -148,6 +148,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     visible: { rivers: true, lakes: true } as Record<ToggleableLayer, boolean>,
     wapor: null as WaporEntry | null,
     waporNext: null as WaporEntry | null, // seamless: loading, not drawn yet
+    waporLast: null as WaporEntry | null, // seamless: the one before, under `wapor` while it fades in
+    waporFade: 1, // `wapor`'s opacity
     waporMaxGap: null as number | null,
     waporRamp: DEFAULT_RAMP,
     hoverFills: undefined as { key: number; colors: Map<number, Color> } | undefined,
@@ -163,7 +165,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     dragged: null as LngLat | null, // the marker while it is dragged
   };
 
-  // Changes eased in (tween.ts): the fills by deck.gl, the rest here, paired by key.
+  // Changes eased in (tween.ts): the fills faded in over the last, the rest paired by key.
   // (The same object until the playback changes: a new one is a changed prop to deck.gl.)
   const EASED: Timing = { duration: EASE_MS, easing: easeOut };
   let playing: Timing | null = null;
@@ -182,6 +184,11 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     // (A line's path is the scheme's own: the same array as long as the scheme is.)
     lines: tween<SchemeLineStyle>((l) => l.path, { width: 0 }),
     arrows: tween<SchemeArrow>((a) => a.subBasin, { size: 0 }),
+  };
+  const fades = {
+    countries: createFade<CountryFills | undefined>(() => render()),
+    major: createFade<BasinFills | undefined>(() => render()),
+    sub: createFade<BasinFills | undefined>(() => render()),
   };
   const schemeShown = () => {
     const shown = <T>(t: { get(): { key: string; items: T[] } | null }) => t.get() ?? { key: "", items: [] };
@@ -225,6 +232,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     watch.observe(attrib, { attributeFilter: ["class"] });
   }
 
+  /** A fading layer's copies, with `fills` as the ones to show (eased in by `t`). */
+  function faded<F extends { key: unknown } | undefined>(fade: Fade<F>, fills: F, t: Timing | null) {
+    fade.to(fills, t);
+    return fade.copies();
+  }
+
   // Bottom to top. Rivers and lakes stay on top of whichever areas are shown.
   function layers() {
     const basins = state.view === "basin";
@@ -236,8 +249,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       // the most precise one only
       selected: state.selection.subBasin || stats ? null : state.selection.majorBasin,
       selectedColor: theme.selected,
-      fills: stats?.level === "major" ? stats : undefined,
-      transition: timing(),
+      fills: faded(fades.major, stats?.level === "major" ? stats : undefined, timing()),
     });
     // Sub-basins are only drawn to fill the selected one, to shade the hovered one
     // and those upstream of it, or to show the water balance model's values or a
@@ -249,9 +261,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       visible: basins && Boolean(stats ? values : values || state.hoverFills || state.selection.subBasin),
       selected: values ? null : state.selection.subBasin,
       selectedColor: theme.selectedSubBasin,
-      fills: values ?? state.hoverFills,
       // (The shading under the pointer follows it at once.)
-      transition: values ? timing() : undefined,
+      fills: faded(fades.sub, values ?? state.hoverFills, values ? timing() : null),
     });
     const scheme = basins ? state.scheme : null;
     const effects = basins ? state.effects : null;
@@ -259,24 +270,23 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])]
       : state.outlined;
     return [
-      countriesLayer({
+      ...countriesLayer({
         color: theme.land,
         selected: state.selection.country,
         selectedColor: theme.selected,
         visible: !basins,
-        fills: state.view === "country" ? state.countryFills : undefined,
-        transition: timing(),
+        fills: faded(fades.countries, state.view === "country" ? state.countryFills : undefined, timing()),
       }),
-      ...[state.wapor, state.waporNext].flatMap((entry) => (entry ? waporLayers(entry) : [])),
-      major.areas,
-      sub.areas,
+      ...[state.waporLast, state.wapor, state.waporNext].flatMap((entry) => (entry ? waporLayers(entry) : [])),
+      ...major.areas,
+      ...sub.areas,
       bordersLayer({ color: theme.border, visible: !basins }),
       major.outlines, // (sub.outlines: not drawn for now)
       ...effectGroundLayers(effects),
       riversLayer({
         color: theme.river,
         visible: state.visible.rivers,
-        hidden: scheme ? { key: scheme.key, subBasins: scheme.subBasins } : undefined,
+        hidden: scheme ? { key: scheme.subBasinsKey, subBasins: scheme.subBasins } : undefined,
       }),
       lakesLayer({ color: theme.water, visible: state.visible.lakes }),
       subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
@@ -448,6 +458,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
    */
   function waporLayers(entry: WaporEntry) {
     const next = entry === state.waporNext;
+    const opacity = entry === state.wapor ? state.waporFade : 1;
     const { period } = entry;
     const atL2 = waporShownLevel(period) === "L2";
     const layer = (p: WaporPeriod, id: string, hidden: boolean, onViewportLoad?: () => void) => {
@@ -455,7 +466,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         openWapor(p).then(render, () => {});
         return null;
       }
-      return waporLayer({ id, period: p, ramp: state.waporRamp, maxGap: state.waporMaxGap, onLoad: entry.onLoad, hidden, onViewportLoad });
+      return waporLayer({ id, period: p, ramp: state.waporRamp, maxGap: state.waporMaxGap, onLoad: entry.onLoad, hidden, opacity, onViewportLoad });
     };
     const l1 = !atL2
       ? layer(period, `wapor-aeti-${entry.id}`, next, next ? () => showNextWapor(entry) : undefined)
@@ -476,17 +487,34 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   // The view asks for the other level: add or drop the L2 layers. (Called while
   // deck.gl picks tiles.)
   onWaporLevel(() => {
-    for (const entry of [state.wapor, state.waporNext]) if (entry) entry.l2Loaded = false;
+    for (const entry of [state.waporLast, state.wapor, state.waporNext]) if (entry) entry.l2Loaded = false;
     queueMicrotask(render);
   });
 
   let waporId = 0;
+  let cancelWaporFade = () => {};
+  // The next period has loaded: it fades in over the one shown (over the step, while
+  // playing), which then goes.
   function showNextWapor(entry: WaporEntry) {
     if (entry !== state.waporNext) return;
+    cancelWaporFade();
+    state.waporLast = state.wapor;
     state.wapor = entry;
     state.waporNext = null;
+    state.waporFade = 0;
+    cancelWaporFade = ease(timing(), (t) => {
+      state.waporFade = t;
+      if (t === 1) state.waporLast = null;
+      render();
+    });
     // (Called while deck.gl updates its layers.)
     queueMicrotask(render);
+  }
+  /** No fade (a period shown at once). */
+  function stopWaporFade() {
+    cancelWaporFade();
+    state.waporLast = null;
+    state.waporFade = 1;
   }
 
   return {
@@ -591,6 +619,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       render();
     },
     setPlayback(stepMs) {
+      if ((playing?.duration ?? null) === (stepMs || null)) return;
       playing = stepMs ? { duration: stepMs, easing: linear } : null;
     },
     setBars(view, bars) {
@@ -612,7 +641,10 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       } else {
         const entry = period && { period, onLoad, id: ++waporId };
         if (seamless && entry && state.wapor) state.waporNext = entry;
-        else [state.wapor, state.waporNext] = [entry, null];
+        else {
+          [state.wapor, state.waporNext] = [entry, null];
+          stopWaporFade();
+        }
       }
       render();
     },

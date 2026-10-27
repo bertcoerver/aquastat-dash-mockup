@@ -8,6 +8,8 @@
  * shows fetched into the tile cache (see bufferWapor), up to `ahead` frames, `loaders`
  * at a time. Playback starts, and after a stall goes on, once a few frames are in.
  * Moving the map changes the tiles, so the frames ahead are loaded again for the new view.
+ * With few frames in ahead (the next dekad's rasters still loading, say), each shows
+ * longer: playback slows down rather than stopping and starting again.
  */
 import { MAX_DAY } from "../toolbar/dekads";
 import type { DayRange } from "../toolbar/range-rules";
@@ -22,6 +24,10 @@ export interface PlaybackSettings {
 }
 
 export const DEFAULT_PLAYBACK: PlaybackSettings = { stepDays: 1, frameMs: 200, ahead: 30, loaders: 3, startAhead: 3 };
+
+/** Fewer frames in ahead than this: each shows longer, up to SLOWEST times as long with none. */
+const SLOW_BELOW = 10;
+const SLOWEST = 3;
 
 export type PlaybackStatus = "stopped" | "buffering" | "playing";
 
@@ -55,8 +61,8 @@ export interface WaporPlayer {
 
 /**
  * `getRange` and `getVariable` are the range and variable shown when play is pressed;
- * `show` shows a frame (the range on the toolbar and the period on the map); `onState`
- * follows the play button and the buffered part of the slider.
+ * `show` shows a frame (the range on the toolbar and the period on the map) for `ms`;
+ * `onState` follows the play button and the buffered part of the slider.
  */
 export function initWaporPlayer({
   getRange,
@@ -66,7 +72,7 @@ export function initWaporPlayer({
 }: {
   getRange: () => DayRange;
   getVariable: () => WaporVariable;
-  show: (range: DayRange, checked: CheckedWaporPeriod) => void;
+  show: (range: DayRange, checked: CheckedWaporPeriod, ms: number) => void;
   onState: (state: PlaybackState) => void;
 }): WaporPlayer {
   const settings = DEFAULT_PLAYBACK;
@@ -183,9 +189,12 @@ export function initWaporPlayer({
     current.frames.shift();
     current.end--;
     current.shown++;
-    show(frame.range, frame.checked!);
+    let ahead = 0;
+    while (ahead < SLOW_BELOW && current.frames[ahead]?.buffered) ahead++;
+    const ms = settings.frameMs * (1 + ((SLOWEST - 1) * (SLOW_BELOW - ahead)) / SLOW_BELOW);
+    show(frame.range, frame.checked!, ms);
     wake(current);
-    current.timer = window.setTimeout(tick, settings.frameMs);
+    current.timer = window.setTimeout(tick, ms);
     advance();
   }
 

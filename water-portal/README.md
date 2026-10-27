@@ -235,7 +235,9 @@ water-portal/
   also outline every tile edge.
 - **Changes on the map are eased in** (a 400 ms ease-out; while a range plays, evenly
   over the whole step, so the map flows from one step to the next). The areas' fills
-  use deck.gl's `transitions`, which pair old and new values by index. The circles,
+  fade: each area layer is drawn twice, the new fills coming in over the last by their
+  opacity (not deck.gl's `transitions`: for polygons those read the colours back from
+  the GPU at every change, which stalled each step). The circles,
   bars and scheme lines are sorted by size, so a step reorders them and
   deck.gl would slide them between places; [src/map/tween.ts](src/map/tween.ts) eases
   those instead, paired by key (their area); ones that come grow from nothing, and ones
@@ -306,17 +308,21 @@ water-portal/
   Mercator scale, which on a globe asks for ever finer tiles towards the poles and keeps
   the far side: over 16,000 tiles at zoom 9.
 - **Playback** (Local view, [src/map/wapor-player.ts](src/map/wapor-player.ts)) moves
-  the range forward by its own unit (a year for whole years, a month for whole months,
-  a dekad for whole dekads, else 10 days), 0.7 s a frame, and stops at the last published one (play again there
-  starts from 2018). Frames are loaded ahead into a cache of decoded tiles in
-  [wapor.ts](src/map/layers/wapor.ts) (384 MB, shared with the map, so sums that share
-  a raster share its tiles): 12 frames ahead, 3 at a time, only the tiles in view. It
-  starts once 3 are in, and waits again if it catches up (the button's ring turns
-  meanwhile); the slider shows how far ahead it has loaded. The map keeps the shown
-  frame until the next has every tile in view, then switches: two layers, the next one
-  hidden. Moving the map loads the frames ahead again for the new view; any change of
-  range or view stops playback. Up to 16 requests to the bucket at once (it speaks
-  HTTP/2), instead of deck.gl-raster's default of 6.
+  the range forward a day at a time, 0.2 s a frame, and stops at the last published one
+  (play again there starts from 2018). Frames are loaded ahead into a cache of decoded
+  tiles in [wapor.ts](src/map/layers/wapor.ts) (384 MB, shared with the map, so sums
+  that share a raster share its tiles): 30 frames ahead, 3 at a time, only the tiles in
+  view. Frames within a dekad mostly weigh the same rasters, so loading is mostly at
+  each new dekad. It starts once 3 are in; with fewer than 10 in ahead each frame shows
+  longer (up to 3×), so it slows down rather than stopping, and if it catches up it
+  waits (the button's ring turns meanwhile); the slider shows how far ahead it has
+  loaded. While it plays, the point's series in the panel reads 2 dekads at a time
+  instead of 12, so the frames get the bucket first. The map keeps the shown frame until
+  the next has every tile in view, then fades it in over the frame's time: three layers,
+  the one before (going), the shown one and the next one (hidden). Moving the map loads
+  the frames ahead again for the new view; any change of range or view stops playback.
+  Up to 16 requests to the bucket at once (it speaks HTTP/2), instead of
+  deck.gl-raster's default of 6.
 - **Playback in Country and Basin** ([src/toolbar/range-player.ts](src/toolbar/range-player.ts))
   moves the range on a year (Country, 0.8 s a frame) or a dekad (Basin, 0.3 s) at a time,
   keeping its length, and stops at the view's last one; played from there, it starts over

@@ -147,6 +147,13 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   const tooltip = $("bs-tooltip");
   let current: { ctx: BasinCtx; layers: Layer[]; csv: Map<string, (string | number)[][]> } | null = null;
 
+  // Folded with no chart pinned, the pane shows none of its tiles and cards: they're
+  // drawn once it opens (not at every step of a range being played, say).
+  const pane = section.closest<HTMLElement>(".wb-panel")!;
+  const unseen = () => pane.classList.contains("resting") && !state.pinned.get(scope());
+  let stale = false;
+  new MutationObserver(() => stale && !unseen() && render()).observe(pane, { attributeFilter: ["class"] });
+
   // The legend's title: a checklist of all the maps, each once, in the order of the tiles
   // and cards; each one on the map has a section (panels/legend.ts). Checking one unpins
   // the chart that was pinned (its map stays checked).
@@ -345,13 +352,18 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   });
 
   /** All the maps, each once (several charts can share one), in the order of the tiles and cards. */
+  const menuMapsOf = new WeakMap<BasinCtx, { id: string; spec: BasinMapSpec }[]>(); // (once per draw)
   function menuMaps(ctx: BasinCtx): { id: string; spec: BasinMapSpec }[] {
+    let maps = menuMapsOf.get(ctx);
+    if (maps) return maps;
     const topic = topicDef();
     const seen = new Set<string>();
-    return [
+    maps = [
       ...topic.tiles.map((t) => ({ id: t.id, spec: tileMap(ctx, t) })),
       ...topic.cards.map((c) => ({ id: c.id, spec: c.map(ctx, null) })),
     ].filter(({ spec }) => !seen.has(spec.title) && !!seen.add(spec.title));
+    menuMapsOf.set(ctx, maps);
+    return maps;
   }
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: BasinCtx, spec: BasinMapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
@@ -490,6 +502,12 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     message.classList.remove("error");
     message.textContent = partly ? `WaPOR data cover only ${ctx.period} of the selected range.` : "";
 
+    stale = unseen();
+    if (stale) {
+      current = { ctx, layers: [], csv: current?.csv ?? new Map() };
+      drawMap();
+      return;
+    }
     tilesEl.innerHTML = topic.tiles.map((t) => tileHtml(t, ctx)).join("");
     const csv = new Map<string, (string | number)[][]>();
     const otherYears = windows.ranges.filter((_, w) => w !== windows.current).map(windowLabel);

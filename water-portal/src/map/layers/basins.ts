@@ -3,7 +3,7 @@ import { MVTLayer, type GeoBoundingBox } from "@deck.gl/geo-layers";
 import { PathLayer } from "@deck.gl/layers";
 import type { Feature, Position } from "geojson";
 import type { Color } from "../theme";
-import type { Timing } from "../tween";
+import type { Copy } from "../tween";
 import { FAO_TILES, ignoreMissingTile } from "./tile-urls";
 
 export interface MajorBasinProperties {
@@ -24,17 +24,21 @@ interface BasinOptions {
   selected?: number | null;
   selectedColor?: Color;
   /**
-   * Basins (by ID) filled with their own colour instead of `fill`. `key` names the set
-   * (deck.gl only redraws the colours when it changes).
+   * The areas' copies (see createFade), each with the basins (by ID) it fills with their
+   * own colour instead of `fill`.
    */
-  fills?: { key: number | string; colors: Map<number, Color> };
-  /** How a change of the fills is eased in (none: at once). */
-  transition?: Timing;
+  fills: Copy<BasinFills | undefined>[];
+}
+
+/** Basins' own colours; `key` names the set (deck.gl only redraws the colours when it changes). */
+export interface BasinFills {
+  key: number | string;
+  colors: Map<number, Color>;
 }
 
 /**
- * SDG 6 major basins, as two layers: the areas (filled with the land colour) and their
- * outlines. Separate layers, so that all outlines are drawn after all areas: the tiles
+ * SDG 6 major basins, as the areas (filled with the land colour; a layer per copy) and
+ * their outlines. Separate layers, so that all outlines are drawn after all areas: the tiles
  * overlap a little, and a neighbouring tile's area would cover part of an outline.
  */
 export function majorBasinsLayers(options: BasinOptions) {
@@ -50,7 +54,7 @@ function basinsLayers<P>(
   id: string,
   data: string,
   idProperty: string,
-  { fill, border, visible, selected = null, selectedColor, fills, transition }: BasinOptions,
+  { fill, border, visible, selected = null, selectedColor, fills: copies }: BasinOptions,
 ) {
   const common = {
     data,
@@ -61,20 +65,24 @@ function basinsLayers<P>(
     parameters: { depthCompare: "always" as const },
   };
 
-  const areas = new MVTLayer<P>({
-    ...common,
-    id,
-    pickable: visible,
-    stroked: false,
-    getFillColor: fills
-      ? (f: { properties: P }) => fills.colors.get((f.properties as Record<string, number>)[idProperty]) ?? fill
-      : fill,
-    updateTriggers: { getFillColor: fills?.key },
-    transitions: transition && { getFillColor: transition },
-    uniqueIdProperty: idProperty,
-    highlightedFeatureId: selected,
-    highlightColor: selectedColor,
-  });
+  const areas = copies.map(
+    ({ slot, fills, opacity, visible: shown }) =>
+      new MVTLayer<P>({
+        ...common,
+        id: slot ? `${id}-1` : id,
+        visible: visible && shown,
+        pickable: visible && shown,
+        opacity,
+        stroked: false,
+        getFillColor: fills
+          ? (f: { properties: P }) => fills.colors.get((f.properties as Record<string, number>)[idProperty]) ?? fill
+          : fill,
+        updateTriggers: { getFillColor: fills?.key },
+        uniqueIdProperty: idProperty,
+        highlightedFeatureId: selected,
+        highlightColor: selectedColor,
+      }),
+  );
 
   // The outlines are the polygon rings as lines (see tileOutlines for why they aren't
   // simply a polygon stroke).

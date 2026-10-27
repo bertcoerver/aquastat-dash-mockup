@@ -41,6 +41,17 @@ export async function waporPixelArea(variable: WaporVariable, lat: number, level
 
 /** Dekads read at the same time (the bucket speaks HTTP/2; each is a few requests in turn). */
 const LOADERS = 12;
+/** While the map plays a range: its frames load from the same bucket, and go first. */
+const PLAYING_LOADERS = 2;
+
+let loaders = LOADERS;
+const wakeLoaders: (() => void)[] = [];
+
+/** Whether the map is playing a range: the series then reads fewer dekads at a time. */
+export function setPointSeriesYield(playing: boolean) {
+  loaders = playing ? PLAYING_LOADERS : LOADERS;
+  if (!playing) wakeLoaders.splice(0).forEach((wake) => wake());
+}
 
 /**
  * Read the series, `onUpdate` running as values come in (the same object, filled in).
@@ -85,8 +96,12 @@ export async function loadPointSeries(
     return best;
   }
 
-  async function loader() {
+  async function loader(n: number) {
     while (left > 0) {
+      // (Loaders past the number allowed wait, between dekads.)
+      while (n >= loaders) await new Promise<void>((wake) => wakeLoaders.push(wake));
+      signal.throwIfAborted();
+      if (left === 0) return;
       const i = next();
       const raw = await Promise.all(parts.map((p) => cogPixel(waporDekadUrl(p.variable, dekads[i]), lngLat, signal)));
       signal.throwIfAborted();
@@ -103,6 +118,6 @@ export async function loadPointSeries(
       onUpdate(series);
     }
   }
-  await Promise.all(Array.from({ length: LOADERS }, loader));
+  await Promise.all(Array.from({ length: LOADERS }, (_, n) => loader(n)));
   return series;
 }

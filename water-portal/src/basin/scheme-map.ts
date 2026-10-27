@@ -377,6 +377,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
         arrows,
         particles: layer,
         subBasins: new Set(q ? ids : []),
+        subBasinsKey: q ? String(major) : "",
         onHover(item) {
           const next = item && { ...item, kind: "Q" as SchemeKind };
           if (next?.subBasin === hover?.subBasin && next?.value === hover?.value) return;
