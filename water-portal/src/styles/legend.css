@@ -309,6 +309,32 @@
 .legend-layer.dragging > .legend-layer-head {
   cursor: grabbing;
 }
+/* Up and down a place (not the colours', which stay at the bottom), and off the map. */
+.legend-layer-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.legend-move {
+  display: none;
+  padding: 2px 3px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.legend-layer.draggable .legend-move {
+  display: inline-flex;
+}
+.legend-move[data-by="1"] svg {
+  transform: rotate(180deg);
+}
+.legend-move:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
 .legend-remove {
   flex: none;
   padding: 0 4px;
@@ -319,11 +345,13 @@
   border-radius: 4px;
   cursor: pointer;
 }
-.legend-remove:hover {
+.legend-remove:hover,
+.legend-move:not(:disabled):hover {
   color: var(--ink);
   background: color-mix(in srgb, var(--ink) 7%, transparent);
 }
-.legend-remove:focus-visible {
+.legend-remove:focus-visible,
+.legend-move:focus-visible {
   outline: 2px solid var(--accent);
 }
 .legend-layer .legend-quality {

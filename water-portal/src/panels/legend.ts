@@ -17,8 +17,8 @@
  * slot: shape-switch.ts); a click on one switches it, or adds it in that shape.
  *
  * The sections are in the order the maps are drawn, the top one on top (onOrder): a new
- * map goes on top, and a section's title drags it up or down. The colours stay at the
- * bottom, as they are the land itself.
+ * map goes on top, and a section's title drags it up or down, as do its arrows. The
+ * colours stay at the bottom, as they are the land itself.
  *
  * A view can put its own controls in a section (extra: under the note; after: under
  * the key). While a range plays the ranges are locked (all of them at once): each map
@@ -123,6 +123,11 @@ interface Options {
   onLock(): void;
 }
 
+/** A chevron up (the down one is turned in legend.css). */
+const ARROW_SVG =
+  `<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5" fill="none" ` +
+  `stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** One layer per slot, the last of `layers` (the latest checked) in its slot winning, in the slots' order. */
@@ -191,8 +196,10 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     el.hidden = true;
     const id = `${aside.id}-${slot}`;
     el.innerHTML =
-      `<div class="legend-layer-head"><span class="legend-layer-title"></span>` +
-      `<button type="button" class="legend-remove" title="Take off the map" aria-label="Take off the map">×</button></div>` +
+      `<div class="legend-layer-head"><span class="legend-layer-title"></span><span class="legend-layer-actions">` +
+      `<button type="button" class="legend-move" data-by="-1" title="Draw above the map over it" aria-label="Move up">${ARROW_SVG}</button>` +
+      `<button type="button" class="legend-move" data-by="1" title="Draw under the map below it" aria-label="Move down">${ARROW_SVG}</button>` +
+      `<button type="button" class="legend-remove" title="Take off the map" aria-label="Take off the map">×</button></span></div>` +
       `<small class="legend-layer-note"></small>` +
       `<div class="legend-extra"></div>` +
       `<div class="legend-period"><span></span><button class="title-menu unit-menu" id="${id}-unit" type="button" ` +
@@ -241,8 +248,11 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       layer: null,
     };
     parts.remove.addEventListener("click", () => parts.layer && onToggle(parts.layer.id));
+    for (const button of el.querySelectorAll<HTMLButtonElement>(".legend-move")) {
+      button.addEventListener("click", () => moveBy(parts, Number(button.dataset.by)));
+    }
     q<HTMLElement>(".legend-layer-head").addEventListener("pointerdown", (e) => {
-      if (e.button !== 0 || !el.classList.contains("draggable") || (e.target as Element).closest(".legend-remove")) return;
+      if (e.button !== 0 || !el.classList.contains("draggable") || (e.target as Element).closest("button")) return;
       e.preventDefault(); // no text selection
       startDrag(parts, e);
     });
@@ -278,7 +288,14 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
   /** Put the sections in this order (only when out of it: moving a section ends a drag or a slide in it), and draw them so. */
   function place(parts: Parts[]) {
     parts.forEach((p, i) => p.el.classList.toggle("below", i > 0));
-    for (const p of parts) p.el.classList.toggle("draggable", p.el.dataset.slot !== fill && parts.filter((q) => q.el.dataset.slot !== fill).length > 1);
+    const movable = parts.filter((q) => q.el.dataset.slot !== fill);
+    for (const p of parts) {
+      const at = movable.indexOf(p);
+      p.el.classList.toggle("draggable", at >= 0 && movable.length > 1);
+      const [up, down] = p.el.querySelectorAll<HTMLButtonElement>(".legend-move");
+      up.disabled = at <= 0;
+      down.disabled = at < 0 || at === movable.length - 1;
+    }
     const now = [...sections.values()].filter((p) => parts.includes(p));
     now.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
     if (!now.every((p, i) => p === parts[i])) {
@@ -295,16 +312,30 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     }
   }
 
+  /** Move a section up (-1) or down (1) a place, above the colours'. */
+  function moveBy(p: Parts, by: number) {
+    const parts = order.map((id) => [...sections.values()].find((q) => q.layer?.id === id)!);
+    const at = parts.indexOf(p);
+    const to = at + by;
+    if (at < 0 || to < 0 || to >= parts.length || parts[to].el.dataset.slot === fill) return;
+    [parts[at], parts[to]] = [parts[to], parts[at]];
+    order = parts.map((q) => q.layer!.id);
+    place(parts);
+    // (The focus stays on the arrow, or goes to the other one where it's now disabled.)
+    const button = p.el.querySelector<HTMLButtonElement>(`.legend-move[data-by="${by}"]`)!;
+    (button.disabled ? p.el.querySelector<HTMLButtonElement>(`.legend-move[data-by="${-by}"]`)! : button).focus();
+  }
+
   // Dragging a section by its title: it follows the pointer, and the others make way as
   // it passes their middles (the colours' stays at the bottom).
   function startDrag(p: Parts, e: PointerEvent) {
-    const head = p.el.querySelector<HTMLElement>(".legend-layer-head")!;
     const startY = e.clientY;
     const grab = e.clientY - p.el.getBoundingClientRect().top;
     let dragging = false;
-    head.setPointerCapture(e.pointerId);
     const shown = () => order.map((id) => [...sections.values()].find((q) => q.layer?.id === id)!).filter(Boolean);
+    // (On the window, not captured: the section moving in the page would lose the capture.)
     function move(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return;
       if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
       dragging = true;
       p.el.classList.add("dragging");
@@ -325,16 +356,17 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       }
       p.el.style.transform = `translateY(${ev.clientY - grab - p.el.getBoundingClientRect().top}px)`;
     }
-    function end() {
-      head.removeEventListener("pointermove", move);
-      head.removeEventListener("pointerup", end);
-      head.removeEventListener("pointercancel", end);
+    function end(ev: PointerEvent) {
+      if (ev.pointerId !== e.pointerId) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
       p.el.classList.remove("dragging");
       p.el.style.transform = "";
     }
-    head.addEventListener("pointermove", move);
-    head.addEventListener("pointerup", end);
-    head.addEventListener("pointercancel", end);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
   }
 
   function showSection(p: Parts, layer: LegendLayer | null) {
