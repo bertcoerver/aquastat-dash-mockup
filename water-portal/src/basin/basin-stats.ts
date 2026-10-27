@@ -51,18 +51,19 @@ import type { CountrySymbol } from "../map/layers/countries";
 import {
   BASIN_UNITS,
   TOPICS,
-  basinUnit,
-  describeBasinUnits,
+  describeUnit,
   parseArea,
   sameDays,
   tileMap,
   tileValue,
+  unitMenu,
   windowLabel,
   type BasinCtx,
   type BasinMapSpec,
   type BasinTile,
   type BasinUnits,
   type FluxStatus,
+  type MeasureKey,
   type TopicDef,
 } from "./stats-cards";
 import { loadSeries, monthlyStats, periodStats, windowRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
@@ -135,6 +136,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     fluxes: new Map<string, FluxStatus>(),
     /** Totals in mm by default, as before there was a choice. */
     units: BASIN_UNITS[3] as BasinUnits,
+    /** The measures mapped against the other years. */
+    against: new Set<MeasureKey>(),
     /** How much of the basins' values the colours span (% cut at either end). */
     stretch: DEFAULT_STRETCH,
   };
@@ -175,16 +178,34 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
         drawMap();
       },
     },
-    // The unit (not for maps in % or m³/s).
+    // The unit (the same for all maps in mm or km³), or against the other years (per measure).
     units: {
-      options: () => ({ options: BASIN_UNITS.map((u, i) => ({ id: String(i), label: basinUnit(u) })), current: String(BASIN_UNITS.indexOf(state.units)) }),
-      onPick(id) {
-        const picked = BASIN_UNITS[Number(id)];
-        if (picked === state.units) return;
-        state.units = picked;
+      options(slot) {
+        const layer = current?.layers.find((l) => l.slot === slot);
+        return layer ? unitMenu(current!.ctx, layer.spec) : { options: [], current: null };
+      },
+      onPick(slot, id) {
+        const layer = current?.layers.find((l) => l.slot === slot);
+        if (!layer) return;
+        const m = layer.spec.measure;
+        if (id === "against") state.against.add(m);
+        else {
+          state.against.delete(m);
+          if (id !== "value") state.units = BASIN_UNITS[Number(id)];
+          // A chart of every year maps against the others: in a unit, its map stays, unpinned.
+          const pin = state.pinned.get(scope());
+          if (layer.spec.against && pin?.id === layer.d.id) {
+            const option = optionId(current!.ctx, layer.spec);
+            state.chosen.set(scope(), [...(state.chosen.get(scope()) ?? []).filter((i) => i !== option), option]);
+            state.pinned.delete(scope());
+          }
+        }
         render();
       },
-      title: () => `Values ${describeBasinUnits(state.units)}.`,
+      title(slot) {
+        const layer = current?.layers.find((l) => l.slot === slot);
+        return layer ? describeUnit(current!.ctx, layer.spec) : "";
+      },
     },
     // How a map's circles or bars look: a menu on their sizes.
     sizes: {
@@ -220,10 +241,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     subBasins,
     legend,
     onChange(kind) {
-      const ctx = current?.ctx;
-      const ids = state.chosen.get(scope());
-      const moved = ctx && kind && ids?.find((id) => specFor(ctx, { id, sub: null }).scheme === kind);
-      if (moved) state.chosen.set(scope(), [...ids!.filter((id) => id !== moved), moved]);
+      switched((spec) => !!kind && spec.scheme === kind);
       drawMap();
     },
     onHover: () => showMapTooltip(),
@@ -235,10 +253,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     majorBasins,
     legend,
     onChange(kind) {
-      const ctx = current?.ctx;
-      const ids = state.chosen.get(scope());
-      const moved = ctx && kind && ids?.find((id) => specFor(ctx, { id, sub: null }).effect === kind);
-      if (moved) state.chosen.set(scope(), [...ids!.filter((id) => id !== moved), moved]);
+      switched((spec) => !!kind && spec.effect === kind);
       drawMap();
     },
   });
@@ -246,12 +261,21 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   // Each other map's shape (colours, circles, bars): a switch in its legend section.
   // Switched, the map takes its new slot from the one there.
   const shapes = initShapeSwitch(legend, (title) => {
-    const ctx = current?.ctx;
-    const ids = state.chosen.get(scope());
-    const moved = ctx && ids?.find((id) => specFor(ctx, { id, sub: null }).title === title);
-    if (moved) state.chosen.set(scope(), [...ids!.filter((id) => id !== moved), moved]);
+    switched((spec) => spec.title === title);
     drawMap();
   });
+  /**
+   * A map switched shape: it goes last in the checklist, so it takes its new slot from the
+   * map there, and the checked maps it covered stay off (not shown again in the slot it left).
+   */
+  function switched(match: (spec: BasinMapSpec) => boolean) {
+    const ctx = current?.ctx;
+    if (!ctx) return;
+    const shown = new Set(current!.layers.map((l) => l.spec.title));
+    const ids = (state.chosen.get(scope()) ?? []).filter((id) => shown.has(specFor(ctx, { id, sub: null }).title));
+    const moved = ids.find((id) => match(specFor(ctx, { id, sub: null })));
+    state.chosen.set(scope(), moved ? [...ids.filter((id) => id !== moved), moved] : ids);
+  }
 
   // Where a basin's circle or bar stands: a sub-basin's middle; a major basin's, the
   // middle of its sub-basin nearest the middle of them all (by area), so it's inside it.
@@ -458,6 +482,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       subName: (id) => subNames.get(id) ?? String(id),
       width: Math.max(240, cardsEl.clientWidth - 22),
       units: state.units,
+      against: state.against,
       cache: new Map(),
     };
     const partly = state.range && (covered.start !== state.range.start || covered.end !== state.range.end);
@@ -556,7 +581,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const lead = leadDriver();
     if (!lead && followsModel()) return [];
     const chosen = (state.chosen.get(scope()) ?? []).filter((id) => isDriver({ id, sub: null }));
-    const layers = (chosen.length ? chosen : [topicDef().tiles[0].id]).map((id) => layerOf(ctx, { id, sub: null }));
+    // (The first tile's only alone: under a chart's map, it would show when that one changes slot.)
+    const layers = (chosen.length ? chosen : lead ? [] : [topicDef().tiles[0].id]).map((id) => layerOf(ctx, { id, sub: null }));
     if (!lead) return onePerSlot(layers, SLOTS);
     const l = layerOf(ctx, lead);
     return onePerSlot([...layers.filter((m) => m.spec.title !== l.spec.title), l], SLOTS);

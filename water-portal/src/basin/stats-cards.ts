@@ -98,6 +98,8 @@ export interface BasinCtx {
   subName(id: number): string;
   width: number;
   units: BasinUnits;
+  /** The measures mapped against the other years (their unit menu's last option). */
+  against: Set<MeasureKey>;
   /** Values computed for this context, by measure, area and range. */
   cache: Map<string, number>;
 }
@@ -176,6 +178,8 @@ const unitOf = (c: BasinCtx, m: MeasureKey) => (inUnits(m) ? basinUnit(c.units) 
 /** Whether values add up over basins (volumes), so a group's dwarfs a basin's. */
 const extensive = (c: BasinCtx, m: MeasureKey) => !!MEASURES[m].flux || (inUnits(m) && c.units.basin);
 const anomalyUnit = (c: BasinCtx, m: MeasureKey) => (MEASURES[m].anomaly === "relative" ? "%" : m === "ratio" ? "% points" : unitOf(c, m));
+/** A map's unit against the other years: "%", or a difference, "± mm" (apart from the value's own unit in the menu). */
+const againstUnit = (c: BasinCtx, m: MeasureKey) => (MEASURES[m].anomaly === "relative" ? "%" : `± ${anomalyUnit(c, m)}`);
 
 // --- Values per area -----------------------------------------------------------------------
 
@@ -360,8 +364,11 @@ export interface BasinMapSpec {
   id: string;
   title: string;
   unit: string;
-  /** Whether the unit menu's units apply. */
+  /** Whether the unit is a menu (unitMenu). */
   units: boolean;
+  /** The measure mapped, and whether against the other years. */
+  measure: MeasureKey;
+  against: boolean;
   note: string;
   /** Which basins are coloured. */
   level: "major" | "sub";
@@ -397,18 +404,23 @@ function valueNote(c: BasinCtx, m: MeasureKey, level: "major" | "sub") {
   return c.units.per === "total" ? `Total per ${per}` : `Average per ${c.units.per}, per ${per}`;
 }
 
-/** A measure per basin of a level, over the period, or (`anomaly`) against the other years. */
-function measureMap(c: BasinCtx, m: MeasureKey, level: "major" | "sub", mode: "value" | "anomaly" = "value", listed?: Set<number>): BasinMapSpec {
+/**
+ * A measure per basin of a level, over the period, or (`anomaly`) against the other years;
+ * by default as its unit menu has it (BasinCtx.against).
+ */
+function measureMap(c: BasinCtx, m: MeasureKey, level: "major" | "sub", mode?: "value" | "anomaly", listed?: Set<number>): BasinMapSpec {
   const def = MEASURES[m];
   const only = level === "sub" && c.major ? new Set(subBasinsOf(c, c.major.id)) : null;
   const area = (id: number): Area => ({ kind: level, id });
-  const anomaly = mode === "anomaly";
+  const anomaly = (mode ?? (c.against.has(m) ? "anomaly" : "value")) === "anomaly";
   const status = anomaly ? othersStatus(c, m) : fluxMessage(c, m, level) ?? "";
   return {
-    id: `${mode}:${m}:${level}:${c.major?.id ?? ""}:${inUnits(m) ? unitSlug(c.units) : ""}:${status ? "wait" : "ok"}:${listed?.size ?? ""}`,
-    title: anomaly ? `${def.label}: against other years` : def.label,
-    unit: anomaly ? anomalyUnit(c, m) : unitOf(c, m),
-    units: inUnits(m) && !(anomaly && def.anomaly === "relative"),
+    id: `${anomaly ? "anomaly" : "value"}:${m}:${level}:${c.major?.id ?? ""}:${inUnits(m) ? unitSlug(c.units) : ""}:${status ? "wait" : "ok"}:${listed?.size ?? ""}`,
+    title: def.label,
+    unit: anomaly ? againstUnit(c, m) : unitOf(c, m),
+    units: true,
+    measure: m,
+    against: anomaly,
     note: anomaly
       ? def.anomaly === "relative"
         ? `% above or below the average of ${c.windows.ranges.length - 1} other years`
@@ -425,6 +437,19 @@ function measureMap(c: BasinCtx, m: MeasureKey, level: "major" | "sub", mode: "v
     listed,
     status: status || undefined,
   };
+}
+
+/** A map's unit menu: the legend's units (or the measure's own unit), then against the other years. */
+export function unitMenu(c: BasinCtx, spec: BasinMapSpec) {
+  const m = spec.measure;
+  const options = inUnits(m) ? BASIN_UNITS.map((u, i) => ({ id: String(i), label: basinUnit(u) })) : [{ id: "value", label: unitOf(c, m) }];
+  options.push({ id: "against", label: againstUnit(c, m) });
+  return { options, current: spec.against ? "against" : inUnits(m) ? String(BASIN_UNITS.indexOf(c.units)) : "value" };
+}
+/** The unit menu's tooltip. */
+export function describeUnit(c: BasinCtx, spec: BasinMapSpec) {
+  if (spec.against) return MEASURES[spec.measure].anomaly === "relative" ? "% above or below the other years' average." : "Difference from the other years' average.";
+  return inUnits(spec.measure) ? `Values ${describeBasinUnits(c.units)}.` : "";
 }
 
 // --- Tiles and cards -----------------------------------------------------------------------
@@ -565,7 +590,7 @@ function rankCard(m: MeasureKey, order: "top" | "ends", title: string, note = ""
       const r = rows(c);
       return { html: bars({ series: [{ label: def.short, color: def.color }], rows: r, unit: unitOf(c, m), axis: def.label, width: c.width }), csv: csvOf(r, [column(c, m)]) };
     },
-    map: (c) => measureMap(c, m, "major", "value", fluxMessage(c, m) ? undefined : listedOf(rows(c))),
+    map: (c) => measureMap(c, m, "major", undefined, fluxMessage(c, m) ? undefined : listedOf(rows(c))),
   };
 }
 

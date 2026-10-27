@@ -99,8 +99,8 @@ interface Options {
   onToggle(id: string): void;
   /** The ramp's menu (of the fill slot): `of` is what the colours span, "the basins' values". */
   ramp: { of: string; initial: WaporStretch; onPick(cut: WaporStretch): void };
-  /** The units' menu, where a layer has `units`. */
-  units?: { options(): { options: MenuOption[]; current: string | null }; onPick(id: string): void; title(): string };
+  /** The units' menu of the map in `slot`, where its layer has `units`. */
+  units?: { options(slot: string): { options: MenuOption[]; current: string | null }; onPick(slot: string, id: string): void; title(slot: string): string };
   /** The menu on the circles' and bars' sizes (shape-style.ts), of the map in `slot`, and its title. */
   sizes?: { options(slot: string): { options: MenuOption[]; current: string[] }; onPick(slot: string, id: string): void; title(slot: string): string };
   /** A class's swatch clicked. */
@@ -248,7 +248,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       period: q(".legend-period > span"),
       unit,
       unitMenu: units
-        ? initTitleMenu(unit, () => (parts.layer?.units ? units.options() : { options: [], current: null }), units.onPick)
+        ? initTitleMenu(unit, () => (parts.layer?.units ? units.options(slot) : { options: [], current: null }), (id) => units.onPick(slot, id))
         : { setLabel: (label: string) => void (unit.querySelector(".title-menu-label")!.textContent = label) },
       ramp: rampButton,
       // How much of the values the colours span: a menu on the fill's ramp.
@@ -280,7 +280,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     p.unitMenu.setLabel(layer.unit);
     // Nothing to pick from: plain text.
     p.unit.disabled = !layer.units;
-    p.unit.title = layer.units && units ? units.title() : "";
+    p.unit.title = layer.units && units ? units.title(p.el.dataset.slot!) : "";
     const key = layer.key;
     p.periodRow.hidden = !key && !layer.period;
     p.ramp.hidden = p.ticks.hidden = key?.kind !== "ramp";

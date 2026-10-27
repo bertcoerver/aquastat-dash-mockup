@@ -238,12 +238,16 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: Ctx, spec: MapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
   // Each map's shape (colours, circles, bars): a switch in its legend section. Switched, it
-  // goes last in the checklist, so it takes its new slot from the map there.
+  // goes last in the checklist, so it takes its new slot from the map there; the checked
+  // maps it covered stay off (not shown again in the slot it left).
   const shapes = initShapeSwitch(legend, (title) => {
     const ctx = current?.ctx;
-    const ids = state.chosen.get(state.topic);
-    const moved = ctx && ids?.find((id) => specFor(ctx, { id, sub: null }).title === title);
-    if (moved) state.chosen.set(state.topic, [...ids!.filter((id) => id !== moved), moved]);
+    if (ctx) {
+      const shown = new Set(current!.layers.map((l) => l.spec.title));
+      const ids = (state.chosen.get(state.topic) ?? []).filter((id) => shown.has(specFor(ctx, { id, sub: null }).title));
+      const moved = ids.find((id) => specFor(ctx, { id, sub: null }).title === title);
+      state.chosen.set(state.topic, moved ? [...ids.filter((id) => id !== moved), moved] : ids);
+    }
     drawMap();
   });
   /** The shapes a map can take: an amount's circles or bars, any value's colours too (not a mix of categories). */
@@ -382,8 +386,9 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const topic = topicDef();
     const known = (id: string) => topic.tiles.some((t) => t.id === id) || topic.cards.some((c) => c.id === id);
     const chosen = (state.chosen.get(state.topic) ?? []).filter(known);
-    const layers = (chosen.length ? chosen : [topic.tiles[0].id]).map((id) => layerOf(ctx, { id, sub: null }));
     const lead = leadDriver();
+    // (The first tile's only alone: under a chart's map, it would show when that one changes slot.)
+    const layers = (chosen.length ? chosen : lead ? [] : [topic.tiles[0].id]).map((id) => layerOf(ctx, { id, sub: null }));
     if (!lead) return onePerSlot(layers, SLOTS);
     const l = layerOf(ctx, lead);
     return onePerSlot([...layers.filter((m) => m.spec.title !== l.spec.title), l], SLOTS);
