@@ -35,6 +35,8 @@ const root = document.documentElement;
 let pending = 0;
 /** Tasks that know how far along they are (0–1), by name. */
 const progress = new Map<string, number>();
+/** Those of them that lead: while one has said, the others aren't shown. */
+const leading = new Set<string>();
 let shownAt = 0;
 // Once scheduled, a timer isn't restarted by later requests: a steady stream of
 // short requests would otherwise keep postponing it.
@@ -44,11 +46,15 @@ let fullTimer = 0;
 
 /**
  * How far along a task is, from 0 to 1, or null once it's done (or stopped). While any
- * task has said, the bar shows the least far along of them (sweeping while that is 0).
+ * task has said, the bar shows the least far along of them (sweeping while that is 0);
+ * of those that `lead` only, while one of them has (what holds up what's on screen
+ * comes before what loads beside it).
  */
-export function setProgress(task: string, fraction: number | null) {
+export function setProgress(task: string, fraction: number | null, lead = false) {
   if (fraction === null) progress.delete(task);
   else progress.set(task, Math.min(1, Math.max(0, fraction)));
+  if (lead && fraction !== null) leading.add(task);
+  else leading.delete(task);
   update();
 }
 
@@ -68,7 +74,8 @@ const busy = () => pending > 0 || progress.size > 0;
 
 function update() {
   // (No progress yet is as good as not knowing: it sweeps until there is some.)
-  const least = progress.size ? Math.min(...progress.values()) : 0;
+  const shown = leading.size ? [...leading].map((task) => progress.get(task)!) : [...progress.values()];
+  const least = shown.length ? Math.min(...shown) : 0;
   if (least > 0) {
     clearTimeout(fullTimer);
     fullTimer = 0;

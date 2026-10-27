@@ -316,9 +316,11 @@ water-portal/
   view. Frames within a dekad mostly weigh the same rasters, so loading is mostly at
   each new dekad. It starts once 3 are in; with fewer than 10 in ahead each frame shows
   longer (up to 3×), so it slows down rather than stopping, and if it catches up it
-  waits (the button's ring turns meanwhile); the slider shows how far ahead it has
-  loaded. While it plays, the point's series in the panel reads 2 dekads at a time
-  instead of 12, so the frames get the bucket first. The map keeps the shown frame until
+  waits; the slider shows how far ahead it has loaded. Meanwhile the load bar shows the
+  frames it's waiting for (sweeping until the first is in), or while it plays on with
+  few in ahead, how far those are: playback leads it (setProgress's `lead`), so the
+  point's series' progress isn't shown then. While it plays, that series reads 2 dekads
+  at a time instead of 12, so the frames get the bucket first. The map keeps the shown frame until
   the next has every tile in view, then fades it in over the frame's time: three layers,
   the one before (going), the shown one and the next one (hidden). Moving the map loads
   the frames ahead again for the new view; any change of range or view stops playback.

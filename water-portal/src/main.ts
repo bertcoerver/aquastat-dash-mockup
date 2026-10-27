@@ -31,7 +31,7 @@ import { makeResizable } from "./panels/floating";
 import { makeFoldable } from "./panels/foldable";
 import type { RampChoice } from "./panels/ramp-menu";
 import { initLayersMenu } from "./panels/layers-menu";
-import { initLoadBar } from "./panels/load-bar";
+import { initLoadBar, setProgress } from "./panels/load-bar";
 import { initThemeSwitch } from "./panels/theme-switch";
 import { mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
@@ -433,8 +433,9 @@ const player = initWaporPlayer({
     playback = state.status;
     if (playback === "stopped") stretchWapor();
     toolbarApi?.setPlayback(state);
-    // The frames load first.
+    // The frames load first, and the load bar shows theirs (not the point's series').
     setPointSeriesYield(playback !== "stopped");
+    setProgress("local-playback", state.loading, true);
     if (playback === "stopped") waterMap.setPlayback(null);
   },
 });
@@ -449,7 +450,7 @@ const rangePlayer = initRangePlayer({
     playing = false;
   },
   onState(status, stepMs) {
-    toolbarApi?.setPlayback({ status, bufferedTo: null });
+    toolbarApi?.setPlayback({ status, bufferedTo: null, loading: null });
     // (Locked before the first step: its ranges are the ones held.)
     if (status === "playing") (view === "basin" ? basinStats : countryPanel).lockLegend();
     waterMap.setPlayback(stepMs);

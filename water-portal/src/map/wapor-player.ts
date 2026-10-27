@@ -35,6 +35,12 @@ export interface PlaybackState {
   status: PlaybackStatus;
   /** How far ahead frames are loaded: the day boundary after the last one (null: none). */
   bufferedTo: number | null;
+  /**
+   * How far the frames it's waiting for are loaded, 0 to 1: those it needs to (re)start,
+   * or while playing on with few in ahead, the ones that would let it play at full
+   * speed. Null otherwise (stopped, or enough in ahead).
+   */
+  loading: number | null;
 }
 
 interface Frame {
@@ -92,13 +98,17 @@ export function initWaporPlayer({
   } | null = null;
 
   function report() {
-    if (!run) return onState({ status: "stopped", bufferedTo: null });
+    if (!run) return onState({ status: "stopped", bufferedTo: null, loading: null });
     let last: Frame | null = null;
+    let ahead = 0;
     for (const frame of run.frames.slice(0, run.end)) {
       if (!frame.buffered) break;
       last = frame;
+      ahead++;
     }
-    onState({ status: run.status, bufferedTo: last && last.range.end + 1 });
+    const wanted = Math.min(run.status === "buffering" ? settings.startAhead : SLOW_BELOW, run.end);
+    const loading = ahead < wanted ? ahead / wanted : null;
+    onState({ status: run.status, bufferedTo: last && last.range.end + 1, loading });
   }
 
   /** Frame `i` ahead, made when first needed; null past the current dekad. */
