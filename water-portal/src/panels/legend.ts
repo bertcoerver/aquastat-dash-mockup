@@ -96,7 +96,7 @@ export function toggled(ids: string[], id: string): string[] {
 }
 
 /** How a slot reads in the checklist, to the right of a map. */
-export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lines", dots: "dots", circles: "circles" };
+export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lines", dots: "dots", circles: "circles", rain: "rain", vapour: "vapour" };
 
 /** A round number at or below x (1, 2 or 5 × a power of ten), for a key's sizes. */
 export function nice(x: number) {

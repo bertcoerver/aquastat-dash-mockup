@@ -14,6 +14,7 @@ import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
 import { basinSchemeLayers, PARTICLES_ID, type BasinScheme } from "./layers/basin-scheme";
+import { EFFECTS_ID, effectGroundLayers, effectLayers, type BasinEffects } from "./layers/basin-effects";
 import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
@@ -68,6 +69,8 @@ export interface WaterMap {
    * (null: none). By `key`, as above.
    */
   setBasinScheme(scheme: BasinScheme | null): void;
+  /** Basin view: precipitation as rain, evapotranspiration as vapour (basin-stats.ts; null: none). By `key`, as above. */
+  setBasinEffects(effects: BasinEffects | null): void;
   /**
    * Country view: fill countries with their own colours (a statistic's values), and
    * outline the selected country instead of filling it (null: none). `key` names the
@@ -137,6 +140,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
     basinStats: null as BasinStatFills | null,
     scheme: null as BasinScheme | null,
+    effects: null as BasinEffects | null,
     dragged: null as LngLat | null, // the marker while it is dragged
   };
 
@@ -203,6 +207,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       fills: values ?? state.hoverFills,
     });
     const scheme = basins ? state.scheme : null;
+    const effects = basins ? state.effects : null;
     const outlined = stats
       ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])]
       : state.outlined;
@@ -219,6 +224,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       sub.areas,
       bordersLayer({ color: theme.border, visible: !basins }),
       major.outlines, // (sub.outlines: not drawn for now)
+      ...effectGroundLayers(effects),
       riversLayer({
         color: theme.river,
         visible: state.visible.rivers,
@@ -227,6 +233,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       lakesLayer({ color: theme.water, visible: state.visible.lakes }),
       subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
       ...basinSchemeLayers(scheme),
+      ...effectLayers(effects),
       countryOutlineLayer({
         m49: state.selection.country,
         color: theme.outline,
@@ -281,12 +288,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     overlay.setProps({ layers: drawn() });
   }
 
-  // The scheme's particles move every frame (deck.gl draws on each of MapLibre's repaints).
+  // The scheme's particles, the rain and the vapour move every frame (deck.gl draws on each of MapLibre's repaints).
   let animating = false;
   function animate() {
     if (animating) return;
     const frame = () => {
-      animating = Boolean(state.scheme?.particles) && state.view === "basin";
+      animating = Boolean(state.scheme?.particles || state.effects) && state.view === "basin";
       if (!animating) return;
       map.triggerRepaint();
       requestAnimationFrame(frame);
@@ -296,9 +303,10 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 
   /** The layers as drawn: each hides the far side of the globe. */
   function drawn() {
-    // (The particles are drawn off screen and pasted on, flat: no extensions.)
+    // (The particles are drawn off screen and pasted on, flat: no extensions. The rain
+    // and vapour hide the far side themselves.)
     return layers().map((layer: Layer | null) =>
-      !layer || layer.id.startsWith(PARTICLES_ID) ? layer : layer.clone({ extensions: [...layer.props.extensions, HORIZON] }),
+      !layer || layer.id.startsWith(PARTICLES_ID) || layer.id.startsWith(EFFECTS_ID) ? layer : layer.clone({ extensions: [...layer.props.extensions, HORIZON] }),
     );
   }
 
@@ -476,6 +484,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (fills?.key === state.basinStats?.key) return;
       state.basinStats = fills;
       render();
+    },
+    setBasinEffects(effects) {
+      if (effects?.key === state.effects?.key) return;
+      state.effects = effects;
+      render();
+      animate();
     },
     setBasinScheme(scheme) {
       if (scheme?.key === state.scheme?.key) return;

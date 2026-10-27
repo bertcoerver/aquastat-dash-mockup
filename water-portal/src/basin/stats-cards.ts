@@ -157,6 +157,9 @@ const MEASURES: Record<MeasureKey, Measure> = {
   dS: { label: STYLES.dS.label, short: "ΔS", color: STYLES.dS.color, ramp: STYLES.dS.ramp, scale: "diverging", flux: { v: "dS" }, anomaly: "absolute" },
 };
 
+/** The measures that can be drawn as rain or vapour (BasinMapSpec.effect). */
+const EFFECTS: Partial<Record<MeasureKey, "rain" | "vapour">> = { pcp: "rain", aeti: "vapour" };
+
 /** Which groups a measure's basins are compared in: the rain's by climate, the rivers' by where they go. */
 const GROUPING: Record<MeasureKey, Grouping> = {
   pcp: "climate",
@@ -373,6 +376,8 @@ export interface BasinMapSpec {
   status?: string;
   /** Discharge or storage change per sub-basin: can be drawn as the water balance scheme instead (scheme-map.ts). */
   scheme?: "Q" | "dS";
+  /** Precipitation or evapotranspiration per sub-basin: can be drawn as rain or vapour instead (effects-map.ts). */
+  effect?: "rain" | "vapour";
 }
 
 /** The maps' level: the selected basin's sub-basins, or the major basins. */
@@ -409,6 +414,7 @@ function measureMap(c: BasinCtx, m: MeasureKey, level: "major" | "sub", mode: "v
     ramp: anomaly ? (m === "aeti" || m === "dS" ? STYLES.dS.ramp : BALANCE_RAMP) : def.ramp,
     scale: anomaly ? "diverging" : def.scale,
     scheme: !anomaly && level === "sub" ? def.flux?.v : undefined,
+    effect: !anomaly && level === "sub" ? EFFECTS[m] : undefined,
     only,
     listed,
     status: status || undefined,

@@ -32,11 +32,12 @@ import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Selection } from "../selection";
 import type { MajorBasin } from "../toolbar/place-picker";
 import { WAPOR_MIN_YEAR, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
-import { basinLastDekad, type DekadRange, type View } from "../toolbar/range-rules";
+import { basinLastDekad, daysOfDekads, type DekadRange, type View } from "../toolbar/range-rules";
 import { inGroup, setBasinGroups, type BasinGroups } from "./groups";
 import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { MODEL_SHOWN } from "./water-balance";
 import { SCHEME_SLOT, initSchemeMap } from "./scheme-map";
+import { initEffectsMap } from "./effects-map";
 import {
   BASIN_UNITS,
   TOPICS,
@@ -77,8 +78,13 @@ export interface BasinStats {
   hover(place: Place | null): void;
 }
 
-/** How the maps are drawn, in the legend's order: fills, the scheme's discharge lines, its storage change dots. */
-const SLOTS = ["fill", "lines", "dots"];
+/**
+ * How the maps are drawn, in the legend's order: fills, the scheme's discharge lines, its
+ * storage change dots, precipitation as rain, evapotranspiration as vapour.
+ */
+const SLOTS = ["fill", "lines", "dots", "rain", "vapour"];
+const isScheme = (l: { slot: string }) => l.slot === "lines" || l.slot === "dots";
+const isEffect = (l: { slot: string }) => l.slot === "rain" || l.slot === "vapour";
 
 /** A map on the map: its tile or card, and how it's drawn (the legend's slot). */
 interface Layer {
@@ -184,6 +190,20 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     },
     onHover: () => showMapTooltip(),
   });
+  // Precipitation and evapotranspiration of a basin's sub-basins: as rain and vapour
+  // (WaPOR's rasters), or (each one's switch in the legend) as fills.
+  const effectsMap = initEffectsMap({
+    map,
+    majorBasins,
+    legend,
+    onChange(kind) {
+      const ctx = current?.ctx;
+      const ids = state.chosen.get(scope());
+      const moved = ctx && kind && ids?.find((id) => specFor(ctx, { id, sub: null }).effect === kind);
+      if (moved) state.chosen.set(scope(), [...ids!.filter((id) => id !== moved), moved]);
+      drawMap();
+    },
+  });
 
   // All the topics' tiles and cards together, in one column.
   const allTopics: TopicDef = {
@@ -229,8 +249,9 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: BasinCtx, spec: BasinMapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
 
-  /** How a map is drawn: as the scheme's lines or dots, or as fills. */
+  /** How a map is drawn: as the scheme's lines or dots, as rain or vapour, or as fills. */
   function slotOf(spec: BasinMapSpec, ctx: BasinCtx): string {
+    if (spec.effect && effectsMap.isEffect(spec.effect, ctx.major?.id ?? null)) return spec.effect;
     return spec.scheme && schemeMap.isScheme(spec.scheme, ctx.major?.id ?? null) ? SCHEME_SLOT[spec.scheme] : "fill";
   }
 
@@ -413,6 +434,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     map.setBasinStatFills(null);
     schemeMap.showSwitches([], null);
     schemeMap.draw(null, []);
+    effectsMap.showSwitches([], null);
+    effectsMap.draw(null, null, []);
     setMapOverride(false);
   }
 
@@ -475,6 +498,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       map.setBasinStatFills(null);
       schemeMap.showSwitches([], null);
       schemeMap.draw(null, []);
+      effectsMap.showSwitches([], null);
+      effectsMap.draw(null, null, []);
       setMapOverride(false);
       return;
     }
@@ -482,12 +507,19 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const theme = map.theme;
     const fill = layers.find((l) => l.slot === "fill")?.spec;
     // The others as the water balance scheme: lines or dots, sized rather than coloured.
-    const sized = layers.filter((l) => l.slot !== "fill");
+    const sized = layers.filter(isScheme);
     const keys = schemeMap.draw(
       major,
       sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${ctx.period}` })),
     );
     schemeMap.showSwitches(layers.filter((l) => l.spec.scheme).map((l) => ({ kind: l.spec.scheme!, slot: l.slot })), major);
+    // Or as rain and vapour.
+    const effectKeys = effectsMap.draw(
+      major,
+      daysOfDekads(ctx.covered),
+      layers.filter((l) => isEffect(l) && !l.spec.status).map((l) => l.spec.effect!),
+    );
+    effectsMap.showSwitches(layers.filter((l) => l.spec.effect).map((l) => ({ kind: l.spec.effect!, slot: l.slot })), major);
 
     // The area under the pointer in a chart (or the one the card is pinned on): a group
     // or a major basin keeps its colours and fades the rest; a sub-basin is outlined.
@@ -510,13 +542,13 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
         if (c) colors.set(id, shown(id) ? c : mixColor(c, theme.land, 0.78));
       });
     } else {
-      // Plain land under the scheme; the other major basins greyed.
+      // Plain land under the others; the other major basins greyed.
       for (const id of ctx.majors) colors.set(id, id === major ? theme.land : theme.noData);
     }
     const outlined = picked?.kind === "sub" ? [picked.id] : [];
     map.setBasinStatFills({
       level: fill?.level ?? "major",
-      key: `${fill?.id ?? ""}:${sized.map((l) => l.spec.id).join()}:${state.stretch}:${fill?.status ? "" : ctx.period}:${sub ?? ""}:${outlined.join()}`,
+      key: `${fill?.id ?? ""}:${layers.filter((l) => l.slot !== "fill").map((l) => l.spec.id).join()}:${state.stretch}:${fill?.status ? "" : ctx.period}:${sub ?? ""}:${outlined.join()}`,
       colors,
       outlined,
     });
@@ -530,6 +562,16 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
           const key: LegendKey | null = scale?.ticks.length ? { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks } : null;
           const note = `${spec.note}${spec.scale === "log" ? " · Log scale" : ""}`;
           return { ...common, note, period: key ? ctx.period : "", key, status: unlessLoading(spec.status ?? "") };
+        }
+        // Rain and vapour: a key of how many drops or puffs, per day whatever the units.
+        if (isEffect({ slot })) {
+          const drawn = effectKeys.get(spec.effect!);
+          const status = spec.status || drawn?.status || "";
+          const key = status ? null : drawn?.key ?? null;
+          const note = spec.effect === "rain"
+            ? "WaPOR's raster: more drops where more rain falls"
+            : "WaPOR's raster: more puffs where more water goes up · green: transpiration, blue: evaporation";
+          return { ...common, unit: "mm/day", units: false, note, period: key ? ctx.period : "", key, status: unlessLoading(status) };
         }
         // The scheme has a key of sizes instead.
         const drawn = keys.get(spec.scheme!);

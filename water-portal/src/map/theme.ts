@@ -24,6 +24,11 @@ export interface MapTheme {
   /** Discharge as particles: the rivers under them, and the particles. */
   particleRiver: Color;
   particle: Color;
+  /** Precipitation as rain, evapotranspiration as vapour (Basin view): the drops, transpiration's and evaporation's puffs, and both. */
+  rain: Color;
+  transpiration: Color;
+  evaporation: Color;
+  vapour: Color;
   marker: Color;
   markerRing: Color;
 }
@@ -48,6 +53,10 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     storageFall: [215, 48, 39, 255],
     particleRiver: [33, 113, 181, 255],
     particle: [255, 255, 255, 255],
+    rain: [30, 80, 160, 255],
+    transpiration: [35, 130, 60, 255],
+    evaporation: [40, 100, 190, 255],
+    vapour: [90, 100, 115, 255],
     marker: [178, 111, 18, 255],
     markerRing: [255, 255, 255, 255],
   },
@@ -70,6 +79,10 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     storageFall: [235, 64, 70, 255],
     particleRiver: [38, 92, 135, 255],
     particle: [235, 248, 255, 255],
+    rain: [200, 220, 255, 255],
+    transpiration: [120, 235, 140, 255],
+    evaporation: [150, 205, 255, 255],
+    vapour: [215, 230, 240, 255],
     marker: [230, 169, 76, 255],
     markerRing: [13, 22, 27, 255],
   },

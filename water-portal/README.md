@@ -94,6 +94,10 @@ water-portal/
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
     │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, storage change dots, particles
     │       ├── river-particles.ts  Particles streaming down the rivers (river-flow-poc's wind map)
+    │       ├── rain.ts       Rain falling as densely as a grid says (river-flow-poc's rain page)
+    │       ├── vapour.ts     Vapour rising as densely as a grid says, transpiration and evaporation
+    │       ├── haze.ts       A heat shimmer over the map, as strong as a grid says
+    │       ├── basin-effects.ts  The Basin view's rain, vapour and shimmer, and the rasters on the ground
     │       └── marker.ts     The click marker
     ├── basin/              Basin view: the water balance of the selected sub-basin
     │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; fao_wapor_discharge.portal), and a network's series for the panel
@@ -106,6 +110,8 @@ water-portal/
     │   ├── rivers.ts       Loads a major basin's river network and the sub-basins' middles
     │   ├── scheme.ts       The water balance scheme: lines along the rivers, dots, simplification
     │   ├── scheme-map.ts   The scheme on the map: the legend's switch, key and simplify slider
+    │   ├── basin-grids.ts  WaPOR's PCP, AETI and T over a range on a grid over a major basin, masked to it
+    │   ├── effects-map.ts  Precipitation as rain, evapotranspiration as vapour: the legend's switch, key and sliders
     │   ├── basin-stats.ts  Statistics in the panel: topics, preview / pin, map colours, legend, tooltip
     │   └── water-balance.ts  Connects selection, date range, model, map and panel
     ├── country/            Country view: AQUASTAT statistics and the maps that go with them
@@ -307,6 +313,24 @@ water-portal/
   For now the legend has sliders for the particles' look (count, speed, trails, size, speed
   contrast, river widths, how many rivers, their opacity) to find the best settings; **Copy
   settings** copies them as JSON. The defaults are `PARTICLES` in `scheme-map.ts`.
+- **Precipitation as rain, evapotranspiration as vapour** ([src/basin/effects-map.ts](src/basin/effects-map.ts),
+  from river-flow-poc's `rain.html` and `et.html`): with a major basin selected, the precipitation
+  and evapotranspiration maps of its sub-basins have a switch in the legend: **Sub-basins** (fills,
+  as before) or **Rain** / **Vapour**. Each is a layer of its own (the legend's `rain` and `vapour`
+  slots), so both can show at once, over another map's fills. They follow WaPOR's rasters rather
+  than the sub-basins' means ([src/basin/basin-grids.ts](src/basin/basin-grids.ts)): the mean
+  mm/day over the period, added up from the same rasters the WaPOR map would use (wapor.ts's
+  `waporPeriod`: a year, months, dekads), each read at the coarsest overview still as fine as a
+  grid of ~480 cells across the basin's box, only the tiles over it, and masked to the basin's
+  outline (drawn from the major basins' vector tiles). Drops and puffs fall and rise only where
+  the grid says, as many per area as (mm/day ÷ the "all at" value)^contrast; vapour is green with
+  the chance of T ÷ AETI (transpiration), else blue (evaporation). The shimmer copies the canvas
+  drawn so far and draws the basin again from it, each pixel shifted by rising ripples as far as
+  AETI says. Like the particles, they're computed on the GPU from each instance's index and the
+  time (no state), and the map repaints every frame while they show. Under each, the raster can
+  be drawn on the ground (river-flow-poc's colours). The map has no 3D relief, so the rain reads
+  best tilted (ctrl-drag). For now the legend has sliders for their look, a colour menu and **Copy
+  settings**; the defaults are `RAIN` and `VAPOUR` in `effects-map.ts`.
 - **The Basin view's data** (PCP, AETI, and the water balance model's Q and ΔS) are files
   precomputed by [fao-wapor-discharge](../../fao-wapor-discharge)'s
   `python -m fao_wapor_discharge.portal --sub-basins public/data/sub-basins.json --out-dir public/data/model`
