@@ -2,8 +2,8 @@
  * Panes whose width can be changed, from a grip on their right edge (the graph panes,
  * and the date range). A centred pane (the date range) grows on both sides, so the grip
  * moves twice as far as the pointer would on its own; its width goes in --pane-w, for
- * its CSS to keep it on screen, and it gets .sized. The width is remembered in this browser; "Reset layout" in the Layers menu forgets
- * it. Panes that share a key (the graph panes of the different views) share one width.
+ * its CSS to keep it on screen, and it gets .sized. The width is remembered in this browser.
+ * Panes that share a key (the graph panes of the different views) share one width.
  * After a resize, "panes-moved" is dispatched on window.
  */
 
@@ -27,22 +27,6 @@ export function makeResizable(pane: HTMLElement, key: string, { centered = false
     e.preventDefault(); // no text selection
     resizeFrom(e, pane, key, grip);
   });
-}
-
-/** Forget every pane's width: each goes back to its CSS's. (Not by reloading: in Safari, a reload from script leaves the map drawn in a strip at the top.) */
-export function resetLayout() {
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // Nothing was kept, then.
-  }
-  for (const key of Object.keys(widths)) delete widths[key];
-  for (const pane of [...panes.values()].flat()) {
-    pane.style.removeProperty("width");
-    pane.style.removeProperty("--pane-w");
-    pane.classList.remove("sized");
-  }
-  window.dispatchEvent(new Event("panes-moved"));
 }
 
 function resizeFrom(down: PointerEvent, pane: HTMLElement, key: string, grip: HTMLElement) {

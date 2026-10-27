@@ -1,5 +1,5 @@
 /*
- * The Layers button and its small menu of on/off switches, the theme and the layout.
+ * The Layers button and its small menu of on/off switches and the theme.
  * The markup lives in index.html; each layer checkbox names its layer in data-layer.
  * main.ts puts it among the map's controls.
  *
@@ -8,7 +8,6 @@
  */
 import type { ToggleableLayer } from "../map/map";
 import type { View } from "../toolbar/range-rules";
-import { resetLayout } from "./floating";
 
 const DEFAULTS: Record<View, Record<ToggleableLayer, boolean>> = {
   country: { rivers: true, lakes: true },
@@ -53,7 +52,6 @@ export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boole
       onToggle(layer, input.checked);
     });
   }
-  document.getElementById("reset-layout")!.addEventListener("click", resetLayout);
 
   return {
     setView(next) {

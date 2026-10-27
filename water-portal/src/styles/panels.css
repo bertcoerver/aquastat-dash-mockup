@@ -74,22 +74,6 @@
 .layers-panel label:hover {
   background: var(--ground);
 }
-.layers-panel .layers-action {
-  width: auto;
-  height: auto;
-  margin: 2px 0;
-  padding: 5px 6px;
-  font: inherit;
-  text-align: left;
-  color: var(--ink);
-  background: transparent;
-  border: 0;
-  border-radius: 5px;
-  cursor: pointer;
-}
-.layers-panel .layers-action:hover {
-  background: var(--ground);
-}
 .layers-group {
   display: flex;
   flex-direction: column;
@@ -107,7 +91,6 @@
   margin: 0;
 }
 .layers-button:focus-visible,
-.layers-action:focus-visible,
 .layers-panel input:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
