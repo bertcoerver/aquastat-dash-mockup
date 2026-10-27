@@ -89,6 +89,11 @@
 .legend-period > * {
   white-space: nowrap;
 }
+/* The layers' period (panels/legend.ts), once above their sections. */
+.legend-range {
+  margin-bottom: 8px;
+  white-space: nowrap;
+}
 /* The period: its tooltip has the equation (wapor-legend.ts). */
 #wapor-period[title]:not([title=""]) {
   cursor: help;
@@ -468,6 +473,11 @@
 .legend-key-body {
   flex: 1;
   min-width: 0;
+}
+/* The unit, to the right of the key (level with the ramp). */
+.legend-unit {
+  flex: none;
+  margin-top: 0;
 }
 /* The tuning pane (panels/tuning-pane.ts): a triple click on a legend opens it. */
 .tuning-pane {

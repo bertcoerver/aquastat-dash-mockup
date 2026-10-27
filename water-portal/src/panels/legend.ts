@@ -1,10 +1,10 @@
 /*
  * The map legend of the Basin and Country views: one or more layers at once. Its title
- * is a checklist of the maps (title-menu.ts), and each layer on the map has a section
- * below it. A layer goes in a slot, by how it's drawn (a fill, lines, circles, bars):
+ * is a checklist of the maps (title-menu.ts), then the period (the same for all the
+ * layers), and each layer on the map has a section below it. A layer goes in a slot, by how it's drawn (a fill, lines, circles, bars):
  * one layer per slot. A section has the layer's title (with a × to take it off the map:
- * the last one too, leaving the map empty), a note, the period and unit (a menu of
- * units where the view has one), and its key:
+ * the last one too, leaving the map empty), a note, and its key, with the unit to its
+ * right (a menu of units where the view has one):
  *
  * - a colour ramp with ticks, also a menu of how much of the values it spans (ramp-menu.ts);
  * - classes, whose swatches switch them on and off on the map;
@@ -24,7 +24,7 @@
  * the key). While a range plays the ranges are locked (all of them at once): each map
  * keeps the colour range or sizes it has (hold), so the frames compare; the view draws
  * it again. Expects this markup (see index.html), the
- * sections are added after the title:
+ * period and sections are added after the title:
  *
  *   <aside class="legend">
  *     <div class="legend-title"><button class="title-menu" …>…</button></div>
@@ -66,6 +66,7 @@ export interface LegendLayer {
   id: string;
   title: string;
   note: string;
+  /** Shown once, above the sections (the first layer's that has one): "" while it has no key. */
   period: string;
   unit: string;
   /** Whether the unit is a menu. */
@@ -159,6 +160,11 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
   const menuButton = aside.querySelector<HTMLButtonElement>(".legend-title .title-menu")!;
   const menu = initTitleMenu(menuButton, options, onToggle, { multi: true, onIcon: onShape });
   const titleRow = aside.querySelector<HTMLElement>(".legend-title")!;
+  // The period of all the layers, between the checklist and the sections.
+  const periodRow = document.createElement("div");
+  periodRow.className = "legend-period legend-range";
+  periodRow.hidden = true;
+  titleRow.after(periodRow);
   // The ranges held while locked, by map and unit (null: unlocked).
   let held: Map<string, unknown> | null = null;
   let lockKey = 0;
@@ -172,8 +178,6 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     title: HTMLElement;
     remove: HTMLButtonElement;
     note: HTMLElement;
-    periodRow: HTMLElement;
-    period: HTMLElement;
     unit: HTMLButtonElement;
     unitMenu: { setLabel(label: string): void };
     key: HTMLElement;
@@ -188,7 +192,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
   }
 
   const sections = new Map<string, Parts>();
-  let after: Element = titleRow;
+  let after: Element = periodRow;
   for (const slot of slots) {
     const el = document.createElement("section");
     el.className = "legend-layer";
@@ -202,9 +206,6 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       `<button type="button" class="legend-remove" title="Take off the map" aria-label="Take off the map">×</button></span></div>` +
       `<small class="legend-layer-note"></small>` +
       `<div class="legend-extra"></div>` +
-      `<div class="legend-period"><span></span><button class="title-menu unit-menu" id="${id}-unit" type="button" ` +
-      `aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span>` +
-      `<span class="title-caret" aria-hidden="true"></span></button></div>` +
       `<div class="legend-key"><div class="legend-key-body">` +
       `<button class="legend-ramp ramp-menu" id="${id}-ramp" type="button" aria-haspopup="listbox" aria-expanded="false" ` +
       `aria-label="Colour range"><span class="title-menu-label" hidden></span></button>` +
@@ -213,7 +214,9 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       `<svg class="scheme-key" aria-hidden="true"></svg>` +
       `<button class="legend-sizes ramp-menu" id="${id}-sizes" type="button" aria-haspopup="listbox" aria-expanded="false" ` +
       `aria-label="How the circles or bars look"><svg class="scheme-key" aria-hidden="true"></svg><span class="title-menu-label" hidden></span></button>` +
-      `</div></div>` +
+      `</div><div class="legend-period legend-unit"><button class="title-menu unit-menu" id="${id}-unit" type="button" ` +
+      `aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span>` +
+      `<span class="title-caret" aria-hidden="true"></span></button></div></div>` +
       `<div class="legend-after"></div>` +
       `<div class="legend-status" role="status"></div>`;
     after.after(el);
@@ -230,8 +233,6 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       title: q(".legend-layer-title"),
       remove: q(".legend-remove"),
       note: q(".legend-layer-note"),
-      periodRow: q(".legend-period"),
-      period: q(".legend-period > span"),
       unit,
       unitMenu: units
         ? initTitleMenu(unit, () => (parts.layer?.units ? units.options(slot) : { options: [], current: null }), (id) => units.onPick(slot, id))
@@ -299,7 +300,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     const now = [...sections.values()].filter((p) => parts.includes(p));
     now.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
     if (!now.every((p, i) => p === parts[i])) {
-      let after: Element = titleRow;
+      let after: Element = periodRow;
       for (const p of parts) {
         after.after(p.el);
         after = p.el;
@@ -375,13 +376,11 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     if (!layer) return;
     p.title.textContent = layer.title;
     p.note.textContent = layer.note;
-    p.period.textContent = layer.period;
     p.unitMenu.setLabel(layer.unit);
     // Nothing to pick from: plain text.
     p.unit.disabled = !layer.units;
     p.unit.title = layer.units && units ? units.title(p.el.dataset.slot!) : "";
     const key = layer.key;
-    p.periodRow.hidden = !key && !layer.period;
     p.key.hidden = !key && !layer.sizes;
     p.ramp.hidden = p.ticks.hidden = key?.kind !== "ramp";
     p.classes.hidden = key?.kind !== "classes";
@@ -418,8 +417,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
 
   /** Three line widths, circles or bars side by side, each labelled with its value. */
   function drawSizes(svg: SVGSVGElement, key: Extract<LegendKey, { kind: "lines" | "circles" | "bars" }>) {
-    // (The legend's padding.)
-    const width = aside.clientWidth - 24 || 220;
+    // (The key's width, beside the unit.)
+    const width = svg.closest(".legend-key-body")!.clientWidth || 220;
     const step = width / key.items.length;
     const top = Math.max(...key.items.map((k) => Math.abs(k.value)));
     const biggest = Math.max(...key.items.map((k) => k.size));
@@ -454,6 +453,9 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       aside.hidden = !layers;
       if (!layers) return;
       menu.setLabel(layers.length > 1 ? `${layers.length} layers on the map` : layers.length ? "1 layer on the map" : "No layers on the map");
+      const period = layers.find((l) => l.period)?.period ?? "";
+      periodRow.textContent = period;
+      periodRow.hidden = !period;
       for (const [slot, p] of sections) showSection(p, layers.find((l) => l.slot === slot) ?? null);
       arrange(layers);
     },
