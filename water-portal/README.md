@@ -389,9 +389,7 @@ water-portal/
   covered), `subbasins.bin` (per sub-basin: PCP and AETI), `majors.bin` (per major basin: Q
   at its outlets, ΔS summed) and `major/<id>.bin` (per sub-basin: Q and ΔS), all over the
   same dekads; the format is in `portal.py` and `src/basin/model.ts`. The app queries
-  nothing itself (only the Country view's AQUASTAT data is read live). Known issue: the model uses
-  Web-Mercator sub-basin areas, so Q and ΔS are too high by 1/cos²(latitude) (~2× at 45°):
-  see [AREA_BUG.md](../../fao-wapor-discharge/AREA_BUG.md). Meant to run
+  nothing itself (only the Country view's AQUASTAT data is read live). Meant to run
   after each new dekad (a scheduled job, not set up yet); a full run, not an append,
   since a new calendar year moves the model's warmup and changes earlier dekads. The
   files are looked for in `public/data/model/` (not in git: 26 MB; `subbasins.bin` 8.8 MB, `majors.bin` 0.5 MB, `major/<id>.bin` up to 1.8 MB), or at
