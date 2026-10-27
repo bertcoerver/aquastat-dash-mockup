@@ -12,8 +12,8 @@
  * the raster can be drawn on the ground too.
  *
  * Like the scheme (scheme-map.ts), basin-stats.ts asks for it for the maps that allow it
- * (BasinMapSpec.effect: precipitation or evapotranspiration per sub-basin), and a switch
- * in each one's legend section picks between it and the other maps' shapes. The tuning
+ * (BasinMapSpec.effect: precipitation or evapotranspiration per sub-basin), and its
+ * icons in the legend's checklist pick between it and the other maps' shapes. The tuning
  * pane (panels/tuning-pane.ts: a triple click on the legend) has sliders for how they're
  * drawn (RAIN_TUNING, VAPOUR_TUNING).
  */
@@ -21,11 +21,10 @@ import type { BasinEffects, EffectGround } from "../map/layers/basin-effects";
 import type { EffectGrid } from "../map/layers/rain";
 import type { WaterMap } from "../map/map";
 import type { Color } from "../map/theme";
-import type { LayerLegend, LegendKey } from "../panels/legend";
+import type { LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
 import { tuningSection } from "../panels/tuning-pane";
-import { slideSelection } from "../panels/segmented";
-import { SHAPES, SHAPE_LABELS, type Shape } from "../panels/shape-switch";
+import { SHAPES, SHAPE_LABELS, type Shape, type ShapeOption } from "../panels/shape-switch";
 import type { MajorBasin } from "../toolbar/place-picker";
 import type { DayRange } from "../toolbar/range-rules";
 import { loadBasinGrid, type BasinGrid } from "./basin-grids";
@@ -35,8 +34,6 @@ export type EffectKind = "rain" | "vapour";
 interface Options {
   map: WaterMap;
   majorBasins: MajorBasin[];
-  /** The legend: the switches go in their layers' sections. */
-  legend: LayerLegend;
   /** Draw the map again: the rasters loaded, or a switch moved (`kind`: its map). */
   onChange(kind?: EffectKind): void;
 }
@@ -46,8 +43,11 @@ export interface EffectsMap {
   isEffect(kind: EffectKind | undefined, major: number | null): boolean;
   /** The shape a map of `kind` is drawn in when it isn't the effect. */
   shape(kind: EffectKind): Shape;
-  /** Show each kind's switch in its section of the legend (`shown`: the maps of the kinds on the map, in their slots). */
-  showSwitches(shown: { kind: EffectKind; slot: string }[], major: number | null): void;
+  /** How a map of `kind` of major basin `major` can be drawn (its icons in the legend's checklist): a shape, or as the effect. */
+  modes(kind: EffectKind, major: number | null): ShapeOption[];
+  /** How it's drawn (one of modes' ids). */
+  mode(kind: EffectKind, major: number | null): string;
+  setMode(kind: EffectKind, id: string): void;
   /**
    * Draw `kinds` of major basin `major` over `range` (none: clear them). Returns each
    * one's key for the legend, or why it isn't drawn (yet).
@@ -189,40 +189,11 @@ const MODES: Record<EffectKind, [Mode, string, string][]> = {
 const rgb = (c: Color | RGB) => `${c[0]},${c[1]},${c[2]}`;
 const rgb3 = (c: Color): RGB => [c[0], c[1], c[2]];
 
-export function initEffectsMap({ map, majorBasins, legend, onChange }: Options): EffectsMap {
+export function initEffectsMap({ map, majorBasins, onChange }: Options): EffectsMap {
   const boxes = new Map(majorBasins.map((b) => [b.id, b.bbox]));
   const statuses = new Map<string, Status>();
   const mode: Record<EffectKind, Mode> = { rain: "fill", vapour: "fill" };
   let lastMajor: number | null = null;
-
-  // --- The switches, one per kind, in their layers' sections --------------------------------
-  const toggles = {} as Record<EffectKind, HTMLElement>;
-  for (const kind of ["rain", "vapour"] as EffectKind[]) {
-    const toggle = document.createElement("div");
-    toggle.className = "wb-vars";
-    toggle.setAttribute("role", "radiogroup");
-    toggle.setAttribute("aria-label", kind === "rain" ? "Precipitation shown" : "Evapotranspiration shown");
-    toggle.style.margin = "6px 0 2px";
-    toggle.hidden = true;
-    toggle.innerHTML = MODES[kind]
-      .map(([m, label, title]) => `<button type="button" role="radio" data-mode="${m}" title="${title}">${label}</button>`)
-      .join("");
-    slideSelection(toggle);
-    toggle.addEventListener("click", (e) => {
-      const button = (e.target as Element).closest<HTMLElement>("[data-mode]");
-      if (!button || button.dataset.mode === mode[kind]) return;
-      mode[kind] = button.dataset.mode as Mode;
-      showMode(kind);
-      onChange(kind);
-    });
-    toggles[kind] = toggle;
-    showMode(kind);
-  }
-  function showMode(kind: EffectKind) {
-    for (const button of toggles[kind].querySelectorAll<HTMLElement>("[data-mode]")) {
-      button.setAttribute("aria-checked", String(button.dataset.mode === mode[kind]));
-    }
-  }
 
   // --- The settings: sliders in the tuning pane --------------------------------------------
   const rain = { ...RAIN };
@@ -268,12 +239,18 @@ export function initEffectsMap({ map, majorBasins, legend, onChange }: Options):
       return m === "effect" ? "fill" : m;
     },
 
-    showSwitches(shown, major) {
-      for (const kind of ["rain", "vapour"] as EffectKind[]) {
-        const s = major === null ? undefined : shown.find((x) => x.kind === kind);
-        toggles[kind].hidden = !s;
-        if (s) legend.section(s.slot).extra.append(toggles[kind]);
-      }
+    modes(kind, major) {
+      return MODES[kind]
+        .filter(([m]) => m !== "effect" || (major !== null && boxes.has(major)))
+        .map(([m, label, title]) => ({ id: m, slot: m === "effect" ? kind : m, icon: m === "effect" ? kind : m, label, title }));
+    },
+
+    mode(kind, major) {
+      return this.isEffect(kind, major) ? "effect" : this.shape(kind);
+    },
+
+    setMode(kind, id) {
+      mode[kind] = id as Mode;
     },
 
     draw(major, range, kinds) {

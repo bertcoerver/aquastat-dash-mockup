@@ -88,6 +88,12 @@ export interface WaterMap {
    */
   setBars(view: "country" | "basin", bars: { key: string; items: Bar[] } | null): void;
   /**
+   * The Country or Basin view: the order to draw its statistics maps in, by slot, top
+   * first (the legend's: "circles", "bars", "lines", "rain", "vapour"). The colours stay
+   * at the bottom; slots not named keep their own order, under those named.
+   */
+  setLayerOrder(view: "country" | "basin", slots: string[]): void;
+  /**
    * A range playing in the Country or Basin view, a step every `stepMs` (null: not
    * playing): the map's changes are then eased over the whole step, evenly, so they flow
    * on from one step to the next (else, quicker, slowing at the end).
@@ -159,6 +165,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
     basinSymbols: null as { key: string; items: CountrySymbol[] } | null,
     bars: { country: null, basin: null } as Record<"country" | "basin", { key: string; items: Bar[] } | null>,
+    order: { country: [], basin: [] } as Record<"country" | "basin", string[]>,
     basinStats: null as BasinStatFills | null,
     scheme: null as BasinScheme | null,
     effects: null as BasinEffects | null,
@@ -181,8 +188,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     basin: tween<Bar>((b) => b.position.join(), { height: 0 }),
   };
   const schemeTweens = {
-    // (A line's path is the scheme's own: the same array as long as the scheme is.)
-    lines: tween<SchemeLineStyle>((l) => l.path, { width: 0 }),
+    lines: tween<SchemeLineStyle>((l) => l.id, { width: 0 }),
     arrows: tween<SchemeArrow>((a) => a.subBasin, { size: 0 }),
   };
   const fades = {
@@ -290,16 +296,19 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       }),
       lakesLayer({ color: theme.water, visible: state.visible.lakes }),
       subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
-      ...basinSchemeLayers(scheme, schemeShown()),
-      ...effectLayers(effects),
       countryOutlineLayer({
         m49: state.selection.country,
         color: theme.outline,
         halo: theme.markerRing,
         visible: state.view === "country" && Boolean(state.countryFills),
       }),
-      barsLayer({ bars: shownBars(), zoom: barsZoom }),
-      countrySymbolsLayer({ symbols: visibleSymbols() }),
+      ...stacked({
+        lines: basinSchemeLayers(scheme, schemeShown()),
+        vapour: effects?.vapour ? effectLayers({ ...effects, rain: undefined }) : [],
+        rain: effects?.rain ? effectLayers({ ...effects, vapour: undefined }) : [],
+        bars: [barsLayer({ bars: shownBars(), zoom: barsZoom })],
+        circles: [countrySymbolsLayer({ symbols: visibleSymbols() })],
+      }),
       // The clicked point: only the Local view is about a point.
       markerLayer({
         position: state.view === "local" ? (state.dragged ?? state.selection.lngLat) : null,
@@ -307,6 +316,14 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         ring: theme.markerRing,
       }),
     ];
+  }
+
+  /** The statistics maps' layers, bottom to top: in the view's order (setLayerOrder), else as `groups` are. */
+  function stacked(groups: Record<string, Layer[]>) {
+    const order = state.view === "country" || state.view === "basin" ? state.order[state.view] : [];
+    const names = Object.keys(groups);
+    const rank = (slot: string) => (order.includes(slot) ? names.length + order.length - order.indexOf(slot) : names.indexOf(slot));
+    return names.sort((a, b) => rank(a) - rank(b)).flatMap((slot) => groups[slot]);
   }
 
   // Only the circles on the near side of the globe: they are drawn without a depth
@@ -629,6 +646,11 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       barsZoom = Math.round(map.getZoom() * 20) / 20;
       render();
       tilt();
+    },
+    setLayerOrder(view, slots) {
+      if (slots.join() === state.order[view].join()) return;
+      state.order[view] = slots;
+      render();
     },
     setWapor(period, onLoad, seamless = false) {
       const same = (entry: WaporEntry | null) =>

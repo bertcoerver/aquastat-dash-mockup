@@ -2,9 +2,9 @@
  * The map legend of the Basin and Country views: one or more layers at once. Its title
  * is a checklist of the maps (title-menu.ts), and each layer on the map has a section
  * below it. A layer goes in a slot, by how it's drawn (a fill, lines, circles, bars):
- * one layer per slot, and the sections in the slots' order. A section has the layer's
- * title (with more than one layer, and a × to take it off the map), a note, the period
- * and unit (a menu of units where the view has one), and its key:
+ * one layer per slot. A section has the layer's title (with a × to take it off the map:
+ * the last one too, leaving the map empty), a note, the period and unit (a menu of
+ * units where the view has one), and its key:
  *
  * - a colour ramp with ticks, also a menu of how much of the values it spans (ramp-menu.ts);
  * - classes, whose swatches switch them on and off on the map;
@@ -13,9 +13,18 @@
  * Circles and bars have a key of sizes too, under their colours' (if any), which is a
  * menu of how they look (shape-style.ts).
  *
+ * The checklist has, to the right of each map, the icons of how it can be drawn (its
+ * slot: shape-switch.ts); a click on one switches it, or adds it in that shape.
+ *
+ * The sections are in the order the maps are drawn, the top one on top (onOrder): a new
+ * map goes on top, and a section's title drags it up or down. The colours stay at the
+ * bottom, as they are the land itself.
+ *
  * A view can put its own controls in a section (extra: under the note; after: under
- * the key). A padlock in the title locks the ranges: each map keeps the colour range or
- * sizes it has (hold), so other periods and places compare; the view draws it again. Expects this markup (see index.html), the sections are added after the title:
+ * the key). A padlock left of each key locks the ranges (all of them at
+ * once): each map keeps the colour range or sizes it has (hold), so other periods and
+ * places compare; the view draws it again. Expects this markup (see index.html), the
+ * sections are added after the title:
  *
  *   <aside class="legend">
  *     <div class="legend-title"><button class="title-menu" …>…</button></div>
@@ -78,7 +87,7 @@ export interface LegendSection {
 
 export interface LayerLegend {
   section(slot: string): LegendSection;
-  /** Show these layers (null: hide the legend). */
+  /** Show these layers (none: only the checklist; null: hide the legend). */
   show(layers: LegendLayer[] | null): void;
   /**
    * A map's range (its colours' domain, the value of its biggest size): `range` as it
@@ -97,6 +106,10 @@ interface Options {
   options(): { options: MenuOption[]; current: string[] };
   /** Check or uncheck a map. */
   onToggle(id: string): void;
+  /** The slots on the map, top first: the order to draw them in. */
+  onOrder?(slots: string[]): void;
+  /** One of a map's icons picked: draw it so (adding it if it isn't on the map). */
+  onShape?(id: string, shape: string): void;
   /** The ramp's menu (of the fill slot): `of` is what the colours span, "the basins' values". */
   ramp: { of: string; initial: WaporStretch; onPick(cut: WaporStretch): void };
   /** The units' menu of the map in `slot`, where its layer has `units`. */
@@ -118,14 +131,10 @@ export function onePerSlot<T extends { slot: string }>(layers: T[], slots: strin
     .sort((a, b) => slots.indexOf(a.slot) - slots.indexOf(b.slot));
 }
 
-/** The checklist's ids after `id` is checked or unchecked (the last one can't be). */
+/** The checklist's ids after `id` is checked or unchecked. */
 export function toggled(ids: string[], id: string): string[] {
-  if (!ids.includes(id)) return [...ids, id];
-  return ids.length > 1 ? ids.filter((x) => x !== id) : ids;
+  return ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
 }
-
-/** How a slot reads in the checklist, to the right of a map. */
-export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lines", circles: "circles", bars: "3D bars", rain: "rain", vapour: "vapour" };
 
 /** A round number at or below x (1, 2 or 5 × a power of ten), for a key's sizes. */
 export function nice(x: number) {
@@ -137,22 +146,32 @@ const LOCK_SVG =
   `<svg viewBox="0 0 12 14" width="12" height="14" aria-hidden="true"><path class="lock-shackle" fill="none" stroke="currentColor" ` +
   `stroke-width="1.5"/><rect x="1" y="6.5" width="10" height="7" rx="1.5" fill="currentColor"/></svg>`;
 
-/** A padlock at the end of a legend's title; `onToggle` runs when it's clicked, with whether it's now locked. */
-export function initLock(aside: HTMLElement, onToggle: (locked: boolean) => void) {
+/** A padlock (not yet shown as locked or not: showLock). */
+function lockButton() {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "legend-lock";
   button.innerHTML = LOCK_SVG;
+  return button;
+}
+
+function showLock(button: HTMLButtonElement, on: boolean) {
+  button.setAttribute("aria-pressed", String(on));
+  // Open: the shackle raised, its right leg out of the body.
+  button.querySelector(".lock-shackle")!.setAttribute("d", on ? "M3.5 6.5V4a2.5 2.5 0 0 1 5 0v2.5" : "M3.5 6.5V2.5a2.5 2.5 0 0 1 5 0V3.5");
+  const what = "the colour ranges and sizes";
+  button.title = on ? `Unlock ${what}: fit them to the values again` : `Lock ${what} as they are, so other periods and places compare`;
+  button.setAttribute("aria-label", on ? "Unlock the ranges" : "Lock the ranges");
+}
+
+/** A padlock at the end of a legend's title; `onToggle` runs when it's clicked, with whether it's now locked. */
+export function initLock(aside: HTMLElement, onToggle: (locked: boolean) => void) {
+  const button = lockButton();
   aside.querySelector(".legend-title")!.append(button);
   let locked = false;
   function set(on: boolean) {
     locked = on;
-    button.setAttribute("aria-pressed", String(on));
-    // Open: the shackle raised, its right leg out of the body.
-    button.querySelector(".lock-shackle")!.setAttribute("d", on ? "M3.5 6.5V4a2.5 2.5 0 0 1 5 0v2.5" : "M3.5 6.5V2.5a2.5 2.5 0 0 1 5 0V3.5");
-    const what = "the colour ranges and sizes";
-    button.title = on ? `Unlock ${what}: fit them to the values again` : `Lock ${what} as they are, so other periods and places compare`;
-    button.setAttribute("aria-label", on ? "Unlock the ranges" : "Lock the ranges");
+    showLock(button, on);
   }
   set(false);
   button.addEventListener("click", () => {
@@ -174,18 +193,21 @@ export function ticksHtml(ticks: Tick[]) {
   return ticks.map((t) => `<span style="left:${t.at * 100}%">${Number.isFinite(t.value) ? fmtStop(t.value, span) : "–"}</span>`).join("");
 }
 
-export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, ramp, units, sizes, onClass, onLock }: Options): LayerLegend {
+export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, onShape, onOrder, ramp, units, sizes, onClass, onLock }: Options): LayerLegend {
   const menuButton = aside.querySelector<HTMLButtonElement>(".legend-title .title-menu")!;
-  const menu = initTitleMenu(menuButton, options, onToggle, { multi: true });
+  const menu = initTitleMenu(menuButton, options, onToggle, { multi: true, onIcon: onShape });
+  const titleRow = aside.querySelector<HTMLElement>(".legend-title")!;
   // The ranges held while locked, by map and unit (null: unlocked).
   let held: Map<string, unknown> | null = null;
   let lockKey = 0;
-  const onToggleLock = (locked: boolean) => {
-    held = locked ? new Map() : null;
+  // A padlock by each section's key, all one lock.
+  const padlocks: HTMLButtonElement[] = [];
+  function setLock(on: boolean) {
+    held = on ? new Map() : null;
     lockKey++;
+    for (const button of padlocks) showLock(button, on);
     onLock();
-  };
-  const padlock = initLock(aside, onToggleLock);
+  }
 
   interface Parts extends LegendSection {
     title: HTMLElement;
@@ -195,6 +217,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     period: HTMLElement;
     unit: HTMLButtonElement;
     unitMenu: { setLabel(label: string): void };
+    key: HTMLElement;
     ramp: HTMLButtonElement;
     rampMenu: RampMenu | null;
     ticks: HTMLElement;
@@ -206,7 +229,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
   }
 
   const sections = new Map<string, Parts>();
-  let after: Element = aside.querySelector(".legend-title")!;
+  let after: Element = titleRow;
   for (const slot of slots) {
     const el = document.createElement("section");
     el.className = "legend-layer";
@@ -221,6 +244,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       `<div class="legend-period"><span></span><button class="title-menu unit-menu" id="${id}-unit" type="button" ` +
       `aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span>` +
       `<span class="title-caret" aria-hidden="true"></span></button></div>` +
+      `<div class="legend-key"><div class="legend-key-body">` +
       `<button class="legend-ramp ramp-menu" id="${id}-ramp" type="button" aria-haspopup="listbox" aria-expanded="false" ` +
       `aria-label="Colour range"><span class="title-menu-label" hidden></span></button>` +
       `<div class="legend-ticks" aria-hidden="true"></div>` +
@@ -228,6 +252,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       `<svg class="scheme-key" aria-hidden="true"></svg>` +
       `<button class="legend-sizes ramp-menu" id="${id}-sizes" type="button" aria-haspopup="listbox" aria-expanded="false" ` +
       `aria-label="How the circles or bars look"><svg class="scheme-key" aria-hidden="true"></svg><span class="title-menu-label" hidden></span></button>` +
+      `</div></div>` +
       `<div class="legend-after"></div>` +
       `<div class="legend-status" role="status"></div>`;
     after.after(el);
@@ -236,6 +261,11 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     const unit = q<HTMLButtonElement>(".unit-menu");
     const rampButton = q<HTMLButtonElement>(".legend-ramp");
     const sizesButton = q<HTMLButtonElement>(".legend-sizes");
+    const padlock = lockButton();
+    showLock(padlock, false);
+    padlock.addEventListener("click", () => setLock(!held));
+    padlocks.push(padlock);
+    q(".legend-key").prepend(padlock);
     if (sizes) initTitleMenu(sizesButton, () => sizes.options(slot), (option) => sizes.onPick(slot, option));
     const parts: Parts = {
       el,
@@ -250,17 +280,23 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       unitMenu: units
         ? initTitleMenu(unit, () => (parts.layer?.units ? units.options(slot) : { options: [], current: null }), (id) => units.onPick(slot, id))
         : { setLabel: (label: string) => void (unit.querySelector(".title-menu-label")!.textContent = label) },
+      key: q(".legend-key"),
       ramp: rampButton,
       // How much of the values the colours span: a menu on the fill's ramp.
       rampMenu: slot === slots[0] ? initRampMenu(rampButton, ramp.of, ramp.initial, ramp.onPick) : null,
       ticks: q(".legend-ticks"),
       classes: q(".cp-classes"),
-      sizes: q<SVGSVGElement>(":scope > .scheme-key"),
+      sizes: q<SVGSVGElement>(".legend-key-body > .scheme-key"),
       shapeSizes: sizesButton,
       status: q(".legend-status"),
       layer: null,
     };
     parts.remove.addEventListener("click", () => parts.layer && onToggle(parts.layer.id));
+    q<HTMLElement>(".legend-layer-head").addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !el.classList.contains("draggable") || (e.target as Element).closest(".legend-remove")) return;
+      e.preventDefault(); // no text selection
+      startDrag(parts, e);
+    });
     // Clicking a class's swatch hides that class on the map, or shows it again.
     parts.classes.addEventListener("click", (e) => {
       const swatch = (e.target as Element).closest<HTMLElement>("[data-class]");
@@ -269,11 +305,13 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     sections.set(slot, parts);
   }
 
-  // The sections in the order the maps came on the map, not by slot: a map switched to
-  // another shape keeps its place, one that takes another's slot takes its place, and a
-  // new one goes last.
+  // The sections in the order the maps are drawn, top first, not by slot: a map switched
+  // to another shape keeps its place, one that takes another's slot takes its place, a
+  // new one goes on top, and the colours at the bottom.
   let order: string[] = [];
   let lastIn = new Map<string, string>(); // (slot → the map last in it)
+  let drawn = ""; // (the slots' order last given to onOrder)
+  const fill = slots[0];
   function arrange(layers: LegendLayer[]) {
     const ids = layers.map((l) => l.id);
     for (const l of layers) {
@@ -281,27 +319,79 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       const was = lastIn.get(l.slot);
       const at = was && !ids.includes(was) ? order.indexOf(was) : -1;
       if (at >= 0) order[at] = l.id;
-      else order.push(l.id);
+      else order.unshift(l.id);
     }
-    order = order.filter((id) => ids.includes(id));
+    const slotOf = (id: string) => layers.find((l) => l.id === id)?.slot;
+    order = order.filter((id) => ids.includes(id)).sort((a, b) => Number(slotOf(a) === fill) - Number(slotOf(b) === fill));
     lastIn = new Map(layers.map((l) => [l.slot, l.id]));
-    // Moved only when out of order: moving a section ends a drag or a slide in it.
-    const els = order.map((id) => sections.get(layers.find((l) => l.id === id)!.slot)!.el);
-    const now = [...sections.values()].map((p) => p.el).filter((el) => els.includes(el));
-    now.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
-    if (now.every((el, i) => el === els[i])) return;
-    let after: Element = aside.querySelector(".legend-title")!;
-    for (const el of els) {
-      after.after(el);
-      after = el;
+    place(order.map((id) => sections.get(slotOf(id)!)!));
+  }
+  /** Put the sections in this order (only when out of it: moving a section ends a drag or a slide in it), and draw them so. */
+  function place(parts: Parts[]) {
+    parts.forEach((p, i) => p.el.classList.toggle("below", i > 0));
+    for (const p of parts) p.el.classList.toggle("draggable", p.el.dataset.slot !== fill && parts.filter((q) => q.el.dataset.slot !== fill).length > 1);
+    const now = [...sections.values()].filter((p) => parts.includes(p));
+    now.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    if (!now.every((p, i) => p === parts[i])) {
+      let after: Element = titleRow;
+      for (const p of parts) {
+        after.after(p.el);
+        after = p.el;
+      }
+    }
+    const slotsNow = parts.map((p) => p.el.dataset.slot!);
+    if (slotsNow.join() !== drawn) {
+      drawn = slotsNow.join();
+      onOrder?.(slotsNow);
     }
   }
 
-  function showSection(p: Parts, layer: LegendLayer | null, several: boolean) {
+  // Dragging a section by its title: it follows the pointer, and the others make way as
+  // it passes their middles (the colours' stays at the bottom).
+  function startDrag(p: Parts, e: PointerEvent) {
+    const head = p.el.querySelector<HTMLElement>(".legend-layer-head")!;
+    const startY = e.clientY;
+    const grab = e.clientY - p.el.getBoundingClientRect().top;
+    let dragging = false;
+    head.setPointerCapture(e.pointerId);
+    const shown = () => order.map((id) => [...sections.values()].find((q) => q.layer?.id === id)!).filter(Boolean);
+    function move(ev: PointerEvent) {
+      if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
+      dragging = true;
+      p.el.classList.add("dragging");
+      const others = shown().filter((q) => q !== p && q.el.dataset.slot !== fill);
+      const at = others.filter((q) => {
+        const r = q.el.getBoundingClientRect();
+        return r.top + r.height / 2 < ev.clientY;
+      }).length;
+      const parts = [...others];
+      parts.splice(at, 0, p);
+      const bottom = shown().find((q) => q.el.dataset.slot === fill);
+      if (bottom) parts.push(bottom);
+      p.el.style.transform = "";
+      const next = parts.map((q) => q.layer!.id);
+      if (next.join() !== order.join()) {
+        order = next;
+        place(parts);
+      }
+      p.el.style.transform = `translateY(${ev.clientY - grab - p.el.getBoundingClientRect().top}px)`;
+    }
+    function end() {
+      head.removeEventListener("pointermove", move);
+      head.removeEventListener("pointerup", end);
+      head.removeEventListener("pointercancel", end);
+      p.el.classList.remove("dragging");
+      p.el.style.transform = "";
+    }
+    head.addEventListener("pointermove", move);
+    head.addEventListener("pointerup", end);
+    head.addEventListener("pointercancel", end);
+  }
+
+  function showSection(p: Parts, layer: LegendLayer | null) {
     p.layer = layer;
     p.el.hidden = !layer;
     if (!layer) return;
-    p.el.classList.toggle("titled", several);
     p.title.textContent = layer.title;
     p.note.textContent = layer.note;
     p.period.textContent = layer.period;
@@ -311,6 +401,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     p.unit.title = layer.units && units ? units.title(p.el.dataset.slot!) : "";
     const key = layer.key;
     p.periodRow.hidden = !key && !layer.period;
+    p.key.hidden = !key && !layer.sizes;
     p.ramp.hidden = p.ticks.hidden = key?.kind !== "ramp";
     p.classes.hidden = key?.kind !== "classes";
     p.sizes.toggleAttribute("hidden", key?.kind !== "lines" && key?.kind !== "circles" && key?.kind !== "bars");
@@ -346,7 +437,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
 
   /** Three line widths, circles or bars side by side, each labelled with its value. */
   function drawSizes(svg: SVGSVGElement, key: Extract<LegendKey, { kind: "lines" | "circles" | "bars" }>) {
-    const width = aside.clientWidth - 24 || 220;
+    // (The legend's padding, and the padlock's column.)
+    const width = aside.clientWidth - 24 - 24 || 196;
     const step = width / key.items.length;
     const top = Math.max(...key.items.map((k) => Math.abs(k.value)));
     const biggest = Math.max(...key.items.map((k) => k.size));
@@ -378,11 +470,10 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       return sections.get(slot)!;
     },
     show(layers) {
-      aside.hidden = !layers?.length;
-      if (!layers?.length) return;
-      const several = layers.length > 1;
-      menu.setLabel(several ? `${layers.length} layers on the map` : layers[0].title);
-      for (const [slot, p] of sections) showSection(p, layers.find((l) => l.slot === slot) ?? null, several);
+      aside.hidden = !layers;
+      if (!layers) return;
+      menu.setLabel(layers.length > 1 ? `${layers.length} layers on the map` : layers.length ? "1 layer on the map" : "No layers on the map");
+      for (const [slot, p] of sections) showSection(p, layers.find((l) => l.slot === slot) ?? null);
       arrange(layers);
     },
     hold(key, range) {
@@ -392,9 +483,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     },
     lockKey: () => lockKey,
     lock() {
-      if (padlock.locked) return;
-      padlock.set(true);
-      onToggleLock(true);
+      if (!held) setLock(true);
     },
   };
 }

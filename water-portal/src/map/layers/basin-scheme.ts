@@ -5,6 +5,8 @@ import { RiverParticlesLayer, type ParticleNetwork } from "./river-particles";
 
 /** A line of the Basin view's discharge network (basin/scheme.ts), styled by its discharge. */
 export interface SchemeLineStyle {
+  /** Names the line from one drawing to the next (its path changes with the simplification). */
+  id: object;
   /** lon, lat. */
   path: [number, number][];
   /** CSS pixels (0: not drawn). */

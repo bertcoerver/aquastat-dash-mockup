@@ -309,21 +309,37 @@
 .legend-layer-note:empty {
   display: none;
 }
-.legend-layer-head {
-  display: none;
+/* Each layer has its title, and a × to take it off the map; a line between them. */
+.legend-layer {
+  position: relative;
 }
-/* With more than one layer: each has its title, and a × to take it off the map. */
-.legend-layer.titled {
+.legend-layer.below {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
-.legend-layer.titled .legend-layer-head {
+.legend-layer-head {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
   font-weight: 600;
+  touch-action: none;
+}
+/* Dragged by its title to draw it above or below the others. */
+.legend-layer.draggable > .legend-layer-head {
+  cursor: grab;
+}
+.legend-layer.dragging {
+  z-index: 1;
+  cursor: grabbing;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+  border-radius: 4px;
+  outline: 4px solid var(--surface);
+}
+.legend-layer.dragging > .legend-layer-head {
+  cursor: grabbing;
 }
 .legend-remove {
   flex: none;
@@ -408,6 +424,64 @@
   border: 1px solid var(--line);
   border-radius: 4px;
   padding: 2px 4px;
+}
+
+/* How each map in the checklist is drawn (title-menu.ts, shape-icons.ts): its icons, at
+   the right; the picked one filled, or (a map not on the map) the one it would be added in. */
+.title-menu-icons {
+  display: flex;
+  flex: none;
+  gap: 1px;
+  margin-left: auto;
+  padding: 1px 1px 1px 12px;
+  align-self: center;
+}
+.title-menu-icons > span {
+  display: grid;
+  place-items: center;
+  padding: 2px 3px;
+  color: var(--muted);
+  border-radius: 3px;
+}
+.title-menu-icons svg {
+  width: 13px;
+  height: 13px;
+}
+.title-menu-icons > span:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.title-menu-icons > .picked {
+  color: var(--ink);
+  background: var(--ground);
+}
+[aria-selected="true"] > .title-menu-icons > .picked {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+/* A section's key, the padlock to its left (it locks all the sections' ranges). */
+.legend-key {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.legend-key[hidden] {
+  display: none;
+}
+.legend-key-body {
+  flex: 1;
+  min-width: 0;
+}
+.legend-key > .legend-lock {
+  position: static;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 2px; /* centred on the ramp */
+}
+.legend-key:has(> .legend-key-body > .cp-classes:not([hidden])) > .legend-lock {
+  margin-top: 6px; /* on the first class */
 }
 
 /* The tuning pane (panels/tuning-pane.ts): a triple click on a legend opens it. */

@@ -14,6 +14,9 @@
  *
  * Or a checklist (`multi`): several options are chosen at once, a pick checks or unchecks
  * one, and the list stays open (built again, as a pick can uncheck others).
+ *
+ * An option can have a row of icons to its right, one of them picked (how a map is
+ * drawn, say): a click on one, or ←/→ on the option, picks another (onIcon).
  */
 
 export interface MenuOption {
@@ -21,6 +24,9 @@ export interface MenuOption {
   label: string;
   /** A note to the right, e.g. how the option is drawn. */
   hint?: string;
+  /** Icons to the right (`html`: an <svg>), and the id of the one picked. */
+  icons?: { id: string; html: string; label: string; title: string }[];
+  icon?: string;
 }
 
 export interface TitleMenu {
@@ -36,7 +42,7 @@ export function initTitleMenu(
   button: HTMLButtonElement,
   options: () => { options: MenuOption[]; current: string | string[] | null },
   onPick: (id: string) => void,
-  { multi = false } = {},
+  { multi = false, onIcon }: { multi?: boolean; onIcon?: (id: string, icon: string) => void } = {},
 ): TitleMenu {
   const label = button.querySelector<HTMLElement>(".title-menu-label")!;
   const list = document.createElement("ul");
@@ -51,12 +57,13 @@ export function initTitleMenu(
   button.setAttribute("aria-controls", list.id);
 
   let shown: MenuOption[] = [];
+  let chosen = new Set<string>();
   let active = -1;
 
   /** Fill the list; returns the first chosen option's index (-1: none). */
   function build() {
     const { options: all, current } = options();
-    const chosen = new Set(Array.isArray(current) ? current : current === null ? [] : [current]);
+    chosen = new Set(Array.isArray(current) ? current : current === null ? [] : [current]);
     shown = all;
     list.replaceChildren(
       ...all.map((o, i) => {
@@ -72,6 +79,16 @@ export function initTitleMenu(
           const hint = document.createElement("small");
           hint.textContent = o.hint;
           li.append(hint);
+        }
+        if (o.icons?.length) {
+          const icons = document.createElement("span");
+          icons.className = "title-menu-icons";
+          icons.innerHTML = o.icons
+            .map((c) => `<span data-icon="${c.id}" title="${c.label}: ${c.title[0].toLowerCase()}${c.title.slice(1)}"${c.id === o.icon ? ' class="picked"' : ""}>${c.html}</span>`)
+            .join("");
+          li.append(icons);
+          const picked = o.icons.find((c) => c.id === o.icon);
+          if (picked) li.setAttribute("aria-label", `${o.label}, as ${picked.label.toLowerCase()}`);
         }
         return li;
       }),
@@ -118,6 +135,15 @@ export function initTitleMenu(
     list.setAttribute("aria-activedescendant", li.id);
   }
 
+  /** Pick option `i`'s icon `icon` (on an option not chosen, the one it's offered in too: it's chosen so). */
+  function pickIcon(i: number, icon: string | undefined) {
+    const option = shown[i];
+    if (!option || !icon || (icon === option.icon && chosen.has(option.id))) return;
+    onIcon?.(option.id, icon);
+    build();
+    setActive(i);
+  }
+
   function pick(i: number) {
     const option = shown[i];
     if (multi) {
@@ -142,6 +168,11 @@ export function initTitleMenu(
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       setActive(Math.min(shown.length - 1, Math.max(0, active + (e.key === "ArrowDown" ? 1 : -1))));
+    } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && shown[active]?.icons) {
+      e.preventDefault();
+      const icons = shown[active].icons!;
+      const at = icons.findIndex((c) => c.id === shown[active].icon) + (e.key === "ArrowRight" ? 1 : -1);
+      pickIcon(active, icons[Math.min(icons.length - 1, Math.max(0, at))]?.id);
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       pick(active);
@@ -157,7 +188,9 @@ export function initTitleMenu(
   list.addEventListener("pointerdown", (e) => {
     e.preventDefault();
     const li = (e.target as HTMLElement).closest<HTMLElement>("[role=option]");
-    if (li) pick(Number(li.dataset.index));
+    const icon = (e.target as HTMLElement).closest<HTMLElement>("[data-icon]");
+    if (li && icon) pickIcon(Number(li.dataset.index), icon.dataset.icon);
+    else if (li) pick(Number(li.dataset.index));
   });
   list.addEventListener("pointermove", (e) => {
     const li = (e.target as HTMLElement).closest<HTMLElement>("[role=option]");

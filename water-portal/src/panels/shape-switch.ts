@@ -1,22 +1,23 @@
 /*
  * How a map of values per area is drawn: the areas' colours, a circle on each (its area
- * by the value) or a 3D bar on each (its height by the value). A switch in the map's
- * legend section picks it, like the discharge map's (basin/scheme-map.ts), and each map
- * keeps its own. Each shape is a slot of the legend: switched into a slot another map
- * is in, the map takes it, and the other moves to the slot it left (or another free one
- * it can be drawn in); only with none free is it replaced (the view moves the switched
- * map last in its checklist). How the circles and bars look (their colours, their full
- * size) is a menu on their key (shape-style.ts).
+ * by the value) or a 3D bar on each (its height by the value). Picked in the legend's
+ * checklist, by the icons to the right of the map (shape-icons.ts), like the discharge
+ * map's network or particles (basin/scheme-map.ts), and each map keeps its own. Each
+ * shape is a slot of the legend: switched into a slot another map is in, the map takes
+ * it, and the other moves to the slot it left (or another free one it can be drawn in);
+ * only with none free is it replaced (the view moves the switched map last in its
+ * checklist). A map not on the map is offered in a free slot, so checking it adds it.
+ * How the circles and bars look (their colours, their full size) is a menu on their
+ * key (shape-style.ts).
  */
-import type { LayerLegend } from "./legend";
-import { slideSelection } from "./segmented";
+import type { ShapeIcon } from "./shape-icons";
 
 export type Shape = "fill" | "circles" | "bars";
 
 /** All three, for a map of values: in the switch's order. */
 export const SHAPES: Shape[] = ["fill", "circles", "bars"];
 
-/** Each shape's button: its label and title (also in the maps with their own switch: scheme-map.ts, effects-map.ts). */
+/** Each shape's name and description (also in the maps with their own: scheme-map.ts, effects-map.ts). */
 export const SHAPE_LABELS: Record<Shape, [string, string]> = {
   fill: ["Colours", "Colour each area by its value"],
   circles: ["Circles", "A circle on each area, its area by the value"],
@@ -54,80 +55,71 @@ export function shapeSizes(values: number[], p: number, hold: (ref: number) => n
   return { ref, radius: (v: number) => Math.max(1.5, r * Math.sqrt(share(v))), height: share };
 }
 
-export interface ShapeSwitch {
-  /** How the map titled `title` is drawn: as it was switched, else `initial` (the first of `shapes`). */
-  shape(title: string, shapes: Shape[], initial?: Shape): Shape;
-  /**
-   * Each map on the map that has more than one shape gets its switch, in its section.
-   * `shown`: all the maps on the map (those without shapes take their slot all the same).
-   */
-  show(shown: { title: string; slot: string; shapes: Shape[] }[]): void;
+/** One way a map can be drawn: its id, the legend slot it takes, its icon, and its name and description. */
+export interface ShapeOption {
+  id: string;
+  slot: string;
+  icon: ShapeIcon;
+  label: string;
+  title: string;
 }
 
-/** `onChange`: a map was switched (by its title); draw the map again. */
-export function initShapeSwitch(legend: LayerLegend, onChange: (title: string) => void): ShapeSwitch {
-  const picked = new Map<string, Shape>();
-  let onMap: { title: string; slot: string; shapes: Shape[] }[] = [];
-  // One switch per map, which goes with it from section to section, so its highlight
-  // slides from the shape it was to the one it's switched to.
-  const switches = new Map<string, { el: HTMLElement; shapes: string }>();
+export const shapeOptions = (shapes: Shape[]): ShapeOption[] =>
+  shapes.map((s) => ({ id: s, slot: s, icon: s, label: SHAPE_LABELS[s][0], title: SHAPE_LABELS[s][1] }));
 
-  function switchOf(title: string) {
-    let s = switches.get(title);
-    if (s) return s;
-    const el = document.createElement("div");
-    el.className = "wb-vars";
-    el.setAttribute("role", "radiogroup");
-    el.setAttribute("aria-label", "Drawn as");
-    el.style.margin = "6px 0 2px";
-    slideSelection(el);
-    el.addEventListener("click", (e) => {
-      const button = (e.target as Element).closest<HTMLElement>("[data-shape]");
-      if (!button || button.getAttribute("aria-checked") === "true") return;
-      const to = button.dataset.shape as Shape;
-      const from = onMap.find((m) => m.title === title)?.slot;
-      // The map in that slot moves out of the way: preferably to the one this left.
-      const other = onMap.find((m) => m.slot === to && m.title !== title);
-      if (other) {
-        const taken = new Set([to, ...onMap.filter((m) => m !== other && m.title !== title).map((m) => m.slot)]);
-        const free = other.shapes.filter((x) => !taken.has(x));
-        const move = free.find((x) => x === from) ?? free[0];
-        if (move) picked.set(other.title, move);
-      }
-      picked.set(title, to);
-      onChange(title);
-    });
-    switches.set(title, (s = { el, shapes: "" }));
-    return s;
+/** A map's ways of being drawn, the one it is in (`current`), and how to switch it. */
+export interface MapShapes {
+  title: string;
+  options: ShapeOption[];
+  current: string;
+  set(id: string): void;
+}
+
+const slotOf = (m: MapShapes, id = m.current) => m.options.find((o) => o.id === id)?.slot;
+
+/**
+ * How a map not on the map is offered (and added): as it is if its slot is free, else
+ * in the first free one it can take (none: as it is, replacing the map there).
+ * `taken`: the slots of the maps on the map.
+ */
+export function freeShape(m: MapShapes, taken: Set<string>): string {
+  if (!taken.has(slotOf(m)!)) return m.current;
+  return m.options.find((o) => !taken.has(o.slot))?.id ?? m.current;
+}
+
+/**
+ * Switch map `m` to `to`, among the maps `onMap` (it may be one of them, or be added):
+ * the map in the slot it takes moves out of the way, preferably to the slot it left.
+ */
+export function switchShape(onMap: MapShapes[], m: MapShapes, to: string) {
+  const from = onMap.some((x) => x.title === m.title) ? slotOf(m) : undefined;
+  const at = slotOf(m, to);
+  const other = onMap.find((x) => x.title !== m.title && slotOf(x) === at);
+  if (other) {
+    const taken = new Set([at, ...onMap.filter((x) => x !== other && x.title !== m.title).map((x) => slotOf(x))]);
+    const free = other.options.filter((o) => !taken.has(o.slot));
+    const move = free.find((o) => o.slot === from) ?? free[0];
+    if (move) other.set(move.id);
   }
+  m.set(to);
+}
 
+/** Each map's shape, by its title. */
+export interface ShapePicks {
+  /** How the map titled `title` is drawn: as it was switched, else `initial` (the first of `shapes`). */
+  shape(title: string, shapes: Shape[], initial?: Shape): Shape;
+  set(title: string, shape: Shape): void;
+}
+
+export function initShapePicks(): ShapePicks {
+  const picked = new Map<string, Shape>();
   return {
     shape(title, shapes, initial = shapes[0]) {
       const s = picked.get(title);
       return s && shapes.includes(s) ? s : initial;
     },
-    show(shown) {
-      onMap = shown;
-      for (const [title, s] of switches) if (!shown.some((m) => m.title === title && m.shapes.length > 1)) s.el.remove();
-      for (const map of shown) {
-        if (map.shapes.length < 2) continue;
-        const s = switchOf(map.title);
-        if (s.shapes !== map.shapes.join()) {
-          s.shapes = map.shapes.join();
-          s.el.innerHTML = map.shapes
-            .map((shape) => `<button type="button" role="radio" data-shape="${shape}" title="${SHAPE_LABELS[shape][1]}">${SHAPE_LABELS[shape][0]}</button>`)
-            .join("");
-        }
-        const extra = legend.section(map.slot).extra;
-        if (s.el.parentElement !== extra) {
-          extra.prepend(s.el);
-          // Laid out where it is now (as it was) first, so the change below slides.
-          void s.el.offsetWidth;
-        }
-        for (const button of s.el.querySelectorAll<HTMLElement>("[data-shape]")) {
-          button.setAttribute("aria-checked", String(button.dataset.shape === map.slot));
-        }
-      }
+    set(title, shape) {
+      picked.set(title, shape);
     },
   };
 }

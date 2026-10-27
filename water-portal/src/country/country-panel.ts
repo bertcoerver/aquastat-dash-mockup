@@ -24,7 +24,7 @@ import { flyTo, type Box } from "../map/fly-to";
 import { mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale } from "../basin/variables";
-import { SLOT_HINTS, initLayerLegend, onePerSlot, toggled, type LegendKey, type SizesKey } from "../panels/legend";
+import { initLayerLegend, onePerSlot, toggled, type LegendKey, type SizesKey } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import { dkY } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
@@ -32,7 +32,8 @@ import { TOPICS, type Card, type Ctx, type MapClass, type MapSpec, type Region, 
 import { WORLD, latestYear, loadTopic, periodLabel, type Period, type Topic } from "./data";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { slideSelection } from "../panels/segmented";
-import { SHAPE_NOTES, SHAPES, initShapeSwitch, shapeSizes, type Shape } from "../panels/shape-switch";
+import { SHAPE_NOTES, SHAPES, freeShape, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
+import { iconSvg } from "../panels/shape-icons";
 import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } from "../panels/shape-style";
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
@@ -172,23 +173,50 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
 
   // --- The legend ----------------------------------------------------------------------------
   // Its title is a checklist of the topic's maps, each once (several charts can share one),
-  // in the order of the tiles and cards; each one on the map has a section
-  // (panels/legend.ts). Checking one unpins the chart that was pinned (its map stays).
+  // in the order of the tiles and cards, with the icons of how each can be drawn; each one
+  // on the map has a section (panels/legend.ts). A map not on the map is offered in a free
+  // slot, if there is one. Checking one unpins the chart that was pinned (its map stays).
   const legend = initLayerLegend($("cp-legend"), {
     slots: SLOTS,
+    onOrder: (slots) => map.setLayerOrder("country", slots),
     options() {
       if (!current) return { options: [], current: [] };
       const ctx = current.ctx;
-      const options = menuMaps(ctx).map(({ id, spec }) => ({ id, label: spec.title, hint: SLOT_HINTS[slotOf(spec)] }));
-      return { options, current: current.layers.map((l) => optionId(ctx, l.spec)) };
+      const on = current.layers.map((l) => optionId(ctx, l.spec));
+      const taken = new Set<string>(current.layers.map((l) => l.slot));
+      const options = menuMaps(ctx).map(({ id, spec }) => {
+        const m = shapesOf(spec);
+        const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
+        return { id, label: spec.title, icons, icon: on.includes(id) ? m.current : freeShape(m, taken) };
+      });
+      return { options, current: on };
     },
     onToggle(id) {
       if (!current) return;
-      state.chosen.set(state.topic, toggled(current.layers.map((l) => optionId(current!.ctx, l.spec)), id));
-      state.pinned.delete(state.topic);
-      drivers.clearPreview();
+      const ctx = current.ctx;
+      const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
+      // Checked, it's drawn as it was offered.
+      if (spec && !current.layers.some((l) => optionId(ctx, l.spec) === id)) {
+        const m = shapesOf(spec);
+        m.set(freeShape(m, new Set(current.layers.map((l) => l.slot))));
+      }
+      toggle(id);
+    },
+    // An icon: the map switches (the one in the slot it takes moving out of the way), or
+    // is added so. Switched, it goes last in the checklist, so it takes its new slot from
+    // the map there; the checked maps it covered stay off (not shown again in the slot it left).
+    onShape(id, shape) {
+      if (!current) return;
+      const ctx = current.ctx;
+      const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
+      if (!spec) return;
+      switchShape(current.layers.map((l) => shapesOf(l.spec)), shapesOf(spec), shape);
+      if (!current.layers.some((l) => optionId(ctx, l.spec) === id)) return toggle(id);
+      const shown = new Set(current.layers.map((l) => l.spec.title));
+      const ids = (state.chosen.get(state.topic) ?? []).filter((i) => shown.has(specFor(ctx, { id: i, sub: null }).title));
+      const moved = ids.find((i) => specFor(ctx, { id: i, sub: null }).title === spec.title);
+      state.chosen.set(state.topic, moved ? [...ids.filter((i) => i !== moved), moved] : ids);
       drawMap();
-      markAll();
     },
     // How much of the countries' values the colours span: a menu on the ramp.
     ramp: {
@@ -237,24 +265,29 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: Ctx, spec: MapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
-  // Each map's shape (colours, circles, bars): a switch in its legend section. Switched, it
-  // goes last in the checklist, so it takes its new slot from the map there; the checked
-  // maps it covered stay off (not shown again in the slot it left).
-  const shapes = initShapeSwitch(legend, (title) => {
-    const ctx = current?.ctx;
-    if (ctx) {
-      const shown = new Set(current!.layers.map((l) => l.spec.title));
-      const ids = (state.chosen.get(state.topic) ?? []).filter((id) => shown.has(specFor(ctx, { id, sub: null }).title));
-      const moved = ids.find((id) => specFor(ctx, { id, sub: null }).title === title);
-      state.chosen.set(state.topic, moved ? [...ids.filter((id) => id !== moved), moved] : ids);
-    }
+  /** Check or uncheck a map. */
+  function toggle(id: string) {
+    if (!current) return;
+    state.chosen.set(state.topic, toggled(current.layers.map((l) => optionId(current!.ctx, l.spec)), id));
+    state.pinned.delete(state.topic);
+    drivers.clearPreview();
     drawMap();
-  });
+    markAll();
+  }
+  // Each map's shape (colours, circles, bars): its icons in the legend.
+  const shapes = initShapePicks();
   /** The shapes a map can take: an amount's circles or bars, any value's colours too (not a mix of categories). */
-  const shapesOf = (spec: MapSpec): Shape[] =>
+  const shapesFor = (spec: MapSpec): Shape[] =>
     spec.style.kind === "circles" ? ["circles", "bars"] : spec.style.kind === "categories" ? ["fill"] : SHAPES;
   /** How a map is drawn (its slot). */
-  const slotOf = (spec: MapSpec): Shape => shapes.shape(spec.title, shapesOf(spec));
+  const slotOf = (spec: MapSpec): Shape => shapes.shape(spec.title, shapesFor(spec));
+  /** How a map can be drawn, and is. */
+  const shapesOf = (spec: MapSpec): MapShapes => ({
+    title: spec.title,
+    options: shapeOptions(shapesFor(spec)),
+    current: slotOf(spec),
+    set: (id) => shapes.set(spec.title, id as Shape),
+  });
   // How a map's circles or bars look: its colours, or by sign; an amount's largest circle
   // at full size, else the 98th percentile.
   const styles = initShapeStyles();
@@ -375,8 +408,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   const leadDriver = (): Driver | null => drivers.preview() ?? state.pinned.get(state.topic) ?? null;
 
   /** The driver the map follows now: previewed, pinned, or the first map on it. */
-  function activeDriver(): Driver {
-    return leadDriver() ?? (current ? shownLayers(current.ctx)[0].d : { id: topicDef().tiles[0].id, sub: null });
+  function activeDriver(): Driver | null {
+    return leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : { id: topicDef().tiles[0].id, sub: null });
   }
 
   const areaOf = (d: Driver | null | undefined) => (d?.sub?.startsWith("area:") ? Number(d.sub.slice(5)) : null);
@@ -385,10 +418,13 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   function shownLayers(ctx: Ctx): Layer[] {
     const topic = topicDef();
     const known = (id: string) => topic.tiles.some((t) => t.id === id) || topic.cards.some((c) => c.id === id);
-    const chosen = (state.chosen.get(state.topic) ?? []).filter(known);
+    const kept = state.chosen.get(state.topic);
+    const chosen = (kept ?? []).filter(known);
     const lead = leadDriver();
-    // (The first tile's only alone: under a chart's map, it would show when that one changes slot.)
-    const layers = (chosen.length ? chosen : lead ? [] : [topic.tiles[0].id]).map((id) => layerOf(ctx, { id, sub: null }));
+    // (The first tile's only alone: under a chart's map, it would show when that one changes
+    // slot. None if all were unchecked.)
+    const first = kept?.length === 0 || lead ? [] : [topic.tiles[0].id];
+    const layers = (chosen.length ? chosen : first).map((id) => layerOf(ctx, { id, sub: null }));
     if (!lead) return onePerSlot(layers, SLOTS);
     const l = layerOf(ctx, lead);
     return onePerSlot([...layers.filter((m) => m.spec.title !== l.spec.title), l], SLOTS);
@@ -509,7 +545,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
         status: slot === layers.at(-1)!.slot ? status : "",
       })),
     );
-    shapes.show(layers.map(({ spec, slot }) => ({ title: spec.title, slot, shapes: shapesOf(spec) })));
     showMapTooltip();
   }
 

@@ -12,7 +12,7 @@
  *
  * Over another map's fills (the legend's layers, panels/legend.ts). basin-stats.ts asks
  * for it for the map that allows it (BasinMapSpec.scheme: discharge per sub-basin), and
- * a switch in its legend section picks between it and the other maps' shapes. The legend
+ * its icons in the legend's checklist pick between it and the other maps' shapes. The legend
  * shows a key to the widths in place of the colour ramp: the widest line is the basin's
  * largest outflow in the period (with the legend's lock on, the one when it was put on:
  * LayerLegend.hold). Also where storage change's circles stand: the scheme's dots, on
@@ -25,8 +25,7 @@ import type { Color } from "../map/theme";
 import { nice, type LayerLegend, type LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
 import { tuningSection } from "../panels/tuning-pane";
-import { slideSelection } from "../panels/segmented";
-import { SHAPES, SHAPE_LABELS, type Shape } from "../panels/shape-switch";
+import { SHAPES, SHAPE_LABELS, type Shape, type ShapeOption } from "../panels/shape-switch";
 import { loadMiddles, loadRivers, type RiverNetwork } from "./rivers";
 import { buildScheme, lineQ, simplify, type Scheme } from "./scheme";
 
@@ -45,7 +44,7 @@ export interface SchemeLayer {
 interface Options {
   map: WaterMap;
   subBasins: SubBasin[];
-  /** The legend: the switches go in their layers' sections. */
+  /** The legend: the settings go in their layers' sections. */
   legend: LayerLegend;
   /** Draw the map again: the rivers loaded, or a switch moved (`kind`: its map). */
   onChange(kind?: SchemeKind): void;
@@ -61,11 +60,11 @@ export interface SchemeMap {
   isScheme(kind: SchemeKind | undefined, major: number | null): boolean;
   /** The shape a map of `kind` is drawn in when it isn't the scheme. */
   shape(kind: SchemeKind): Shape;
-  /**
-   * Show each kind's switch in its section of the legend (`shown`: the maps of the kinds
-   * on the map, in the slot they're in), hiding the others.
-   */
-  showSwitches(shown: { kind: SchemeKind; slot: string }[], major: number | null): void;
+  /** How a map of `kind` can be drawn (its icons in the legend's checklist): the scheme's lines or particles, or a shape. */
+  modes(kind: SchemeKind): ShapeOption[];
+  /** How it's drawn (one of modes' ids). */
+  mode(kind: SchemeKind): string;
+  setMode(kind: SchemeKind, id: string): void;
   /**
    * Draw `layers` (at most one of each kind) of major basin `major` as the scheme (none:
    * clear it). Returns each one's key for the legend, or why it isn't drawn (yet).
@@ -177,35 +176,6 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
   /** The basin's scheme last drawn (for the slider). */
   let drawnScheme: Scheme | null = null;
 
-  // --- The switches, one per kind, in their layers' sections --------------------------------
-  const toggles = {} as Record<SchemeKind, HTMLElement>;
-  for (const kind of ["Q"] as SchemeKind[]) {
-    const toggle = document.createElement("div");
-    toggle.className = "wb-vars";
-    toggle.setAttribute("role", "radiogroup");
-    toggle.setAttribute("aria-label", "Discharge shown");
-    toggle.style.margin = "6px 0 2px";
-    toggle.hidden = true;
-    toggle.innerHTML = MODES[kind]
-      .map(([m, label, title]) => `<button type="button" role="radio" data-mode="${m}" title="${title}">${label}</button>`)
-      .join("");
-    slideSelection(toggle);
-    toggle.addEventListener("click", (e) => {
-      const button = (e.target as Element).closest<HTMLElement>("[data-mode]");
-      if (!button || button.dataset.mode === mode[kind]) return;
-      mode[kind] = button.dataset.mode as Mode;
-      showMode(kind);
-      onChange(kind);
-    });
-    toggles[kind] = toggle;
-    showMode(kind);
-  }
-  function showMode(kind: SchemeKind) {
-    for (const button of toggles[kind].querySelectorAll<HTMLElement>("[data-mode]")) {
-      button.setAttribute("aria-checked", String(button.dataset.mode === mode[kind]));
-    }
-  }
-
   // --- The particles' settings: sliders in the tuning pane ----------------------------------
   const tune: ParticleSettings = { ...PARTICLES };
   const tuning = document.createElement("div");
@@ -299,13 +269,14 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       return isShape(m) ? m : "fill";
     },
 
-    showSwitches(shown, major) {
-      for (const kind of ["Q"] as SchemeKind[]) {
-        const s = major === null ? undefined : shown.find((x) => x.kind === kind);
-        const toggle = toggles[kind];
-        toggle.hidden = !s;
-        if (s) legend.section(s.slot).extra.append(toggle);
-      }
+    modes(kind) {
+      return MODES[kind].map(([m, label, title]) => ({ id: m, slot: isShape(m) ? m : SCHEME_SLOT[kind], icon: m, label, title }));
+    },
+
+    mode: (kind) => mode[kind],
+
+    setMode(kind, id) {
+      mode[kind] = id as Mode;
     },
 
     draw(major, layers) {
@@ -329,7 +300,9 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       const particles = !!q && mode.Q === "particles";
       slider.hidden = !q || particles;
       tuningBody.hidden = !particles;
-      if (q) legend.section(SCHEME_SLOT.Q).after.append(slider);
+      // Only when they aren't there yet: appending moves them, and a slider being
+      // dragged (each step redraws) would let go of the pointer.
+      if (q && slider.parentElement !== legend.section(SCHEME_SLOT.Q).after) legend.section(SCHEME_SLOT.Q).after.append(slider);
       drawnScheme = scheme;
       const mapKey =
         `${major}:${layers.map((l) => `${l.kind}:${mode[l.kind]}:${l.key}`).join("|")}:` +
@@ -357,7 +330,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
         const width = (v: number) => (v > 0 ? Math.max(Q_MIN_PX, (v / ref) * Q_PX) : 0);
         for (const line of scheme.lines) {
           const v = lineQ(line, q.value, scheme);
-          lines.push({ path: line.path, width: width(v), subBasin: line.in, value: v });
+          lines.push({ id: line, path: line.path, width: width(v), subBasin: line.in, value: v });
           if (line.kind !== "mouth") continue;
           const [[x0, y0], [x1, y1]] = line.path;
           const angle = (Math.atan2(y1 - y0, (x1 - x0) * Math.cos((y0 * Math.PI) / 180)) * 180) / Math.PI;

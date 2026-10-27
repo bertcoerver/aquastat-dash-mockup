@@ -3,12 +3,14 @@
    Squeezed below its min-width, it goes over the graph pane rather than vanish. */
 .range-pane {
   position: fixed;
-  left: calc((var(--range-left, 0px) + 100vw - var(--range-right, 0px)) / 2);
+  --mid: calc((var(--range-left, 0px) + 100vw - var(--range-right, 0px)) / 2);
+  --w: min(var(--range-w), calc(100vw - var(--range-left, 0px) - var(--range-right, 0px) - 24px));
+  left: var(--mid);
   bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   z-index: 10;
   transform: translateX(-50%);
-  width: min(var(--range-w), calc(100vw - var(--range-left, 0px) - var(--range-right, 0px) - 24px));
-  min-width: min(300px, calc(100vw - 24px));
+  width: var(--w);
+  min-width: min(var(--range-min, 300px), calc(100vw - 24px)); /* (range-slider.ts: room for the year labels) */
   padding: 8px 14px;
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--line) var(--glass), transparent);
@@ -16,6 +18,13 @@
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
   backdrop-filter: blur(12px) saturate(1.2);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.1);
+}
+/* Once its width has been changed (floating.ts): that wide, centred on the same spot,
+   but kept on screen and left of the map's controls. It can reach under the graph
+   pane, which then stops above it (main.ts sets --pane-bottom). */
+.range-pane.sized {
+  --w: min(var(--pane-w), calc(100vw - var(--range-right, 0px) - 24px));
+  left: clamp(calc(12px + var(--w) / 2), var(--mid), calc(100vw - var(--range-right, 0px) - 12px - var(--w) / 2));
 }
 
 /* View tabs: at the top of the view's pane (toolbar.ts moves them), above its title,
@@ -461,6 +470,21 @@
   text-align: center;
   overflow: hidden;
   pointer-events: none;
+}
+.slider-years > span.unlabelled {
+  color: transparent;
+}
+/* Month ticks: short, and only once the slider is wide enough (range-slider.ts). */
+.slider-years > i {
+  position: absolute;
+  top: 18px;
+  height: 4px;
+  border-left: 1px solid var(--line);
+  pointer-events: none;
+  display: none;
+}
+.slider-years.months > i {
+  display: block;
 }
 
 /* A date the system adjusted (e.g. after switching view) briefly lights up. */

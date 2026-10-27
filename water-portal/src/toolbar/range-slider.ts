@@ -43,6 +43,8 @@ export type Grip = "start" | "end" | "band";
 
 const BOUNDARIES = MAX_DAY + 1;
 const HIT_PX = 12; // how close to a handle a press outside the band must be to grab it
+const LABEL_GAP_PX = 8; // least space between year labels
+const MONTH_TICK_PX = 8; // least space between month ticks for them to show
 const CORE_PX = 5; // same inside the band, at most (a narrow band leaves its middle draggable)
 const pct = (b: number) => `${(b / BOUNDARIES) * 100}%`;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -70,13 +72,37 @@ export function initRangeSlider(
   const track = $("slider-track");
   const handles = { start: $("start-handle"), end: $("end-handle") };
 
-  // Year ticks, labelled in the middle of each year (if there's room for the label).
+  // Year ticks, labelled in the middle of each year where the label fits, and month
+  // ticks once there's room for them. The pane is kept wide enough for every whole
+  // year's label (--range-min).
   const lastYear = new Date(Date.UTC(MIN_YEAR, 0, 1 + MAX_DAY)).getUTCFullYear();
-  $("slider-years").innerHTML = Array.from({ length: lastYear - MIN_YEAR + 1 }, (_, i) => {
+  const years = $("slider-years");
+  years.innerHTML = Array.from({ length: lastYear - MIN_YEAR + 1 }, (_, i) => {
     const a = dayOf(MIN_YEAR + i, 0, 1);
     const b = Math.min(dayOf(MIN_YEAR + i + 1, 0, 1), BOUNDARIES);
-    return `<span style="left:${pct(a)};width:${pct(b - a)}">${b - a >= 180 ? MIN_YEAR + i : ""}</span>`;
+    const months = Array.from({ length: 11 }, (_, m) => dayOf(MIN_YEAR + i, m + 1, 1))
+      .filter((d) => d < BOUNDARIES)
+      .map((d) => `<i style="left:${pct(d)}"></i>`)
+      .join("");
+    return `<span style="left:${pct(a)};width:${pct(b - a)}">${MIN_YEAR + i}</span>${months}`;
   }).join("");
+  const labels = [...years.querySelectorAll("span")];
+  const fitTicks = () => {
+    const font = getComputedStyle(labels[0]).font;
+    const ctx = document.createElement("canvas").getContext("2d")!;
+    ctx.font = font;
+    const labelPx = ctx.measureText(String(lastYear)).width + LABEL_GAP_PX;
+    const pxPerDay = track.clientWidth / BOUNDARIES;
+    for (const label of labels) label.classList.toggle("unlabelled", label.offsetWidth < labelPx);
+    years.classList.toggle("months", pxPerDay * 30 >= MONTH_TICK_PX);
+    // The pane's width around the track (play button, margins), plus a track that
+    // gives each whole year room for its label.
+    const pane = slider.closest<HTMLElement>(".range-pane")!;
+    const around = pane.offsetWidth - track.clientWidth;
+    pane.style.setProperty("--range-min", `${Math.ceil(around + (labelPx * BOUNDARIES) / 365)}px`);
+  };
+  new ResizeObserver(fitTicks).observe(track);
+  document.fonts.ready.then(fitTicks);
 
   /** Move `grip` to track position `p` (in boundaries; `from` is the range when the drag began). */
   function moveTo(grip: Grip, p: number, from: { p: number; range: DayRange }) {

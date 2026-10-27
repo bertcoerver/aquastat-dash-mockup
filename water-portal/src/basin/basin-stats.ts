@@ -32,7 +32,7 @@ import type { SubBasin } from "../map/sub-basin-network";
 import { mixColor, type Color } from "../map/theme";
 import { unlessLoading } from "../panels/load-bar";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
-import { SLOT_HINTS, initLayerLegend, onePerSlot, toggled, type LegendKey, type LegendLayer, type SizesKey } from "../panels/legend";
+import { initLayerLegend, onePerSlot, toggled, type LegendKey, type LegendLayer, type SizesKey } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Selection } from "../selection";
 import type { MajorBasin } from "../toolbar/place-picker";
@@ -41,10 +41,11 @@ import { basinLastDekad, daysOfDekads, type DekadRange, type View } from "../too
 import { inGroup, setBasinGroups, type BasinGroups } from "./groups";
 import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { MODEL_SHOWN } from "./water-balance";
-import { SCHEME_SLOT, initSchemeMap } from "./scheme-map";
+import { initSchemeMap } from "./scheme-map";
 import { initEffectsMap } from "./effects-map";
 import { loadMiddles } from "./rivers";
-import { SHAPE_NOTES, SHAPES, initShapeSwitch, shapeSizes, type Shape } from "../panels/shape-switch";
+import { SHAPE_NOTES, SHAPES, freeShape, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
+import { iconSvg } from "../panels/shape-icons";
 import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } from "../panels/shape-style";
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
@@ -155,26 +156,46 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   new MutationObserver(() => stale && !unseen() && render()).observe(pane, { attributeFilter: ["class"] });
 
   // The legend's title: a checklist of all the maps, each once, in the order of the tiles
-  // and cards; each one on the map has a section (panels/legend.ts). Checking one unpins
-  // the chart that was pinned (its map stays checked).
+  // and cards, with the icons of how each can be drawn; each one on the map has a section
+  // (panels/legend.ts). A map not on the map is offered in a free slot, if there is one.
+  // Checking one unpins the chart that was pinned (its map stays checked).
   const legend = initLayerLegend($("bs-legend"), {
     slots: SLOTS,
+    onOrder: (slots) => map.setLayerOrder("basin", slots),
     options() {
       if (!current) return { options: [], current: [] };
       const ctx = current.ctx;
-      const options = menuMaps(ctx).map(({ id, spec }) => ({ id, label: spec.title, hint: SLOT_HINTS[slotOf(spec, ctx)] }));
-      return { options, current: current.layers.map((l) => optionId(ctx, l.spec)) };
+      const on = current.layers.map((l) => optionId(ctx, l.spec));
+      const taken = new Set(current.layers.map((l) => l.slot));
+      const options = menuMaps(ctx).map(({ id, spec }) => {
+        const m = shapesOf(spec, ctx);
+        const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
+        return { id, label: spec.title, icons, icon: on.includes(id) ? m.current : freeShape(m, taken) };
+      });
+      return { options, current: on };
     },
     onToggle(id) {
       if (!current) return;
-      const ids = toggled(current.layers.map((l) => optionId(current!.ctx, l.spec)), id);
-      state.chosen.set(scope(), ids);
-      // With a sub-basin selected the map defaults to the model's, so a pick is a pin.
-      if (followsModel() && ids.includes(id)) state.pinned.set(scope(), { id, sub: null });
-      else state.pinned.delete(scope());
-      drivers.clearPreview();
+      const ctx = current.ctx;
+      const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
+      // Checked, it's drawn as it was offered.
+      if (spec && !current.layers.some((l) => optionId(ctx, l.spec) === id)) {
+        const m = shapesOf(spec, ctx);
+        m.set(freeShape(m, new Set(current.layers.map((l) => l.slot))));
+      }
+      toggle(id);
+    },
+    // An icon: the map switches (the one in the slot it takes moving out of the way), or
+    // is added so.
+    onShape(id, shape) {
+      if (!current) return;
+      const ctx = current.ctx;
+      const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
+      if (!spec) return;
+      switchShape(current.layers.map((l) => shapesOf(l.spec, ctx)), shapesOf(spec, ctx), shape);
+      if (!current.layers.some((l) => optionId(ctx, l.spec) === id)) return toggle(id);
+      switched((s) => s.title === spec.title);
       drawMap();
-      markAll();
     },
     // How much of the basins' values the colours span: a menu on the ramp.
     ramp: {
@@ -233,6 +254,18 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     },
     onLock: () => drawMap(),
   });
+  /** Check or uncheck a map. */
+  function toggle(id: string) {
+    if (!current) return;
+    const ids = toggled(current.layers.map((l) => optionId(current!.ctx, l.spec)), id);
+    state.chosen.set(scope(), ids);
+    // With a sub-basin selected the map defaults to the model's, so a pick is a pin.
+    if (followsModel() && ids.includes(id)) state.pinned.set(scope(), { id, sub: null });
+    else state.pinned.delete(scope());
+    drivers.clearPreview();
+    drawMap();
+    markAll();
+  }
   // How a map's circles or bars look: in its colours (storage change's by sign), the 98th
   // percentile at full size.
   const styles = initShapeStyles();
@@ -241,36 +274,24 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   const styleOf = (spec: BasinMapSpec) => styles.get(spec.title, initialStyle(spec), signed(spec));
 
   // The discharge map of a basin's sub-basins: as the water balance scheme (a network of
-  // lines, particles), or (its switch in the legend) as colours, circles or bars. Switched,
-  // the map takes its new slot from the one there.
+  // lines, particles), or (its icons in the legend) as colours, circles or bars.
   const schemeMap = initSchemeMap({
     map,
     subBasins,
     legend,
-    onChange(kind) {
-      switched((spec) => !!kind && spec.scheme === kind);
-      drawMap();
-    },
+    onChange: () => drawMap(),
     onHover: () => showMapTooltip(),
   });
   // Precipitation and evapotranspiration of a basin's sub-basins: as rain and vapour
-  // (WaPOR's rasters), or (each one's switch in the legend) as colours, circles or bars.
+  // (WaPOR's rasters), or (each one's icons in the legend) as colours, circles or bars.
   const effectsMap = initEffectsMap({
     map,
     majorBasins,
-    legend,
-    onChange(kind) {
-      switched((spec) => !!kind && spec.effect === kind);
-      drawMap();
-    },
+    onChange: () => drawMap(),
   });
 
-  // Each other map's shape (colours, circles, bars): a switch in its legend section.
-  // Switched, the map takes its new slot from the one there.
-  const shapes = initShapeSwitch(legend, (title) => {
-    switched((spec) => spec.title === title);
-    drawMap();
-  });
+  // Each other map's shape (colours, circles, bars): its icons in the legend.
+  const shapes = initShapePicks();
   /**
    * A map switched shape: it goes last in the checklist, so it takes its new slot from the
    * map there, and the checked maps it covered stay off (not shown again in the slot it left).
@@ -368,14 +389,28 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: BasinCtx, spec: BasinMapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
 
-  /** How a map is drawn: as the scheme's lines, as rain or vapour, or as fills, circles or bars (storage change first as circles). */
-  function slotOf(spec: BasinMapSpec, ctx: BasinCtx): string {
-    if (!ownSwitch(spec, ctx)) return shapes.shape(spec.title, SHAPES, spec.onRivers ? "circles" : "fill");
+  /**
+   * How a map can be drawn and is: as the scheme's lines or particles, as rain or vapour,
+   * or as fills, circles or bars (storage change first as circles).
+   */
+  function shapesOf(spec: BasinMapSpec, ctx: BasinCtx): MapShapes {
+    const title = spec.title;
     const major = ctx.major?.id ?? null;
-    if (spec.effect) return effectsMap.isEffect(spec.effect, major) ? spec.effect : effectsMap.shape(spec.effect);
-    return schemeMap.isScheme(spec.scheme, major) ? SCHEME_SLOT[spec.scheme!] : schemeMap.shape(spec.scheme!);
+    if (!ownSwitch(spec, ctx)) {
+      const current = shapes.shape(title, SHAPES, spec.onRivers ? "circles" : "fill");
+      return { title, options: shapeOptions(SHAPES), current, set: (id) => shapes.set(title, id as Shape) };
+    }
+    const effect = spec.effect;
+    if (effect) return { title, options: effectsMap.modes(effect, major), current: effectsMap.mode(effect, major), set: (id) => effectsMap.setMode(effect, id) };
+    const scheme = spec.scheme!;
+    return { title, options: schemeMap.modes(scheme), current: schemeMap.mode(scheme), set: (id) => schemeMap.setMode(scheme, id) };
   }
-  /** A basin's sub-basins' discharge, rain and evapotranspiration have their own switch (scheme-map.ts, effects-map.ts). */
+  /** The slot of how a map is drawn. */
+  function slotOf(spec: BasinMapSpec, ctx: BasinCtx): string {
+    const m = shapesOf(spec, ctx);
+    return m.options.find((o) => o.id === m.current)?.slot ?? "fill";
+  }
+  /** A basin's sub-basins' discharge, rain and evapotranspiration have their own ways (scheme-map.ts, effects-map.ts). */
   const ownSwitch = (spec: BasinMapSpec, ctx: BasinCtx) => !!(spec.scheme || spec.effect) && ctx.major !== null;
 
   // The map tooltip follows the pointer (to its right).
@@ -562,11 +597,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     legend.show(null);
     tooltip.hidden = true;
     map.setBasinStatFills(null);
-    schemeMap.showSwitches([], null);
     schemeMap.draw(null, []);
-    effectsMap.showSwitches([], null);
     effectsMap.draw(null, null, []);
-    shapes.show([]);
     map.setBasinSymbols(null);
     map.setBars("basin", null);
     setMapOverride(false);
@@ -598,9 +630,12 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   function shownLayers(ctx: BasinCtx): Layer[] {
     const lead = leadDriver();
     if (!lead && followsModel()) return [];
-    const chosen = (state.chosen.get(scope()) ?? []).filter((id) => isDriver({ id, sub: null }));
-    // (The first tile's only alone: under a chart's map, it would show when that one changes slot.)
-    const layers = (chosen.length ? chosen : lead ? [] : [topicDef().tiles[0].id]).map((id) => layerOf(ctx, { id, sub: null }));
+    const kept = state.chosen.get(scope());
+    const chosen = (kept ?? []).filter((id) => isDriver({ id, sub: null }));
+    // (The first tile's only alone: under a chart's map, it would show when that one changes
+    // slot. None if all were unchecked.)
+    const first = kept?.length === 0 || lead ? [] : [topicDef().tiles[0].id];
+    const layers = (chosen.length ? chosen : first).map((id) => layerOf(ctx, { id, sub: null }));
     if (!lead) return onePerSlot(layers, SLOTS);
     const l = layerOf(ctx, lead);
     return onePerSlot([...layers.filter((m) => m.spec.title !== l.spec.title), l], SLOTS);
@@ -628,13 +663,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const layers = shownLayers(ctx);
     current.layers = layers;
     if (!layers.length) {
-      legend.show(null);
+      // (The model's map has no legend; all unchecked, it has only the checklist.)
+      legend.show(followsModel() ? null : []);
       map.setBasinStatFills(null);
-      schemeMap.showSwitches([], null);
       schemeMap.draw(null, []);
-      effectsMap.showSwitches([], null);
       effectsMap.draw(null, null, []);
-      shapes.show([]);
       map.setBasinSymbols(null);
       map.setBars("basin", null);
       setMapOverride(false);
@@ -649,14 +682,12 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       major,
       sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${ctx.period}`, range: `${l.spec.title}:${l.spec.unit}` })),
     );
-    schemeMap.showSwitches(layers.filter((l) => l.spec.scheme).map((l) => ({ kind: l.spec.scheme!, slot: l.slot })), major);
     // Or as rain and vapour.
     const effectKeys = effectsMap.draw(
       major,
       daysOfDekads(ctx.covered),
       layers.filter((l) => isEffect(l) && !l.spec.status).map((l) => l.spec.effect!),
     );
-    effectsMap.showSwitches(layers.filter((l) => l.spec.effect).map((l) => ({ kind: l.spec.effect!, slot: l.slot })), major);
 
     // The area under the pointer in a chart (or the one the card is pinned on): a group
     // or a major basin keeps its colours and fades the rest; a sub-basin is outlined.
@@ -764,9 +795,6 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
         return { ...common, note, period: key ? ctx.period : "", key, status: unlessLoading(status) };
       }),
     );
-    // (After the legend, laid out, so a switch's highlight slides. The maps with their own
-    // switch take their slot all the same.)
-    shapes.show(layers.map(({ spec, slot }) => ({ title: spec.title, slot, shapes: ownSwitch(spec, ctx) ? [] : SHAPES })));
     showMapTooltip();
   }
 

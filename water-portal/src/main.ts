@@ -234,10 +234,12 @@ waterMap.map.addControl({ onAdd: () => layersBox, onRemove: () => layersBox.remo
 // pane (when it reaches down there, folded) and the map's controls. (Not the credits:
 // the pane would move each time they're opened or closed; it goes over them instead.
 // Nor the unfolded pane, which would push it aside on every hover.) Where the range is
-// under the pane, the unfolded pane stops above it (--pane-bottom).
+// under the pane, the unfolded pane stops above it (--pane-bottom). Its width can be
+// changed too, from either side at once, as far as under the pane.
 const controls = document.querySelector<HTMLElement>(".maplibregl-ctrl-bottom-right .maplibregl-ctrl-group")!;
 const graphPanes = ["cp-panel", "wb-panel", "lp-panel"].map($);
 const rangePane = $("pane-range");
+makeResizable(rangePane, "range", { centered: true });
 function fitRange() {
   const root = document.documentElement.style;
   if (graphPanes.every((pane) => pane.classList.contains("resting"))) {
