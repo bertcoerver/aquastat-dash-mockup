@@ -1,12 +1,13 @@
 /* Country view: the statistics panel (built on the Basin view's .wb-panel, basin.css),
    its chart cards and charts, and the map legend. */
 
-/* Chart colours: categorical slots 1–3, the World in grey, and two steps of one blue
+/* Chart colours: categorical slots 1–4, the World in grey, and two steps of one blue
    for "base year" and "selected year". Dark mode has its own steps. */
 :root {
   --c-1: #2a78d6;
   --c-2: #eb6834;
   --c-3: #1baf7a;
+  --c-4: #eda100;
   --c-world: #898781;
   --c-pcp: #27ae60; /* the Basin view's precipitation and evapotranspiration (variables.ts) */
   --c-aeti: #e74c3c;
@@ -18,6 +19,7 @@
     --c-1: #3987e5;
     --c-2: #d95926;
     --c-3: #199e70;
+    --c-4: #c98500;
     --c-base: #256abf;
     --c-now: #86b6ef;
   }
@@ -26,6 +28,7 @@
   --c-1: #3987e5;
   --c-2: #d95926;
   --c-3: #199e70;
+  --c-4: #c98500;
   --c-base: #256abf;
   --c-now: #86b6ef;
 }
@@ -295,4 +298,49 @@ svg.ch-pin {
 .cp-classes li.off .cp-swatch {
   background: none !important;
   box-shadow: inset 0 0 0 1px currentColor;
+}
+
+/* --- Bubbles, columns and heatmaps (charts.ts) ------------------------------------------------ */
+.ch-bubble .ch-dot {
+  fill-opacity: 0.72;
+  stroke-width: 1;
+}
+.ch-bubble.em .ch-dot {
+  fill-opacity: 0.95;
+}
+.ch-arrow {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.ch-arrow.em {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  opacity: 1;
+}
+.ch-corner {
+  font-style: italic;
+}
+.ch-ghost {
+  fill: none;
+  stroke: var(--c-world);
+  stroke-width: 1;
+}
+.ch-cell rect {
+  stroke: transparent;
+  stroke-width: 1.5;
+}
+.ch-cell:hover rect {
+  stroke: var(--ink);
+}
+.ch-cell.pinned-sub rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.ch-cell.clickable {
+  cursor: pointer;
+}
+.ch-cell-none {
+  stroke: var(--line) !important;
+  stroke-dasharray: 2 2;
 }

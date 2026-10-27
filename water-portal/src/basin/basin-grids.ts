@@ -8,13 +8,17 @@
  * as fine as the grid, only the tiles over the basin, sampled onto the grid (nearest
  * pixel). The basin's outline comes from the major basins' vector tiles, drawn onto the
  * grid at a zoom level a few tiles across it.
+ *
+ * Also transpiration and evapotranspiration per sub-basin (loadTranspiration): there are
+ * no zonal statistics of T, so its grid and AETI's are averaged over the cells of each
+ * sub-basin, drawn onto the grid from the sub-basins' vector tiles the same way.
  */
 import { parse } from "@loaders.gl/core";
 import { MVTLoader } from "@loaders.gl/mvt";
 import { GeoTIFF, defaultDecoderPool, type RasterArray } from "@developmentseed/geotiff";
 import type { Feature } from "geojson";
 import { WAPOR_VARIABLES, publishedWaporPeriod, type WaporVariableId } from "../map/layers/wapor";
-import type { MajorBasinProperties } from "../map/layers/basins";
+import type { MajorBasinProperties, SubBasinProperties } from "../map/layers/basins";
 import { FAO_TILES } from "../map/layers/tile-urls";
 import type { DayRange } from "../toolbar/range-rules";
 
@@ -125,12 +129,86 @@ async function sampled(url: string, frame: Frame): Promise<Float32Array> {
   return out;
 }
 
-// --- The basin's outline -------------------------------------------------------------
+// --- Transpiration per sub-basin --------------------------------------------------------
 
-/** 1 where a cell's centre lies in the major basin, else 0. */
-async function basinMask(major: number, frame: Frame): Promise<Uint8Array> {
+const transpirations = new Map<string, Promise<Map<number, { t: number; aeti: number }>>>();
+
+/**
+ * Per sub-basin of a major basin, the mean mm/day of T and AETI over a range, over the
+ * cells of the basin's grid inside it (kept; a failed one is forgotten).
+ */
+export function loadTranspiration(range: DayRange, major: number, box: Box): Promise<Map<number, { t: number; aeti: number }>> {
+  const key = `${range.start}-${range.end}:${major}`;
+  let out = transpirations.get(key);
+  if (!out) {
+    out = Promise.all([loadBasinGrid("T", range, major, box), loadBasinGrid("AETI", range, major, box), subBasinZones(major, frameOf(box))]).then(([t, aeti, zones]) => {
+      const sums = new Map<number, { t: number; aeti: number; n: number }>();
+      for (let i = 0; i < zones.length; i++) {
+        const [tv, ev] = [t.values[i], aeti.values[i]];
+        if (!zones[i] || tv !== tv || ev !== ev) continue;
+        const s = sums.get(zones[i]) ?? { t: 0, aeti: 0, n: 0 };
+        s.t += tv;
+        s.aeti += ev;
+        s.n++;
+        sums.set(zones[i], s);
+      }
+      return new Map([...sums].map(([id, s]) => [id, { t: s.t / s.n, aeti: s.aeti / s.n }]));
+    });
+    out.catch(() => transpirations.delete(key));
+    transpirations.set(key, out);
+  }
+  return out;
+}
+
+/**
+ * The sub-basin each cell's centre lies in (its id; 0: none), of a major basin's: each
+ * drawn in a colour of its own. Cells on an edge are left out: those not fully covered,
+ * and those whose colour no neighbour across shares (two sub-basins' colours blended
+ * can look like a third's).
+ */
+async function subBasinZones(major: number, frame: Frame): Promise<Int32Array> {
+  const features = (await tilesOver(frame, FAO_TILES.subBasins)).filter((f) => (f.properties as SubBasinProperties).SDG6_MB_ID === major);
+  const ids = [...new Set(features.map((f) => (f.properties as SubBasinProperties).SDG6_SB_ID))];
+  const index = new Map(ids.map((id, i) => [id, i + 1]));
+  const ctx = drawn(frame, features, (f) => {
+    const k = index.get((f.properties as SubBasinProperties).SDG6_SB_ID)!;
+    return `rgb(${k & 255} ${(k >> 8) & 255} ${(k >> 16) & 255})`;
+  });
+  const { data } = ctx.getImageData(0, 0, frame.width, frame.height);
+  const w = frame.width;
+  const colorAt = (i: number) => (data[i * 4 + 3] === 255 ? data[i * 4] | (data[i * 4 + 1] << 8) | (data[i * 4 + 2] << 16) : -1);
+  return Int32Array.from({ length: w * frame.height }, (_, i) => {
+    const k = colorAt(i);
+    if (k <= 0) return 0;
+    const x = i % w;
+    const shared = (x > 0 && colorAt(i - 1) === k) || (x < w - 1 && colorAt(i + 1) === k);
+    return shared ? ids[k - 1] ?? 0 : 0;
+  });
+}
+
+/** Polygons drawn onto a canvas the size of the grid (cell (i, j) is pixel (i, j)), each in `color`, without smoothing. */
+function drawn(frame: Frame, features: Feature[], color: (f: Feature) => string) {
   const [west, south, east, north] = frame.bounds;
-  // A zoom level with the basin about three tiles across.
+  const canvas = new OffscreenCanvas(frame.width, frame.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const px = (lng: number) => ((lng - west) / (east - west)) * frame.width;
+  const py = (lat: number) => ((north - lat) / (north - south)) * frame.height;
+  for (const f of features) {
+    const { geometry } = f;
+    const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.type === "MultiPolygon" ? geometry.coordinates : [];
+    ctx.fillStyle = color(f);
+    for (const rings of polygons) {
+      ctx.beginPath();
+      for (const ring of rings) ring.forEach(([lng, lat], k) => (k ? ctx.lineTo(px(lng), py(lat)) : ctx.moveTo(px(lng), py(lat))));
+      ctx.fill("evenodd");
+    }
+  }
+  return ctx;
+}
+
+/** The features of a tile set over a grid, at a zoom level with the grid about three tiles across. */
+async function tilesOver(frame: Frame, tiles: string): Promise<Feature[]> {
+  const [west, south, east, north] = frame.bounds;
   const z = Math.max(0, Math.min(8, Math.floor(Math.log2((3 * 360) / Math.max(east - west, north - south)))));
   const n = 2 ** z;
   const tileX = (lng: number) => Math.min(n - 1, Math.max(0, Math.floor(((lng + 180) / 360) * n)));
@@ -140,30 +218,22 @@ async function basinMask(major: number, frame: Frame): Promise<Uint8Array> {
   };
   const loads: Promise<Feature[]>[] = [];
   for (let x = tileX(west); x <= tileX(east); x++) {
-    for (let y = tileY(north); y <= tileY(south); y++) loads.push(loadTile(x, y, z));
+    for (let y = tileY(north); y <= tileY(south); y++) loads.push(loadTile(tiles, x, y, z));
   }
-  const features = (await Promise.all(loads)).flat().filter((f) => (f.properties as MajorBasinProperties).SDG6_MB_ID === major);
+  return (await Promise.all(loads)).flat();
+}
 
-  const canvas = new OffscreenCanvas(frame.width, frame.height);
-  const ctx = canvas.getContext("2d")!;
-  // Cell (i, j) is pixel (i, j).
-  const px = (lng: number) => ((lng - west) / (east - west)) * frame.width;
-  const py = (lat: number) => ((north - lat) / (north - south)) * frame.height;
-  ctx.fillStyle = "#fff";
-  for (const { geometry } of features) {
-    const polygons = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.type === "MultiPolygon" ? geometry.coordinates : [];
-    for (const rings of polygons) {
-      ctx.beginPath();
-      for (const ring of rings) ring.forEach(([lng, lat], k) => (k ? ctx.lineTo(px(lng), py(lat)) : ctx.moveTo(px(lng), py(lat))));
-      ctx.fill("evenodd");
-    }
-  }
-  const { data } = ctx.getImageData(0, 0, frame.width, frame.height);
+// --- The basin's outline -------------------------------------------------------------
+
+/** 1 where a cell's centre lies in the major basin, else 0. */
+async function basinMask(major: number, frame: Frame): Promise<Uint8Array> {
+  const features = (await tilesOver(frame, FAO_TILES.majorBasins)).filter((f) => (f.properties as MajorBasinProperties).SDG6_MB_ID === major);
+  const { data } = drawn(frame, features, () => "#fff").getImageData(0, 0, frame.width, frame.height);
   return Uint8Array.from({ length: frame.width * frame.height }, (_, i) => (data[i * 4 + 3] >= 128 ? 1 : 0));
 }
 
-async function loadTile(x: number, y: number, z: number): Promise<Feature[]> {
-  const url = FAO_TILES.majorBasins.replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
+async function loadTile(tiles: string, x: number, y: number, z: number): Promise<Feature[]> {
+  const url = tiles.replace("{z}", String(z)).replace("{x}", String(x)).replace("{y}", String(y));
   const response = await fetch(url);
   if (!response.ok) return []; // (no tile: nothing there)
   return (await parse(await response.arrayBuffer(), MVTLoader, {

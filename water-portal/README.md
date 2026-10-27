@@ -186,6 +186,33 @@ water-portal/
   of drawing them (the checklist says which): a fill, circles, 3D bars, and the scheme's discharge
   lines (Basin). Checking a map replaces the one drawn the
   same way; a previewed or pinned chart's map takes its place for the while.
+- **A chart's maps** (`also` in [src/country/cards.ts](src/country/cards.ts) and
+  [src/basin/stats-cards.ts](src/basin/stats-cards.ts)): most charts bring more maps along
+  with their own, each drawn its own way, so the map shows the chart's variables together:
+  water stress under circles of the population or the water withdrawn, the water left under the
+  discharge network, rain and vapour over it, or the water balance's terms as fill, circles and
+  bars (see `waterportal-inventory/waterportal-multivariable-maps.md`). Each map says how it would
+  be drawn (`shape` in the Country view; `prefer` in the Basin view, which can also ask for rain,
+  vapour, the network or particles); one switched in the legend stays as switched, and one that
+  would be drawn the same way as another of the chart's moves to a free way. While shown they
+  take the places of the maps checked in the legend; the checklist lists them after their
+  chart's own (id `<chart>~<index>`). A map against the other years (Basin) has a title of its
+  own, so it can show beside the values. Amounts split into parts (by sector, source, method)
+  are **pie circles**: [src/map/layers/countries.ts](src/map/layers/countries.ts)'s circles
+  layer paints the slices in its fragment shader by the angle from the top, from cut points and
+  colours per circle (so they ease like the rest); the legend's swatches switch parts off.
+  Variables of other topics a chart combines with its own are loaded with the topic
+  (`TOPIC_VARS` in [src/country/data.ts](src/country/data.ts)).
+- **Months and dekads on the map** (Basin): hovering a month on the monthly charts (the lines,
+  and the month × year grid of PCP − AETI) or a dekad on the rain and discharge chart maps that
+  month or dekad alone (a context over that range: `BasinCtx.at`; the legend shows its dates),
+  with its rain and vapour, or its discharge as particles; clicking it selects it in the top
+  bar (`select` on the card).
+- **Transpiration per sub-basin**: there are no zonal statistics of T, so its share of AETI
+  per sub-basin is averaged over the cells of WaPOR's T and AETI grids over the basin (the
+  vapour's: [src/basin/basin-grids.ts](src/basin/basin-grids.ts)), each sub-basin drawn onto
+  the grid from the sub-basins' vector tiles (cells on edges left out). Loaded with a basin
+  selected and the panel open, not while a range plays.
 - **Colours, circles or 3D bars** ([src/panels/shape-switch.ts](src/panels/shape-switch.ts)): a
   switch in a map's legend section draws it as the areas' colours, a circle on each (area: the
   value) or a bar on each (height: the value), coloured as the fill would be; amounts (Country)

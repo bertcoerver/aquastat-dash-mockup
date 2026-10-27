@@ -4,6 +4,13 @@ Companion to [waterportal-plot-inventory.md](waterportal-plot-inventory.md). Tha
 
 Chart IDs (WR1, MB6, …) are the inventory's. The app's card id is given where the app implements that chart (`src/country/cards.ts`, `src/basin/stats-cards.ts`).
 
+> **Status (27 Oct 2026): built in `water-portal`.** All the combinations below and the 13 new charts are in the app, along with capabilities A–G. The app differs from this plan in these places:
+> - **B3** (rain → flow) extends the existing hydrograph card (`Q-dekads`): the rain hangs above the discharge, instead of being a separate card.
+> - **B5** (transpiration share) is computed from WaPOR's T and AETI grids over the selected basin, because there are no zonal statistics of T. Cells on sub-basin edges are left out.
+> - **N5** (water per irrigated hectare) only ranks countries that irrigate at least 50,000 ha. Below that, the ratio is dominated by livestock and fish farms (Finland and Latvia topped the list).
+> - **MB7, MB8, MB12, SB3** are new or reworked sub-basin cards: `aeti-sub`, `pcp-sub`, `ratio-sub`, `Q-sub`. **SB5–SB7** (global sub-basin rankings) are still not in the app.
+> - **WR6/IR6:** the cropland card's main map is now cropland per person (the original chart's line). The share of cropland equipped for irrigation is no longer a map of its own.
+
 ## What a map can hold now
 
 | View | Slots (one map each) | Notes |

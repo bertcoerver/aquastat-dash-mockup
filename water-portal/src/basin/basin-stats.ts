@@ -7,7 +7,10 @@
  *
  * Every tile and card has a map: hovering previews it, clicking pins it
  * (map-drivers.ts); unpinned, the map shows the one picked in the legend, else the
- * first tile. Unless a sub-basin is selected and the water balance model is
+ * first tile. Many bring more maps along (stats-cards.ts, `also`), each drawn its own
+ * way, as the card asks (as rain, along the rivers…) unless the legend switched it:
+ * they take the places of the maps checked in the legend while shown. Hovering a month
+ * or dekad on a chart of them maps that month or dekad; clicking it selects it. Unless a sub-basin is selected and the water balance model is
  * shown (water-balance.ts, MODEL_SHOWN): then it shows the model's, which this hands
  * the map back to. Within a card, hovering a row picks out its basins on the map (a
  * group's, a basin, a sub-basin outlined), hovering a series in a legend maps that
@@ -39,6 +42,7 @@ import type { MajorBasin } from "../toolbar/place-picker";
 import { WAPOR_MIN_YEAR, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
 import { basinLastDekad, daysOfDekads, type DekadRange, type View } from "../toolbar/range-rules";
 import { inGroup, setBasinGroups, type BasinGroups } from "./groups";
+import { loadTranspiration } from "./basin-grids";
 import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { MODEL_SHOWN } from "./water-balance";
 import { initSchemeMap } from "./scheme-map";
@@ -66,6 +70,7 @@ import {
   type FluxStatus,
   type MeasureKey,
   type TopicDef,
+  type TranspirationStatus,
 } from "./stats-cards";
 import { loadSeries, monthlyStats, periodStats, windowRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
 import { fmt, rampScale, type ColorScale } from "./variables";
@@ -103,11 +108,12 @@ const isShape = (l: { slot: string }) => l.slot === "circles" || l.slot === "bar
 const isScheme = (l: { slot: string }) => l.slot === "lines";
 const isEffect = (l: { slot: string }) => l.slot === "rain" || l.slot === "vapour";
 
-/** A map on the map: its tile or card, and how it's drawn (the legend's slot). */
+/** A map on the map: its tile or card, and how it's drawn (the legend's slot, and which of its ways). */
 interface Layer {
   d: Driver;
   spec: BasinMapSpec;
   slot: string;
+  mode: string;
 }
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; series: WaporSeries };
@@ -124,6 +130,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   const majorIds = majorBasins.map((b) => b.id);
   const majorBoxes = new Map(majorBasins.map((b) => [b.id, b.bbox]));
   const subBoxes = new Map(subBasins.map((b) => [b.id, b.bbox]));
+  const subsById = new Map(subBasins.map((b) => [b.id, b]));
   const state = {
     view: "country" as View,
     range: null as DekadRange | null,
@@ -143,6 +150,12 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     against: new Set<MeasureKey>(),
     /** How much of the basins' values the colours span (% cut at either end). */
     stretch: DEFAULT_STRETCH,
+    /** The maps switched in the legend (by title): drawn so, whatever a card asks. */
+    switched: new Set<string>(),
+    /** Transpiration per sub-basin, by major basin and range. */
+    transpiration: new Map<string, TranspirationStatus>(),
+    /** A range playing (the legend locked): rasters aren't loaded for every step. */
+    playing: false,
   };
   const section = $("bs-section");
   const cardsEl = $("bs-cards");
@@ -172,7 +185,9 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       const options = menuMaps(ctx).map(({ id, spec }) => {
         const m = shapesOf(spec, ctx);
         const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
-        return { id, label: spec.title, icons, icon: on.includes(id) ? m.current : freeShape(m, taken) };
+        // (On the map, as drawn: a card can have it drawn its own way.)
+        const drawn = current!.layers.find((l) => optionId(ctx, l.spec) === id)?.mode;
+        return { id, label: spec.title, icons, icon: drawn ?? freeShape(m, taken) };
       });
       return { options, current: on };
     },
@@ -194,7 +209,10 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       const ctx = current.ctx;
       const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
       if (!spec) return;
-      switchShape(current.layers.map((l) => shapesOf(l.spec, ctx)), shapesOf(spec, ctx), shape);
+      // (The maps on the map as drawn: some as their cards asked.)
+      const drawnAs = (l: Layer): MapShapes => ({ ...shapesOf(l.spec, ctx), current: l.mode });
+      switchShape(current.layers.map(drawnAs), shapesOf(spec, ctx), shape);
+      state.switched.add(spec.title);
       if (!current.layers.some((l) => optionId(ctx, l.spec) === id)) return toggle(id);
       switched((s) => s.title === spec.title);
       drawMap();
@@ -222,10 +240,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
         else {
           state.against.delete(m);
           if (id !== "value") state.units = BASIN_UNITS[Number(id)];
-          // A chart of every year maps against the others: in a unit, its map stays, unpinned.
+          // A chart of every year maps against the others: in a unit, its map stays, unpinned,
+          // as the measure's values (its tile's map).
           const pin = state.pinned.get(scope());
           if (layer.spec.against && pin?.id === layer.d.id) {
-            const option = optionId(current!.ctx, layer.spec);
+            const option = topicDef().tiles.find((t) => t.measure === m)?.id ?? optionId(current!.ctx, layer.spec);
             state.chosen.set(scope(), [...(state.chosen.get(scope()) ?? []).filter((i) => i !== option), option]);
             state.pinned.delete(scope());
           }
@@ -365,9 +384,13 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       drawMap();
       markAll();
     },
-    // A year on a chart of the same days every year: the index of its range.
-    onX(w) {
-      const r = current?.ctx.windows.ranges[w];
+    // A step on a chart: what its card says it is (a month, a dekad), else a year on a
+    // chart of the same days every year (the index of its range).
+    onX(x, d) {
+      const ctx = current?.ctx;
+      if (!ctx) return;
+      const card = d && topicDef().cards.find((c) => c.id === d.id);
+      const r = card?.select ? card.select(ctx, x) : ctx.windows.ranges[x];
       if (r) setRange(r);
     },
     onCsv: download,
@@ -381,9 +404,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     if (maps) return maps;
     const topic = topicDef();
     const seen = new Set<string>();
+    // Each followed by those it brings along (id "<driver>~<index>").
+    const withAlso = (id: string, spec: BasinMapSpec, also: BasinMapSpec[] | undefined) => [{ id, spec }, ...(also ?? []).map((a, i) => ({ id: `${id}~${i}`, spec: a }))];
     maps = [
-      ...topic.tiles.map((t) => ({ id: t.id, spec: tileMap(ctx, t) })),
-      ...topic.cards.map((c) => ({ id: c.id, spec: c.map(ctx, null) })),
+      ...topic.tiles.flatMap((t) => withAlso(t.id, tileMap(ctx, t), t.also?.(ctx))),
+      ...topic.cards.flatMap((c) => withAlso(c.id, c.map(ctx, null), c.also?.(ctx, null))),
     ].filter(({ spec }) => !seen.has(spec.title) && !!seen.add(spec.title));
     menuMapsOf.set(ctx, maps);
     return maps;
@@ -447,6 +472,23 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   const periodFor = memo<PeriodStats>();
   const ratesFor = memo<WindowRates | null>();
   const monthlyFor = memo<Monthly>();
+  const regimeFor = memo<Monthly>();
+
+  /** Transpiration per sub-basin of `major` over `range` (loading it the first time it's asked for). */
+  function transpiration(major: number, range: DekadRange): TranspirationStatus | null {
+    const box = majorBoxes.get(major);
+    if (!box) return null;
+    const key = `${major}:${range.start}-${range.end}`;
+    let status = state.transpiration.get(key);
+    if (!status) {
+      state.transpiration.set(key, (status = { kind: "loading" }));
+      loadTranspiration(daysOfDekads(range), major, box).then(
+        (sub) => state.transpiration.set(key, { kind: "ready", sub }),
+        (err: Error) => state.transpiration.set(key, { kind: "error", message: err.message }),
+      ).then(render);
+    }
+    return status;
+  }
 
   /**
    * The model's output for `key` (see state.fluxes), loading it the first time it's asked
@@ -511,6 +553,9 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const monthly = topic.cards.some((c) => c.id === "monthly")
       ? monthlyFor(`${covered.start}-${covered.end}:${major?.id ?? "all"}`, () => monthlyStats(series, covered, major?.id ?? null))
       : null;
+    // Every month of the record, for the chart of them.
+    const record = { start: series.first, end: series.first + series.dekads - 1 };
+    const regime = regimeFor(`${major?.id ?? "all"}`, () => monthlyStats(series, record, major?.id ?? null));
     // The model's output.
     const majorFlux: FluxStatus = fluxes("majors", loadMajorFluxes);
     const subFlux: FluxStatus | null = major ? fluxes(String(major.id), () => loadSubBasinFluxes(major.id)) : null;
@@ -533,7 +578,14 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       units: state.units,
       against: state.against,
       cache: new Map(),
+      series,
+      subs: subsById,
+      at: (r) => ctxAt(ctx, r),
+      regime,
+      // (Rasters: only while the panel is open, and not for every step of a range played.)
+      transpiration: major && !unseen() && !state.playing ? transpiration(major.id, covered) : null,
     };
+    atCache.clear();
     const partly = state.range && (covered.start !== state.range.start || covered.end !== state.range.end);
     message.hidden = !partly;
     message.classList.remove("error");
@@ -564,6 +616,28 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     current = { ctx, layers: [], csv };
     markAll();
     drawMap();
+  }
+
+  /** The context over another range (a month or dekad of a chart): its values only, kept until the next draw. */
+  const atCache = new Map<string, BasinCtx | null>();
+  function ctxAt(base: BasinCtx, range: DekadRange): BasinCtx | null {
+    const key = `${range.start}-${range.end}`;
+    if (atCache.has(key)) return atCache.get(key)!;
+    const stats = periodStats(base.series, range);
+    const covered = stats.covered;
+    const ctx: BasinCtx | null = covered && {
+      ...base,
+      period: `${fmtStart(covered.start)} – ${fmtEnd(covered.end)}`,
+      covered,
+      days: stats.days,
+      stats,
+      windows: { ranges: [covered], current: 0, first: base.windows.first, last: base.windows.last },
+      rates: null,
+      monthly: null,
+      cache: new Map(),
+    };
+    atCache.set(key, ctx);
+    return ctx;
   }
 
   function tileHtml(t: BasinTile, ctx: BasinCtx) {
@@ -611,8 +685,15 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     return MODEL_SHOWN && !!state.selection?.subBasin;
   }
 
-  const isDriver = (d: Driver | null | undefined): d is Driver =>
-    !!d && (topicDef().tiles.some((t) => t.id === d.id) || topicDef().cards.some((c) => c.id === d.id));
+  /** A map's tile or card, and which of the maps it brings along it is ("<driver>~<index>"; null: its own). */
+  const parseId = (id: string) => {
+    const [base, k] = id.split("~");
+    return { base, also: k === undefined ? null : Number(k) };
+  };
+  const isDriver = (d: Driver | null | undefined): d is Driver => {
+    const base = d && parseId(d.id).base;
+    return !!d && (topicDef().tiles.some((t) => t.id === base) || topicDef().cards.some((c) => c.id === base));
+  };
 
   /** The previewed or pinned tile or card. */
   function leadDriver(): Driver | null {
@@ -622,7 +703,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
 
   /** The tile or card the map follows: previewed, pinned, or the first map on it. */
   function activeDriver(): Driver | null {
-    return leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : null);
+    const d = leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : null);
+    return d && { ...d, id: parseId(d.id).base };
   }
 
   /**
@@ -639,20 +721,51 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const first = kept?.length === 0 || lead ? [] : [topicDef().tiles[0].id];
     const layers = (chosen.length ? chosen : first).map((id) => layerOf(ctx, { id, sub: null }));
     if (!lead) return onePerSlot(layers, SLOTS);
-    const l = layerOf(ctx, lead);
-    return onePerSlot([...layers.filter((m) => m.spec.title !== l.spec.title), l], SLOTS);
+    const set = leadLayers(ctx, lead);
+    const titles = new Set(set.map((l) => l.spec.title));
+    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...set], SLOTS);
+  }
+
+  /**
+   * A tile's or card's map and those it brings along, each drawn as the card asks
+   * (unless switched in the legend), each its own way: one that would be drawn as
+   * another of them is moves to a free way it can take (none: it's left out).
+   */
+  function leadLayers(ctx: BasinCtx, lead: Driver): Layer[] {
+    const { base } = parseId(lead.id);
+    const tile = topicDef().tiles.find((t) => t.id === base);
+    const card = topicDef().cards.find((c) => c.id === base);
+    const own = specFor(ctx, { id: base, sub: lead.sub });
+    const also = (tile ? tile.also?.(ctx) : card?.also?.(ctx, lead.sub)) ?? [];
+    const taken = new Set<string>();
+    const out: Layer[] = [];
+    [own, ...also].forEach((spec, i) => {
+      if (i > 0 && spec.title === own.title) return;
+      const m = shapesOf(spec, ctx);
+      const asked = state.switched.has(spec.title) ? undefined : m.options.find((o) => o.id === spec.prefer);
+      const want = asked ?? m.options.find((o) => o.id === m.current) ?? m.options[0];
+      const way = taken.has(want.slot) ? m.options.find((o) => !taken.has(o.slot)) : want;
+      if (!way) return;
+      taken.add(way.slot);
+      out.push({ d: i ? { id: `${base}~${i - 1}`, sub: lead.sub } : lead, spec, slot: way.slot, mode: way.id });
+    });
+    // (Its own last: the newest in the legend's order.)
+    return [...out.slice(1), out[0]].filter(Boolean);
   }
 
   function layerOf(ctx: BasinCtx, d: Driver): Layer {
     const spec = specFor(ctx, d);
-    return { d, spec, slot: slotOf(spec, ctx) };
+    const m = shapesOf(spec, ctx);
+    return { d, spec, slot: slotOf(spec, ctx), mode: m.current };
   }
 
   function specFor(ctx: BasinCtx, d: Driver): BasinMapSpec {
+    const { base, also } = parseId(d.id);
     const topic = topicDef();
-    const tile = topic.tiles.find((t) => t.id === d.id);
-    if (tile) return tileMap(ctx, tile);
-    return (topic.cards.find((c) => c.id === d.id) ?? topic.cards[0]).map(ctx, d.sub);
+    const tile = topic.tiles.find((t) => t.id === base);
+    if (tile) return (also !== null ? tile.also?.(ctx)[also] : undefined) ?? tileMap(ctx, tile);
+    const card = topic.cards.find((c) => c.id === base) ?? topic.cards[0];
+    return (also !== null ? card.also?.(ctx, d.sub)[also] : undefined) ?? card.map(ctx, d.sub);
   }
 
   function markAll() {
@@ -682,14 +795,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const sized = layers.filter(isScheme);
     const keys = schemeMap.draw(
       major,
-      sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${ctx.period}`, range: `${l.spec.title}:${l.spec.unit}` })),
+      sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${l.spec.period}`, range: `${l.spec.title}:${l.spec.unit}`, mode: l.mode })),
     );
-    // Or as rain and vapour.
-    const effectKeys = effectsMap.draw(
-      major,
-      daysOfDekads(ctx.covered),
-      layers.filter((l) => isEffect(l) && !l.spec.status).map((l) => l.spec.effect!),
-    );
+    // Or as rain and vapour (over their own range: a month's, say).
+    const effects = layers.filter((l) => isEffect(l) && !l.spec.status);
+    const effectKeys = effectsMap.draw(major, daysOfDekads(effects[0]?.spec.range ?? ctx.covered), effects.map((l) => l.spec.effect!));
 
     // The area under the pointer in a chart (or the one the card is pinned on): a group
     // or a major basin keeps its colours and fades the rest; a sub-basin is outlined.
@@ -760,7 +870,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const outlined = picked?.kind === "sub" ? [picked.id] : [];
     const statKey =
       `${fill?.id ?? ""}:${layers.filter((l) => l.slot !== "fill").map((l) => `${l.spec.id}:${l.slot}:${Object.values(styleOf(l.spec)).join("/")}:${waiting.has(l.slot)}`).join()}:${state.stretch}:` +
-      `${legend.lockKey()}:${fill?.status ? "" : ctx.period}:${sub ?? ""}:${outlined.join()}`;
+      `${legend.lockKey()}:${fill?.status ? "" : fill?.period ?? ctx.period}:${sub ?? ""}:${outlined.join()}`;
     map.setBasinStatFills({ level: fill?.level ?? "major", key: statKey, colors, outlined });
     map.setBasinSymbols(symbols.length ? { key: `${statKey}:${!!at}`, items: symbols } : null);
     map.setBars("basin", bars.length ? { key: `${statKey}:${!!at}`, items: bars } : null);
@@ -779,7 +889,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
           const where = spec.onRivers && slot !== "fill" ? spec.note.replace(/per sub-basin$/, "per sub-basin, on its river") : spec.note;
           const note = [where, spec.scale === "log" && !bySign ? "Log scale" : "", slot === "fill" ? "" : SHAPE_NOTES[slot as "circles" | "bars"]].filter(Boolean).join(" · ");
           const status = spec.status || waiting.get(slot) || "";
-          return { ...common, note, period: key || sized ? ctx.period : "", key, sizes: status ? null : sized, status: unlessLoading(status) };
+          return { ...common, note, period: key || sized ? spec.period : "", key, sizes: status ? null : sized, status: unlessLoading(status) };
         }
         // Rain and vapour: a key of how many drops or puffs, per day whatever the units.
         if (isEffect({ slot })) {
@@ -789,14 +899,14 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
           const note = spec.effect === "rain"
             ? "WaPOR's raster: more drops where more rain falls"
             : "WaPOR's raster: more puffs where more water goes up · green: transpiration, blue: evaporation";
-          return { ...common, unit: "mm/day", units: false, note, period: key ? ctx.period : "", key, status: unlessLoading(status) };
+          return { ...common, unit: "mm/day", units: false, note, period: key ? spec.period : "", key, status: unlessLoading(status) };
         }
         // The scheme has a key of sizes instead.
         const drawn = keys.get(spec.scheme!);
         const status = spec.status || drawn?.status || "";
         const key = status ? null : drawn?.key ?? null;
         const note = spec.note.replace(/per sub-basin$/, "along the rivers");
-        return { ...common, note, period: key ? ctx.period : "", key, status: unlessLoading(status) };
+        return { ...common, note, period: key ? spec.period : "", key, status: unlessLoading(status) };
       }),
     );
     showMapTooltip();
@@ -844,8 +954,15 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   }).observe(cardsEl);
 
   return {
-    lockLegend: () => legend.lock(),
-    unlockLegend: () => legend.unlock(),
+    lockLegend() {
+      state.playing = true;
+      legend.lock();
+    },
+    unlockLegend() {
+      state.playing = false;
+      legend.unlock();
+      render();
+    },
     setView(view) {
       state.view = view;
       forgetFailedFluxes();

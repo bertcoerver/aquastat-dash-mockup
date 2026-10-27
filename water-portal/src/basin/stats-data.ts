@@ -15,6 +15,8 @@
  *   sub-basins or those of one major basin.
  * - windowRates: every sub-basin's mean daily PCP and AETI over each of several ranges
  *   (the same days in other years: see sameDays), for comparing the period with them.
+ * - dekadRates: PCP and AETI dekad by dekad, area-weighted over all sub-basins or those
+ *   of one major basin (rain against discharge).
  *
  * A failed load is forgotten, so it can be retried.
  */
@@ -166,4 +168,29 @@ export function windowRates(s: WaporSeries, ranges: DekadRange[]): WindowRates {
     sub.set(s.ids[row], { pcp, aeti });
   }
   return { sub };
+}
+
+/** Per dekad of `range` (by dekad number), mean mm/day of PCP and AETI, area-weighted over all sub-basins or those of `majorBasin`. */
+export function dekadRates(s: WaporSeries, range: DekadRange, majorBasin: number | null): { pcp: Map<number, number>; aeti: Map<number, number> } {
+  const { from, to } = span(s, range);
+  const pcp = new Map<number, number>();
+  const aeti = new Map<number, number>();
+  for (let i = from; i < to; i++) {
+    let area = 0;
+    let p = 0;
+    let e = 0;
+    for (let row = 0, j = i; row < s.ids.length; row++, j += s.dekads) {
+      if (majorBasin !== null && s.majorBasins[row] !== majorBasin) continue;
+      const [pv, ev] = [s.pcp[j], s.aeti[j]];
+      if (pv !== pv || ev !== ev) continue;
+      area += s.areas[row];
+      p += pv * s.areas[row];
+      e += ev * s.areas[row];
+    }
+    if (area) {
+      pcp.set(s.first + i, p / area);
+      aeti.set(s.first + i, e / area);
+    }
+  }
+  return { pcp, aeti };
 }

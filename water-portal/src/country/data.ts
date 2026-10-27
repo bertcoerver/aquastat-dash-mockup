@@ -74,11 +74,15 @@ export type VarKey = keyof typeof VARS;
 
 export type Topic = "sdg" | "resources" | "use" | "irrigation";
 
+/**
+ * Each topic's variables: its own, then those of other topics its maps and charts
+ * combine them with (water stress under withdrawal, say), so a topic loads in one query.
+ */
 const TOPIC_VARS: Record<Topic, VarKey[]> = {
-  sdg: ["pop", "tww", "ws", "ascws", "iscws", "mscws", "wue", "iwue", "iawue", "swue"],
-  resources: ["pop", "trwr", "trwrpc", "irwr", "ext", "rsw", "rgw", "overlap", "dep", "dam"],
-  use: ["pop", "tww", "tfw", "twpc", "aw", "iw", "mw", "awpc", "iwpc", "mwpc", "fsw", "fgw", "desal", "reuse"],
-  irrigation: ["pop", "aei", "fci", "fcSurface", "fcSprinkler", "fcLocalized", "pctci", "srcSurface", "srcGround", "srcMixed", "aai", "pctaai", "crop"],
+  sdg: ["pop", "tww", "ws", "ascws", "iscws", "mscws", "wue", "iwue", "iawue", "swue", "aw", "iw", "mw", "trwrpc"],
+  resources: ["pop", "trwr", "trwrpc", "irwr", "ext", "rsw", "rgw", "overlap", "dep", "dam", "fgw", "desal", "reuse"],
+  use: ["pop", "tww", "tfw", "twpc", "aw", "iw", "mw", "awpc", "iwpc", "mwpc", "fsw", "fgw", "desal", "reuse", "ws", "trwrpc"],
+  irrigation: ["pop", "aei", "fci", "fcSurface", "fcSprinkler", "fcLocalized", "pctci", "srcSurface", "srcGround", "srcMixed", "aai", "pctaai", "crop", "aw", "iawue", "ascws"],
 };
 
 /** area -> variable -> year -> value */

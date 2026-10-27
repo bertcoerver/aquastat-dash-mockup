@@ -33,12 +33,17 @@ export type SchemeKind = "Q";
 /** The legend's slot of each kind drawn as the scheme. */
 export const SCHEME_SLOT: Record<SchemeKind, "lines"> = { Q: "lines" };
 
-/** A map to draw as the scheme: its value per sub-basin, `key` names those (for the cache), and `range` the map and its unit (for the lock). */
+/**
+ * A map to draw as the scheme: its value per sub-basin, `key` names those (for the
+ * cache), `range` the map and its unit (for the lock), and `mode` how ("scheme" or
+ * "particles"; else as the legend's switch has it: a card can ask for one while it shows).
+ */
 export interface SchemeLayer {
   kind: SchemeKind;
   value(id: number): number;
   key: string;
   range: string;
+  mode?: string;
 }
 
 interface Options {
@@ -297,7 +302,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       }
       const { scheme, net } = s;
       const q = layers.find((l) => l.kind === "Q");
-      const particles = !!q && mode.Q === "particles";
+      const particles = !!q && (q.mode ?? mode.Q) === "particles";
       slider.hidden = !q || particles;
       tuningBody.hidden = !particles;
       // Only when they aren't there yet: appending moves them, and a slider being
@@ -305,7 +310,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       if (q && slider.parentElement !== legend.section(SCHEME_SLOT.Q).after) legend.section(SCHEME_SLOT.Q).after.append(slider);
       drawnScheme = scheme;
       const mapKey =
-        `${major}:${layers.map((l) => `${l.kind}:${mode[l.kind]}:${l.key}`).join("|")}:` +
+        `${major}:${layers.map((l) => `${l.kind}:${l.mode ?? mode[l.kind]}:${l.key}`).join("|")}:` +
         (particles ? Object.values(tune).join() : input.value) +
         `:${legend.lockKey()}`;
       if (mapKey === drawn) return drawnKeys;

@@ -11,7 +11,8 @@
  * - inside a driver, the element under the pointer with data-sub (a chart row, a
  *   legend series) is passed along, so the map can pick out that area or series;
  * - data-tip on a chart mark is shown as a tooltip, data-x (a year or month on a
- *   line chart) and data-csv (a download button) are clicked through to the owner.
+ *   line chart) and data-csv (a download button) are clicked through to the owner
+ *   (data-x with its driver, so a chart can say what its steps are: years, months, dekads).
  *
  * Where the pins are kept (one per topic, say) is up to the owner.
  */
@@ -28,7 +29,7 @@ interface Options {
   setPinned(driver: Driver | null): void;
   /** The preview or pin changed: redraw the map and mark the drivers. */
   onChange(): void;
-  onX?(x: number): void;
+  onX?(x: number, driver: Driver | null): void;
   onCsv?(id: string): void;
   tooltip: HTMLElement;
 }
@@ -104,8 +105,8 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
       return onChange();
     }
     const x = target.closest<HTMLElement>("[data-x]")?.dataset.x;
-    if (x !== undefined && onX) onX(Number(x));
     const d = driverAt(target);
+    if (x !== undefined && onX) onX(Number(x), d);
     if (d) pin(d);
   });
   root.addEventListener("focusin", (e) => {

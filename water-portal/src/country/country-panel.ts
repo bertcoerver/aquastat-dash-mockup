@@ -5,7 +5,9 @@
  * each with number tiles and chart cards (cards.ts).
  *
  * Every tile and card has a map that goes with it: hovering previews it, clicking pins
- * it (map-drivers.ts); unpinned, the map shows the topic's first tile. The legend lists the
+ * it (map-drivers.ts); unpinned, the map shows the topic's first tile. Many bring more
+ * maps along (cards.ts, `also`), shown with theirs, each in a shape of its own: those
+ * take the places of the maps checked in the legend while shown. The legend lists the
  * maps of all the topics, so maps of different topics can be shown together. Within a card,
  * hovering a row picks out that area's countries on the map, hovering a series in a
  * legend maps that series, and clicking a year on a line chart sets the year in the
@@ -191,7 +193,9 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const options = menuMaps(ctx).map(({ id, spec, group }) => {
         const m = shapesOf(spec);
         const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
-        return { id, label: spec.title, group, icons, icon: on.includes(id) ? m.current : freeShape(m, taken) };
+        // (On the map, as drawn: a chart's map can be moved out of another's shape.)
+        const drawn = current!.layers.find((l) => optionId(ctx, l.spec) === id)?.slot;
+        return { id, label: spec.title, group, icons, icon: drawn ?? freeShape(m, taken) };
       });
       return { options, current: on };
     },
@@ -258,13 +262,25 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     onLock: () => drawMap(),
   });
 
-  /** All the topics' maps, each once (under the first topic that has it), in the order of the tiles and cards. */
+  /**
+   * All the topics' maps, each once (under the first topic that has it), in the order of
+   * the tiles and cards, each followed by those it brings along (id "<driver>~<index>").
+   */
+  const menuMapsOf = new WeakMap<Ctx, { id: string; spec: MapSpec; group: string }[]>(); // (once per draw)
   function menuMaps(ctx: Ctx): { id: string; spec: MapSpec; group: string }[] {
+    let maps = menuMapsOf.get(ctx);
+    if (maps) return maps;
     const seen = new Set<string>();
-    return TOPICS.flatMap((topic) => [
-      ...topic.tiles.map((t) => ({ id: t.id, spec: t.map(ctx), group: topic.label })),
-      ...topic.cards.map((c) => ({ id: c.id, spec: c.map(ctx, null), group: topic.label })),
+    const withAlso = (id: string, spec: MapSpec, also: MapSpec[] | undefined, group: string) => [
+      { id, spec, group },
+      ...(also ?? []).map((a, i) => ({ id: `${id}~${i}`, spec: a, group })),
+    ];
+    maps = TOPICS.flatMap((topic) => [
+      ...topic.tiles.flatMap((t) => withAlso(t.id, t.map(ctx), t.also?.(ctx), topic.label)),
+      ...topic.cards.flatMap((c) => withAlso(c.id, c.map(ctx, null), c.also?.(ctx, null), topic.label)),
     ]).filter(({ spec }) => !seen.has(spec.title) && !!seen.add(spec.title));
+    menuMapsOf.set(ctx, maps);
+    return maps;
   }
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: Ctx, spec: MapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
@@ -281,9 +297,9 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   const shapes = initShapePicks();
   /** The shapes a map can take: an amount's circles or bars, any value's colours too (not a mix of categories). */
   const shapesFor = (spec: MapSpec): Shape[] =>
-    spec.style.kind === "circles" ? ["circles", "bars"] : spec.style.kind === "categories" ? ["fill"] : SHAPES;
-  /** How a map is drawn (its slot). */
-  const slotOf = (spec: MapSpec): Shape => shapes.shape(spec.title, shapesFor(spec));
+    spec.style.kind === "circles" ? ["circles", "bars"] : spec.style.kind === "categories" ? ["fill"] : spec.style.kind === "pies" ? ["circles"] : SHAPES;
+  /** How a map is drawn (its slot): as switched in the legend, else as it says. */
+  const slotOf = (spec: MapSpec): Shape => shapes.shape(spec.title, shapesFor(spec), spec.shape && shapesFor(spec).includes(spec.shape) ? spec.shape : undefined);
   /** How a map can be drawn, and is. */
   const shapesOf = (spec: MapSpec): MapShapes => ({
     title: spec.title,
@@ -314,9 +330,16 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   const topicDef = (): TopicDef => TOPICS.find((t) => t.id === state.topic)!;
+  /** A map's tile or card, and which of the maps it brings along it is ("<driver>~<index>"; null: its own). */
+  const parseId = (id: string) => {
+    const [base, k] = id.split("~");
+    return { base, also: k === undefined ? null : Number(k) };
+  };
   /** The topic a tile or card is in: the tab's, else the first other that has it (undefined: none). */
-  const topicOf = (id: string): TopicDef | undefined =>
-    [topicDef(), ...TOPICS].find((t) => t.tiles.some((m) => m.id === id) || t.cards.some((c) => c.id === id));
+  const topicOf = (id: string): TopicDef | undefined => {
+    const { base } = parseId(id);
+    return [topicDef(), ...TOPICS].find((t) => t.tiles.some((m) => m.id === base) || t.cards.some((c) => c.id === base));
+  };
 
   function context(): Ctx | null {
     const latest = latestYear();
@@ -413,9 +436,10 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   /** The previewed or pinned tile or card. */
   const leadDriver = (): Driver | null => drivers.preview() ?? state.pinned.get(state.topic) ?? null;
 
-  /** The driver the map follows now: previewed, pinned, or the first map on it. */
+  /** The driver the map follows now: previewed, pinned, or the first map on it (its tile or card). */
   function activeDriver(): Driver | null {
-    return leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : { id: topicDef().tiles[0].id, sub: null });
+    const d = leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : { id: topicDef().tiles[0].id, sub: null });
+    return d && { ...d, id: parseId(d.id).base };
   }
 
   const areaOf = (d: Driver | null | undefined) => (d?.sub?.startsWith("area:") ? Number(d.sub.slice(5)) : null);
@@ -432,8 +456,31 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const first = kept?.length === 0 || lead ? [] : [topic.tiles[0].id];
     const layers = (chosen.length ? chosen : first).map((id) => layerOf(ctx, { id, sub: null }));
     if (!lead) return onePerSlot(layers, SLOTS);
-    const l = layerOf(ctx, lead);
-    return onePerSlot([...layers.filter((m) => m.spec.title !== l.spec.title), l], SLOTS);
+    const set = leadLayers(ctx, lead);
+    const titles = new Set(set.map((l) => l.spec.title));
+    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...set], SLOTS);
+  }
+
+  /**
+   * A tile's or card's map and those it brings along, each in a shape of its own: one
+   * that would be drawn as another of them is moves to a free shape it can take (none:
+   * it's left out).
+   */
+  function leadLayers(ctx: Ctx, lead: Driver): Layer[] {
+    const own = layerOf(ctx, lead);
+    const { base } = parseId(lead.id);
+    const topic = topicOf(base) ?? topicDef();
+    const also = topic.tiles.find((t) => t.id === base)?.also?.(ctx) ?? topic.cards.find((c) => c.id === base)?.also?.(ctx, lead.sub) ?? [];
+    const taken = new Set<Shape>([own.slot]);
+    const out: Layer[] = [];
+    also.forEach((spec, i) => {
+      const want = slotOf(spec);
+      const slot = taken.has(want) ? shapesFor(spec).find((s) => !taken.has(s)) : want;
+      if (!slot) return;
+      taken.add(slot);
+      out.push({ d: { id: `${base}~${i}`, sub: lead.sub }, spec, slot });
+    });
+    return [...out, own];
   }
 
   function layerOf(ctx: Ctx, d: Driver): Layer {
@@ -442,11 +489,12 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   function specFor(ctx: Ctx, d: Driver): MapSpec {
-    const topic = topicOf(d.id) ?? topicDef();
-    const tile = topic.tiles.find((t) => t.id === d.id);
-    if (tile) return tile.map(ctx);
-    const card = topic.cards.find((c) => c.id === d.id) ?? topic.cards[0];
-    return card.map(ctx, d.sub);
+    const { base, also } = parseId(d.id);
+    const topic = topicOf(base) ?? topicDef();
+    const tile = topic.tiles.find((t) => t.id === base);
+    if (tile) return (also !== null ? tile.also?.(ctx)[also] : undefined) ?? tile.map(ctx);
+    const card = topic.cards.find((c) => c.id === base) ?? topic.cards[0];
+    return (also !== null ? card.also?.(ctx, d.sub)[also] : undefined) ?? card.map(ctx, d.sub);
   }
 
   function markAll() {
@@ -499,7 +547,11 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       // when the lock was put on); in the map's colours, or by sign.
       const style = styleOf(spec, slot);
       const bySign = style.colours === "sign";
-      const values = countries.map((m49) => Math.abs(spec.value(m49)));
+      // Pies: their parts (those switched off in the legend left out), and their whole.
+      const pies = spec.style.kind === "pies" ? spec.style : null;
+      const off = state.hiddenClasses.get(spec.id);
+      const partsOf = (m49: number) => pies?.amounts(m49)?.map((v, i) => (off?.has(i) ? 0 : v)) ?? null;
+      const values = countries.map((m49) => (pies ? partsOf(m49)?.reduce((s, v) => s + v, 0) ?? NaN : Math.abs(spec.value(m49))));
       const size = shapeSizes(values, style.full, (ref) => legend.hold(`${spec.title}:${spec.unit}:${slot}:${style.full}`, ref));
       countries.forEach((m49, i) => {
         const v = values[i];
@@ -507,7 +559,9 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
         const own = p.color(m49);
         if (!center || !(v > 0) || !own || own === "off") return;
         const c = bySign ? signColor(spec.value(m49), theme.storageRise, theme.storageFall) : own;
-        if (slot === "circles") {
+        if (pies) {
+          symbols.push({ id: `${m49}`, position: center, radius: size.radius(v), fill: [c[0], c[1], c[2], 200], line: [255, 255, 255, 220], ...pieOf(partsOf(m49)!, pies.parts) });
+        } else if (slot === "circles") {
           // (An amount's in white, as before; others in a darker shade, as their colours can be pale.)
           const line: Color = spec.style.kind === "circles" ? [255, 255, 255, 220] : [c[0] * 0.6, c[1] * 0.6, c[2] * 0.6, 230];
           symbols.push({ id: `${m49}`, position: center, radius: size.radius(v), fill: [c[0], c[1], c[2], 170], line });
@@ -516,8 +570,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       // The key of their sizes, in their colours, in place of a ramp (classes keep theirs, and grey sizes).
       const colorAt = (v: number) => (bySign ? signColor(v, theme.storageRise, theme.storageFall) : p.colorOf?.(v)) ?? null;
       const tint = (c: Color | null) => (c ? css(c, slot === "circles" ? 0.7 : 1) : css(theme.border, 0.6));
-      sizes.set(slot, sizeKey(slot, size, (v) => tint(colorAt(v)), signed(spec)));
-      if (p.colorOf) keys.set(slot, null);
+      sizes.set(slot, sizeKey(slot, size, (v) => tint(pies ? null : colorAt(v)), signed(spec)));
+      if (p.colorOf && !pies) keys.set(slot, null);
     }
     // Small circles on top of big ones.
     symbols.sort((a, b) => b.radius - a.radius);
@@ -560,7 +614,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   /** A map's note, for the shape it's drawn in. */
   function noteOf(spec: MapSpec, slot: Shape) {
     const note = spec.note ?? "";
-    if (spec.style.kind === "circles") return slot === "bars" ? note.replace("Circle area", "Bar height") : note;
+    if (spec.style.kind === "circles" || spec.style.kind === "pies") return slot === "bars" ? note.replace("Circle area", "Bar height") : note;
     return slot === "fill" ? note : [note, SHAPE_NOTES[slot]].filter(Boolean).join(" · ");
   }
 
@@ -613,6 +667,11 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
         kind: "classes",
         items: style.categories.map((k, i) => ({ label: k.label, background: `linear-gradient(to right, ${k.color}55, ${k.color})`, state: classState(i) })),
       };
+    } else if (style.kind === "pies") {
+      // (Their first part's colour stands for them; the key lists the parts, which switch on and off.)
+      const c = hexToColor(style.parts[0].color);
+      color = (m49) => (Number.isFinite(spec.value(m49)) ? c : null);
+      key = { kind: "classes", items: style.parts.map((k, i) => ({ label: k.label, background: k.color, state: off.has(i) ? "off" : "on" })) };
     } else {
       const c = hexToColor(style.color);
       color = () => c;
@@ -620,7 +679,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     }
     // The classes' states are only known once every country's colour is: work them all out now.
     const colors = new Map(countries.map((m49) => [m49, outside(m49) ? ("off" as const) : color(m49)]));
-    if (key?.kind === "classes") key.items.forEach((item, i) => (item.state = classState(i)));
+    if (key?.kind === "classes" && style.kind !== "pies") key.items.forEach((item, i) => (item.state = classState(i)));
     return { color: (m49: number) => colors.get(m49) ?? null, key, colorOf };
   }
 
@@ -631,8 +690,14 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const v = spec.value(m49);
       let text = `${fmt(v)} ${esc(spec.unit)}`;
       if (spec.style.kind === "categories") {
-        const cat = spec.style.category(m49);
-        text = cat ? `${esc(spec.style.categories[cat.index].label)}: ${Math.round(cat.share * 100)}% of withdrawal` : "–";
+        const style = spec.style;
+        const cat = style.category(m49);
+        text = !cat ? "–" : style.of ? `${esc(style.categories[cat.index].label)}: ${Math.round(cat.share * 100)}% ${esc(style.of)}` : esc(style.categories[cat.index].label);
+      } else if (spec.style.kind === "pies") {
+        const parts = spec.style.parts;
+        const amounts = spec.style.amounts(m49);
+        const total = amounts?.reduce((s, x) => s + x, 0) ?? NaN;
+        text += total > 0 ? ` (${amounts!.map((x, i) => `${esc(parts[i].label)} ${Math.round((x / total) * 100)}%`).join(", ")})` : "";
       }
       return `${esc(spec.title)}: ${text}`;
     });
@@ -694,3 +759,16 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
 
 const csvCell = (v: string | number) =>
   typeof v === "number" ? (Number.isFinite(v) ? String(v) : "") : /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+
+/** A pie's cuts (where its first three slices end, 0–1) and its four slices' colours, for the circles layer. */
+function pieOf(amounts: number[], parts: { color: string }[]) {
+  const total = amounts.reduce((s, v) => s + v, 0) || 1;
+  const cuts: number[] = [];
+  let at = 0;
+  for (let i = 0; i < 3; i++) cuts.push((at += (amounts[i] ?? 0) / total));
+  const colors = [0, 1, 2, 3].flatMap((i) => {
+    const [r, g, b] = hexToColor(parts[Math.min(i, parts.length - 1)].color);
+    return [r, g, b, 225];
+  });
+  return { pie: cuts, pieColors: colors };
+}
