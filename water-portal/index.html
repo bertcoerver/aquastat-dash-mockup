@@ -269,12 +269,16 @@
         <!-- Charts for the point (src/local/local-panel.ts). -->
         <p class="wb-message" id="lp-message"></p>
         <!-- A ratio of totals (water productivity): the same days in every year (src/local/year-bars.ts). -->
-        <section class="wb-section lp-section" id="lp-bars" hidden>
+        <!-- Cards: a click pins one, so it stays when the panel folds (as in the other views). -->
+        <section class="wb-section lp-section cp-card" id="lp-bars" data-pin="bars" tabindex="0" aria-label="By year" hidden>
+          <h3><span>By year</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin type="button"
+                title="Remove pin" aria-label="Remove pin">×</button></span></h3>
           <div id="lp-bars-chart"></div>
           <p id="lp-bars-caption"></p>
         </section>
-        <section class="wb-section lp-section" id="lp-series" hidden>
-          <h3 id="lp-ts-title">Time series</h3>
+        <section class="wb-section lp-section cp-card" id="lp-series" data-pin="series" tabindex="0" aria-label="Time series" hidden>
+          <h3><span id="lp-ts-title">Time series</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin
+                type="button" title="Remove pin" aria-label="Remove pin">×</button></span></h3>
           <p id="lp-ts-caption"></p>
           <div class="wb-overview" id="lp-overview"></div>
           <div class="wb-zoom" id="lp-zoom"></div>

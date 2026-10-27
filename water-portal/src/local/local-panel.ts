@@ -46,6 +46,41 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   const barsSection = $("lp-bars");
   const updateBars = initYearBars($("lp-bars-chart"), ({ start, end }) => setDays({ start, end: Math.min(end, MAX_DAY) }));
 
+  // A card (the year bars, the series) pinned with a click stays when the panel folds,
+  // as in the other views (foldable.ts keeps the .pinned one); it has no map to drive.
+  const cards = [barsSection, section];
+  let pinned: string | null = null;
+  function markPinned() {
+    for (const el of cards) {
+      const on = el.dataset.pin === pinned && !el.hidden;
+      el.classList.toggle("pinned", on);
+      el.setAttribute("aria-pressed", String(on));
+    }
+  }
+  function setPinned(next: string | null) {
+    pinned = next;
+    markPinned();
+  }
+  const body = $("lp-body");
+  body.addEventListener("click", (e) => {
+    const target = e.target as Element;
+    const id = target.closest<HTMLElement>("[data-pin]")?.dataset.pin;
+    if (!id) return;
+    if (target.closest("[data-unpin]")) setPinned(null);
+    // Using its chart pins it, but never unpins it (a drag on it ends in a click too).
+    else if (target.closest("#lp-overview, #lp-zoom, #lp-bars-chart")) setPinned(id);
+    else setPinned(pinned === id ? null : id);
+  });
+  body.addEventListener("keydown", (e) => {
+    const id = (e.target as HTMLElement).dataset.pin;
+    if (!id || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    setPinned(pinned === id ? null : id);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.view === "local" && pinned) setPinned(null);
+  });
+
   const state = {
     view: "country" as View,
     lngLat: null as LngLat | null,
@@ -128,6 +163,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
     section.hidden = !series;
     const ratio = series?.ratio && state.days ? yearBars(series, state.days) : null;
     barsSection.hidden = !ratio;
+    markPinned(); // (only a card on show)
     $("lp-ts-title").textContent = ratio ? "Per dekad" : "Time series";
     if (ratio) {
       const [num, den] = variable.parts!.map((p) => waporVariable(p.id));

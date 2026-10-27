@@ -180,7 +180,7 @@
   margin-top: 0;
 }
 #lp-body > section:not([hidden]) ~ section:not([hidden]) {
-  margin-top: 20px;
+  margin-top: 10px;
 }
 
 /* A ratio by year (year-bars.ts): the selected days' value as a headline, then bars. */
