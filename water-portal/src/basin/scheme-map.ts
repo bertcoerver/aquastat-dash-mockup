@@ -24,6 +24,7 @@ import type { SubBasin } from "../map/sub-basin-network";
 import type { Color } from "../map/theme";
 import { nice, type LayerLegend, type LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
+import { tuningSection } from "../panels/tuning-pane";
 import { slideSelection } from "../panels/segmented";
 import { SHAPES, SHAPE_LABELS, type Shape } from "../panels/shape-switch";
 import { loadMiddles, loadRivers, type RiverNetwork } from "./rivers";
@@ -86,31 +87,31 @@ type Mode = "scheme" | "particles" | Shape;
 const Q_PX = 12;
 const Q_MIN_PX = 0.8;
 /**
- * How the particles are drawn. For now the legend has a slider for each (TUNING), to
- * find the best settings; they start at these.
+ * How the particles are drawn. The tuning pane (a triple click on the legend) has a
+ * slider for each (TUNING); they start at these.
  */
 const PARTICLES = {
   /** Particles alive at once. */
-  count: 3500,
+  count: 1000,
   /** CSS pixels per frame (at 60 fps) on the fastest river. */
-  speed: 1.5,
+  speed: 0.5,
   /** Share of a trail kept from one frame to the next. */
-  fade: 0.9,
+  fade: 0.835,
   /** Particle size, CSS pixels. */
-  pointSize: 1.8,
+  pointSize: 1.6,
   /** Speed = (Q / largest Q) ^ this: 0 is the same speed everywhere. */
   contrast: 0,
   /** River widths (px), from the smallest drawn to the largest... */
-  minWidth: 1,
-  maxWidth: 7,
+  minWidth: 2.5,
+  maxWidth: 8,
   /** ...which is this many powers of ten bigger (smaller rivers left out). */
-  decades: 2.5,
+  decades: 4,
   /** Opacity of the rivers under the particles (0: particles only). */
-  opacity: 1,
+  opacity: 0,
   /** Share of the particles a big river gets per pixel of width that the smallest still get. */
-  smallSpawn: 0.25,
+  smallSpawn: 0.05,
   /** A key of PARTICLE_COLORS. */
-  color: "theme",
+  color: "viridis",
 };
 type ParticleSettings = typeof PARTICLES;
 type NumberSetting = Exclude<keyof ParticleSettings, "color">;
@@ -205,11 +206,10 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
     }
   }
 
-  // --- The particles' settings (for now: sliders to find the best ones) -------------------
+  // --- The particles' settings: sliders in the tuning pane ----------------------------------
   const tune: ParticleSettings = { ...PARTICLES };
   const tuning = document.createElement("div");
   tuning.className = "legend-quality particle-tuning";
-  tuning.hidden = true;
   tuning.innerHTML =
     TUNING.map(
       ({ key, label, min, max, step }) =>
@@ -220,7 +220,8 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
     Object.entries(PARTICLE_COLORS).map(([key, { label }]) => `<option value="${key}">${label}</option>`).join("") +
     "</select></div>" +
     '<button type="button" class="particle-tuning-copy" title="Copy the settings">Copy settings</button>';
-  slider.after(tuning);
+  const tuningBody = tuningSection("Discharge particles", "Draw the discharge map as particles to tune them.");
+  tuningBody.append(tuning);
   const showTune = () => {
     for (const el of tuning.querySelectorAll<HTMLElement>("[data-value]")) el.textContent = String(tune[el.dataset.value as NumberSetting]);
   };
@@ -276,7 +277,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
   function clear() {
     drawn = "";
     drawnScheme = null;
-    slider.hidden = tuning.hidden = true;
+    slider.hidden = tuningBody.hidden = true;
     map.setBasinScheme(null);
     if (hover) {
       hover = null;
@@ -327,8 +328,8 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       const q = layers.find((l) => l.kind === "Q");
       const particles = !!q && mode.Q === "particles";
       slider.hidden = !q || particles;
-      tuning.hidden = !particles;
-      if (q) legend.section(SCHEME_SLOT.Q).after.append(slider, tuning);
+      tuningBody.hidden = !particles;
+      if (q) legend.section(SCHEME_SLOT.Q).after.append(slider);
       drawnScheme = scheme;
       const mapKey =
         `${major}:${layers.map((l) => `${l.kind}:${mode[l.kind]}:${l.key}`).join("|")}:` +

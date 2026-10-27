@@ -13,9 +13,9 @@
  *
  * Like the scheme (scheme-map.ts), basin-stats.ts asks for it for the maps that allow it
  * (BasinMapSpec.effect: precipitation or evapotranspiration per sub-basin), and a switch
- * in each one's legend section picks between it and the other maps' shapes. For now
- * each section also has sliders for how they're drawn (RAIN_TUNING, VAPOUR_TUNING), to
- * find the best settings.
+ * in each one's legend section picks between it and the other maps' shapes. The tuning
+ * pane (panels/tuning-pane.ts: a triple click on the legend) has sliders for how they're
+ * drawn (RAIN_TUNING, VAPOUR_TUNING).
  */
 import type { BasinEffects, EffectGround } from "../map/layers/basin-effects";
 import type { EffectGrid } from "../map/layers/rain";
@@ -23,6 +23,7 @@ import type { WaterMap } from "../map/map";
 import type { Color } from "../map/theme";
 import type { LayerLegend, LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
+import { tuningSection } from "../panels/tuning-pane";
 import { slideSelection } from "../panels/segmented";
 import { SHAPES, SHAPE_LABELS, type Shape } from "../panels/shape-switch";
 import type { MajorBasin } from "../toolbar/place-picker";
@@ -58,7 +59,7 @@ type Mode = Shape | "effect";
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; grids: BasinGrid[] };
 type RGB = [number, number, number];
 
-/** How the rain is drawn. For now the legend has a slider for each (RAIN_TUNING); they start at these. */
+/** How the rain is drawn. The tuning pane has a slider for each (RAIN_TUNING); they start at these. */
 const RAIN = {
   /** Drops at once (most aren't shown: only where it rains). */
   count: 60000,
@@ -223,13 +224,15 @@ export function initEffectsMap({ map, majorBasins, legend, onChange }: Options):
     }
   }
 
-  // --- The settings (for now: sliders to find the best ones) ------------------------------
+  // --- The settings: sliders in the tuning pane --------------------------------------------
   const rain = { ...RAIN };
   const vapour = { ...VAPOUR };
   const panels: Record<EffectKind, HTMLElement> = {
-    rain: tuningPanel("rain", rain, RAIN_TUNING, RAIN_COLORS, () => onChange()),
-    vapour: tuningPanel("vapour", vapour, VAPOUR_TUNING, VAPOUR_COLORS, () => onChange()),
+    rain: tuningSection("Rain", "Draw the precipitation map as rain to tune it."),
+    vapour: tuningSection("Vapour", "Draw the evapotranspiration map as vapour to tune it."),
   };
+  panels.rain.append(tuningPanel("rain", rain, RAIN_TUNING, RAIN_COLORS, () => onChange()));
+  panels.vapour.append(tuningPanel("vapour", vapour, VAPOUR_TUNING, VAPOUR_COLORS, () => onChange()));
 
   /** The rasters a kind needs over a range (loading them the first time). */
   function status(kind: EffectKind, range: DayRange, major: number): Status {
@@ -287,7 +290,6 @@ export function initEffectsMap({ map, majorBasins, legend, onChange }: Options):
       for (const kind of ["rain", "vapour"] as EffectKind[]) {
         panels[kind].hidden = !kinds.includes(kind);
         if (!kinds.includes(kind)) continue;
-        legend.section(kind).after.append(panels[kind]);
         const s = status(kind, range, major);
         if (s.kind !== "ready") {
           out.set(kind, { status: s.kind === "loading" ? LOADING : s.message, key: null });
@@ -355,7 +357,6 @@ export function initEffectsMap({ map, majorBasins, legend, onChange }: Options):
 function tuningPanel(id: string, values: Settings, sliders: Slider[], colors: Record<string, { label: string }>, onChange: () => void) {
   const panel = document.createElement("div");
   panel.className = "legend-quality particle-tuning";
-  panel.hidden = true;
   panel.innerHTML =
     sliders
       .map(

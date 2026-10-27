@@ -126,6 +126,7 @@ water-portal/
     │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
     │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
+    │   ├── tuning-pane.ts  Hidden pane of sliders for the particles, rain and vapour (triple-click a legend)
     │   ├── shape-switch.ts A map's switch: the areas' colours, circles or 3D bars
     │   ├── shape-style.ts  How circles and bars look: a menu on their key (colours, full size)
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
@@ -358,9 +359,10 @@ water-portal/
   whenever the view changes, the particles move through it on the GPU and leave fading trails;
   big rivers carry more of them as they're wider. While it shows, the map repaints every frame
   (map.ts's `animate`). It needs WebGL 2 with float render targets.
-  For now the legend has sliders for the particles' look (count, speed, trails, size, speed
-  contrast, river widths, how many rivers, their opacity) to find the best settings; **Copy
-  settings** copies them as JSON. The defaults are `PARTICLES` in `scheme-map.ts`.
+  Sliders for the particles' look (count, speed, trails, size, speed contrast, river widths,
+  how many rivers, their opacity) are out of sight in a tuning pane
+  ([src/panels/tuning-pane.ts](src/panels/tuning-pane.ts)): a triple click on the legend opens
+  it, and it drags by its heading. **Copy settings** copies them as JSON. The defaults are `PARTICLES` in `scheme-map.ts`.
 - **Precipitation as rain, evapotranspiration as vapour** ([src/basin/effects-map.ts](src/basin/effects-map.ts),
   from river-flow-poc's `rain.html` and `et.html`): with a major basin selected, the precipitation
   and evapotranspiration maps of its sub-basins have a switch in the legend: the other maps' **Colours**,
@@ -377,7 +379,7 @@ water-portal/
   AETI says. Like the particles, they're computed on the GPU from each instance's index and the
   time (no state), and the map repaints every frame while they show. Under each, the raster can
   be drawn on the ground (river-flow-poc's colours). The map has no 3D relief, so the rain reads
-  best tilted (ctrl-drag). For now the legend has sliders for their look, a colour menu and **Copy
+  best tilted (ctrl-drag). The tuning pane has sliders for their look too, a colour menu and **Copy
   settings**; the defaults are `RAIN` and `VAPOUR` in `effects-map.ts`.
 - **The Basin view's data** (PCP, AETI, and the water balance model's Q and ΔS) are files
   precomputed by [fao-wapor-discharge](../../fao-wapor-discharge)'s
