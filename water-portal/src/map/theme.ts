@@ -14,8 +14,7 @@ export interface MapTheme {
   outline: Color; // the selected sub-basin (or country) when the map shows values
   border: Color;
   basinBorder: Color;
-  water: Color; // lakes
-  river: Color;
+  river: Color; // rivers and lakes
   /** The water balance scheme (Basin view): discharge lines, their edge, storage rising and falling. */
   scheme: Color;
   schemeCasing: Color;
@@ -45,8 +44,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     outline: [19, 35, 43, 255],
     border: [120, 136, 143, 255],
     basinBorder: [150, 112, 70, 255],
-    water: [62, 138, 189, 255],
-    river: [0, 0, 138, 200],
+    river: [0, 0, 138, 255],
     scheme: [33, 113, 181, 255],
     schemeCasing: [255, 255, 255, 220],
     storageRise: [38, 166, 91, 255],
@@ -71,8 +69,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     outline: [240, 244, 245, 255],
     border: [102, 124, 134, 255],
     basinBorder: [190, 150, 100, 255],
-    water: [70, 150, 200, 255],
-    river: [0, 0, 138, 200],
+    river: [0, 0, 138, 255],
     scheme: [214, 236, 250, 255],
     schemeCasing: [10, 18, 22, 220],
     storageRise: [52, 199, 104, 255],

@@ -8,6 +8,9 @@ interface RiverProperties {
   Strahler: number; // stream order, 1 (headwater) to 7 (largest rivers)
 }
 
+/** The zoom from which the rivers are drawn. */
+const RIVERS_MIN_ZOOM = 5;
+
 /** HydroLAKES lake polygons. Opaque: the tiles overlap a little at their edges. */
 export function lakesLayer({ color, visible }: { color: Color; visible: boolean }) {
   return new MVTLayer({
@@ -32,7 +35,8 @@ export function riversLayer({ color, visible, hidden }: { color: Color; visible:
     id: "rivers",
     data: FAO_TILES.rivers,
     visible,
-    minZoom: 0,
+    // Below this zoom no tiles are loaded: the rivers show only zoomed in.
+    minZoom: RIVERS_MIN_ZOOM,
     maxZoom: 8,
     onTileError: ignoreMissingTile,
     uniqueIdProperty: "SUBBAS_ID",

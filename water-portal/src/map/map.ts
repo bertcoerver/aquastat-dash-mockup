@@ -294,7 +294,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         visible: state.visible.rivers,
         hidden: scheme ? { key: scheme.subBasinsKey, subBasins: scheme.subBasins } : undefined,
       }),
-      lakesLayer({ color: theme.water, visible: state.visible.lakes }),
+      lakesLayer({ color: theme.river, visible: state.visible.lakes }),
       subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
       countryOutlineLayer({
         m49: state.selection.country,
