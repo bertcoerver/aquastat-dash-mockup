@@ -1,7 +1,7 @@
 /*
  * The map legend of the Basin and Country views: one or more layers at once. Its title
  * is a checklist of the maps (title-menu.ts), and each layer on the map has a section
- * below it. A layer goes in a slot, by how it's drawn (a fill, lines, dots, circles):
+ * below it. A layer goes in a slot, by how it's drawn (a fill, lines, circles, bars):
  * one layer per slot, and the sections in the slots' order. A section has the layer's
  * title (with more than one layer, and a × to take it off the map), a note, the period
  * and unit (a menu of units where the view has one), and its key:
@@ -9,6 +9,9 @@
  * - a colour ramp with ticks, also a menu of how much of the values it spans (ramp-menu.ts);
  * - classes, whose swatches switch them on and off on the map;
  * - sizes: three line widths, circles or bars, labelled with their values.
+ *
+ * Circles and bars have a key of sizes too, under their colours' (if any), which is a
+ * menu of how they look (shape-style.ts).
  *
  * A view can put its own controls in a section (extra: under the note; after: under
  * the key). A padlock in the title locks the ranges: each map keeps the colour range or
@@ -36,8 +39,18 @@ export type LegendKey =
   | { kind: "ramp"; gradient: string; ticks: Tick[]; fixed?: boolean }
   /** `state`: shown on the map, switched off, or none of the picked places fall in it. */
   | { kind: "classes"; items: { label: string; background: string; state: "on" | "off" | "absent" }[] }
-  /** `size`: the line's width, the circle's radius or the bar's height, px; `sign` goes before the value. */
-  | { kind: "lines" | "circles" | "bars"; items: { value: number; size: number; color: string; sign?: string }[] };
+  | { kind: "lines" | "circles" | "bars"; items: SizeItem[] };
+
+/** A size in a key: `size` is the line's width, the circle's radius or the bar's height, px; `sign` goes before the value. */
+export interface SizeItem {
+  value: number;
+  size: number;
+  color: string;
+  sign?: string;
+}
+
+/** Circles' or bars' sizes (shape-style.ts). */
+export type SizesKey = { kind: "circles" | "bars"; items: SizeItem[] };
 
 export interface LegendLayer {
   slot: string;
@@ -51,6 +64,8 @@ export interface LegendLayer {
   units?: boolean;
   /** Null: no key (no values yet: see status). */
   key: LegendKey | null;
+  /** Circles' or bars' sizes, under the key (a menu, with Options.sizes). */
+  sizes?: SizesKey | null;
   status?: string;
 }
 
@@ -86,6 +101,8 @@ interface Options {
   ramp: { of: string; initial: WaporStretch; onPick(cut: WaporStretch): void };
   /** The units' menu, where a layer has `units`. */
   units?: { options(): { options: MenuOption[]; current: string | null }; onPick(id: string): void; title(): string };
+  /** The menu on the circles' and bars' sizes (shape-style.ts), of the map in `slot`, and its title. */
+  sizes?: { options(slot: string): { options: MenuOption[]; current: string[] }; onPick(slot: string, id: string): void; title(slot: string): string };
   /** A class's swatch clicked. */
   onClass?(slot: string, index: number): void;
   /** The lock switched: draw the maps again. */
@@ -108,7 +125,7 @@ export function toggled(ids: string[], id: string): string[] {
 }
 
 /** How a slot reads in the checklist, to the right of a map. */
-export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lines", dots: "dots", circles: "circles", bars: "3D bars", rain: "rain", vapour: "vapour" };
+export const SLOT_HINTS: Record<string, string> = { fill: "colours", lines: "lines", circles: "circles", bars: "3D bars", rain: "rain", vapour: "vapour" };
 
 /** A round number at or below x (1, 2 or 5 × a power of ten), for a key's sizes. */
 export function nice(x: number) {
@@ -157,7 +174,7 @@ export function ticksHtml(ticks: Tick[]) {
   return ticks.map((t) => `<span style="left:${t.at * 100}%">${Number.isFinite(t.value) ? fmtStop(t.value, span) : "–"}</span>`).join("");
 }
 
-export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, ramp, units, onClass, onLock }: Options): LayerLegend {
+export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, ramp, units, sizes, onClass, onLock }: Options): LayerLegend {
   const menuButton = aside.querySelector<HTMLButtonElement>(".legend-title .title-menu")!;
   const menu = initTitleMenu(menuButton, options, onToggle, { multi: true });
   // The ranges held while locked, by map and unit (null: unlocked).
@@ -183,6 +200,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     ticks: HTMLElement;
     classes: HTMLElement;
     sizes: SVGSVGElement;
+    shapeSizes: HTMLButtonElement;
     status: HTMLElement;
     layer: LegendLayer | null;
   }
@@ -208,6 +226,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       `<div class="legend-ticks" aria-hidden="true"></div>` +
       `<ul class="cp-classes"></ul>` +
       `<svg class="scheme-key" aria-hidden="true"></svg>` +
+      `<button class="legend-sizes ramp-menu" id="${id}-sizes" type="button" aria-haspopup="listbox" aria-expanded="false" ` +
+      `aria-label="How the circles or bars look"><svg class="scheme-key" aria-hidden="true"></svg><span class="title-menu-label" hidden></span></button>` +
       `<div class="legend-after"></div>` +
       `<div class="legend-status" role="status"></div>`;
     after.after(el);
@@ -215,6 +235,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     const q = <T extends Element>(selector: string) => el.querySelector<T>(selector)!;
     const unit = q<HTMLButtonElement>(".unit-menu");
     const rampButton = q<HTMLButtonElement>(".legend-ramp");
+    const sizesButton = q<HTMLButtonElement>(".legend-sizes");
+    if (sizes) initTitleMenu(sizesButton, () => sizes.options(slot), (option) => sizes.onPick(slot, option));
     const parts: Parts = {
       el,
       extra: q(".legend-extra"),
@@ -233,7 +255,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       rampMenu: slot === slots[0] ? initRampMenu(rampButton, ramp.of, ramp.initial, ramp.onPick) : null,
       ticks: q(".legend-ticks"),
       classes: q(".cp-classes"),
-      sizes: q<SVGSVGElement>(".scheme-key"),
+      sizes: q<SVGSVGElement>(":scope > .scheme-key"),
+      shapeSizes: sizesButton,
       status: q(".legend-status"),
       layer: null,
     };
@@ -263,6 +286,12 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     p.ramp.hidden = p.ticks.hidden = key?.kind !== "ramp";
     p.classes.hidden = key?.kind !== "classes";
     p.sizes.toggleAttribute("hidden", key?.kind !== "lines" && key?.kind !== "circles" && key?.kind !== "bars");
+    p.shapeSizes.hidden = !layer.sizes;
+    if (layer.sizes) {
+      drawSizes(p.shapeSizes.querySelector("svg")!, layer.sizes);
+      p.shapeSizes.disabled = !sizes;
+      p.shapeSizes.title = sizes?.title(p.el.dataset.slot!) ?? "";
+    }
     p.status.textContent = layer.status ?? "";
     if (key?.kind === "ramp") {
       // Locked, there's nothing to pick either.

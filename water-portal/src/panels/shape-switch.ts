@@ -5,7 +5,8 @@
  * keeps its own. Each shape is a slot of the legend: switched into a slot another map
  * is in, the map takes it, and the other moves to the slot it left (or another free one
  * it can be drawn in); only with none free is it replaced (the view moves the switched
- * map last in its checklist).
+ * map last in its checklist). How the circles and bars look (their colours, their full
+ * size) is a menu on their key (shape-style.ts).
  */
 import type { LayerLegend } from "./legend";
 import { slideSelection } from "./segmented";
@@ -15,7 +16,8 @@ export type Shape = "fill" | "circles" | "bars";
 /** All three, for a map of values: in the switch's order. */
 export const SHAPES: Shape[] = ["fill", "circles", "bars"];
 
-const LABELS: Record<Shape, [string, string]> = {
+/** Each shape's button: its label and title (also in the maps with their own switch: scheme-map.ts, effects-map.ts). */
+export const SHAPE_LABELS: Record<Shape, [string, string]> = {
   fill: ["Colours", "Colour each area by its value"],
   circles: ["Circles", "A circle on each area, its area by the value"],
   bars: ["3D bars", "A bar on each area, its height by the value (tilts the map)"],
@@ -28,8 +30,13 @@ export const SHAPE_NOTES: Record<Shape, string> = {
   bars: "Bar height shows the value",
 };
 
-/** A circle's radius at the reference value, px; above it, circles and bars grow to at most this many times its size. */
+/**
+ * A circle's radius at the reference value, px: on countries and major basins, and on
+ * small areas (sub-basins: many, close together). Above it, circles and bars grow to at
+ * most OVER times its size.
+ */
 const REF_R = 26;
+const SMALL_REF_R = 12;
 const OVER = 1.6;
 
 /**
@@ -37,17 +44,19 @@ const OVER = 1.6;
  * are: the reference value at full size, the `p` quantile of the absolute values (1:
  * the largest; lower, so a few outliers don't shrink the rest, which then grow up to
  * OVER × as big). `hold`: the reference as it is, or as locked (LayerLegend.hold).
+ * `small`: the areas are small (SMALL_REF_R).
  */
-export function shapeSizes(values: number[], p: number, hold: (ref: number) => number) {
+export function shapeSizes(values: number[], p: number, hold: (ref: number) => number, small = false) {
   const abs = values.map(Math.abs).filter((v) => v > 0 && Number.isFinite(v)).sort((a, b) => a - b);
   const ref = hold(abs[Math.min(abs.length - 1, Math.floor(p * abs.length))] || 1);
   const share = (v: number) => Math.min(OVER, Math.abs(v) / ref);
-  return { ref, radius: (v: number) => Math.max(1.5, REF_R * Math.sqrt(share(v))), height: share };
+  const r = small ? SMALL_REF_R : REF_R;
+  return { ref, radius: (v: number) => Math.max(1.5, r * Math.sqrt(share(v))), height: share };
 }
 
 export interface ShapeSwitch {
-  /** How the map titled `title` is drawn: as it was switched, else the first of `shapes`. */
-  shape(title: string, shapes: Shape[]): Shape;
+  /** How the map titled `title` is drawn: as it was switched, else `initial` (the first of `shapes`). */
+  shape(title: string, shapes: Shape[], initial?: Shape): Shape;
   /**
    * Each map on the map that has more than one shape gets its switch, in its section.
    * `shown`: all the maps on the map (those without shapes take their slot all the same).
@@ -93,9 +102,9 @@ export function initShapeSwitch(legend: LayerLegend, onChange: (title: string) =
   }
 
   return {
-    shape(title, shapes) {
+    shape(title, shapes, initial = shapes[0]) {
       const s = picked.get(title);
-      return s && shapes.includes(s) ? s : shapes[0];
+      return s && shapes.includes(s) ? s : initial;
     },
     show(shown) {
       onMap = shown;
@@ -106,7 +115,7 @@ export function initShapeSwitch(legend: LayerLegend, onChange: (title: string) =
         if (s.shapes !== map.shapes.join()) {
           s.shapes = map.shapes.join();
           s.el.innerHTML = map.shapes
-            .map((shape) => `<button type="button" role="radio" data-shape="${shape}" title="${LABELS[shape][1]}">${LABELS[shape][0]}</button>`)
+            .map((shape) => `<button type="button" role="radio" data-shape="${shape}" title="${SHAPE_LABELS[shape][1]}">${SHAPE_LABELS[shape][0]}</button>`)
             .join("");
         }
         const extra = legend.section(map.slot).extra;

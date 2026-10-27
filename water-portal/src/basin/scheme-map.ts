@@ -1,37 +1,37 @@
 /*
- * Basin view: the selected major basin's discharge and storage change maps drawn as a
- * water balance scheme (scheme.ts) rather than as sub-basin fills:
+ * Basin view: the selected major basin's discharge map drawn as a water balance scheme
+ * (scheme.ts) rather than as the sub-basins' colours, circles or 3D bars
+ * (panels/shape-switch.ts):
  *
- * - discharge as a network of lines along the rivers, as wide as the discharge they
- *   carry (linear, so widths add up where rivers join), with a slider in the legend for
- *   how far the lines may stray from the rivers;
- * - or discharge as particles streaming down the real rivers (river-flow-poc's wind map),
- *   the rivers as wide as their discharge (each sub-basin's outflow shared over its
- *   arcs by upstream area), so big rivers carry more of the particles;
- * - storage change as a dot on each sub-basin's river, its area the change, green as
- *   storage rises and red as it falls.
+ * - as a network of lines along the rivers, as wide as the discharge they carry
+ *   (linear, so widths add up where rivers join), with a slider in the legend for how
+ *   far the lines may stray from the rivers;
+ * - or as particles streaming down the real rivers (river-flow-poc's wind map), the
+ *   rivers as wide as their discharge (each sub-basin's outflow shared over its arcs by
+ *   upstream area), so big rivers carry more of the particles.
  *
- * Both at once, over another map's fills (the legend's layers, panels/legend.ts).
- * basin-stats.ts asks for it for the maps that allow it (BasinMapSpec.scheme: discharge
- * or storage change per sub-basin), and a switch in each one's legend section picks
- * between them and the fills. The legend shows a key to the widths or sizes in place of
- * the colour ramp. Sizes are set per map: the widest line is the basin's largest outflow
- * in the period, a dot of DS_PX the 98th percentile of the sub-basins' |ΔS| (with the
- * legend's lock on, those when it was put on: LayerLegend.hold).
+ * Over another map's fills (the legend's layers, panels/legend.ts). basin-stats.ts asks
+ * for it for the map that allows it (BasinMapSpec.scheme: discharge per sub-basin), and
+ * a switch in its legend section picks between it and the other maps' shapes. The legend
+ * shows a key to the widths in place of the colour ramp: the widest line is the basin's
+ * largest outflow in the period (with the legend's lock on, the one when it was put on:
+ * LayerLegend.hold). Also where storage change's circles stand: the scheme's dots, on
+ * each sub-basin's river (riverPoints).
  */
-import type { SchemeArrow, SchemeDot, SchemeLineStyle, SchemeParticles } from "../map/layers/basin-scheme";
+import type { SchemeArrow, SchemeLineStyle, SchemeParticles } from "../map/layers/basin-scheme";
 import type { WaterMap } from "../map/map";
 import type { SubBasin } from "../map/sub-basin-network";
 import type { Color } from "../map/theme";
 import { nice, type LayerLegend, type LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
 import { slideSelection } from "../panels/segmented";
+import { SHAPES, SHAPE_LABELS, type Shape } from "../panels/shape-switch";
 import { loadMiddles, loadRivers, type RiverNetwork } from "./rivers";
 import { buildScheme, lineQ, simplify, type Scheme } from "./scheme";
 
-export type SchemeKind = "Q" | "dS";
+export type SchemeKind = "Q";
 /** The legend's slot of each kind drawn as the scheme. */
-export const SCHEME_SLOT: Record<SchemeKind, "lines" | "dots"> = { Q: "lines", dS: "dots" };
+export const SCHEME_SLOT: Record<SchemeKind, "lines"> = { Q: "lines" };
 
 /** A map to draw as the scheme: its value per sub-basin, `key` names those (for the cache), and `range` the map and its unit (for the lock). */
 export interface SchemeLayer {
@@ -55,9 +55,11 @@ interface Options {
 export interface SchemeMap {
   /**
    * Whether a map of `kind` (BasinMapSpec.scheme; undefined: not allowed) of major basin
-   * `major` is drawn as the scheme (true) or as fills.
+   * `major` is drawn as the scheme (true) or in a shape (see shape).
    */
   isScheme(kind: SchemeKind | undefined, major: number | null): boolean;
+  /** The shape a map of `kind` is drawn in when it isn't the scheme. */
+  shape(kind: SchemeKind): Shape;
   /**
    * Show each kind's switch in its section of the legend (`shown`: the maps of the kinds
    * on the map, in the slot they're in), hiding the others.
@@ -68,20 +70,21 @@ export interface SchemeMap {
    * clear it). Returns each one's key for the legend, or why it isn't drawn (yet).
    */
   draw(major: number | null, layers: SchemeLayer[]): Map<SchemeKind, { status: string; key: LegendKey | null }>;
-  /** The line or dot under the pointer: its sub-basin and value (null: none). */
+  /** The line under the pointer: its sub-basin and value (null: none). */
   hovered(): { subBasin: number; value: number; kind: SchemeKind } | null;
+  /**
+   * A point on each sub-basin's river of major basin `major`, near its middle (the
+   * scheme's dots), or why there are none (yet): the river network loading, or failed.
+   */
+  riverPoints(major: number): Map<number, [number, number]> | string;
 }
 
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; scheme: Scheme; net: RiverNetwork | null };
-type Mode = "scheme" | "particles" | "fills";
+type Mode = "scheme" | "particles" | Shape;
 
 /** Line width (px) of the largest outflow in the basin. */
 const Q_PX = 12;
 const Q_MIN_PX = 0.8;
-/** Dot radius (px) of the 98th percentile of the sub-basins' |ΔS|. */
-const DS_PX = 12;
-const DS_MIN_PX = 2.5;
-const DS_MAX_PX = 20;
 /**
  * How the particles are drawn. For now the legend has a slider for each (TUNING), to
  * find the best settings; they start at these.
@@ -155,20 +158,17 @@ const MODES: Record<SchemeKind, [Mode, string, string][]> = {
   Q: [
     ["scheme", "Network", "Discharge along the rivers, from sub-basin to sub-basin"],
     ["particles", "Particles", "Discharge as particles streaming down the rivers"],
-    ["fills", "Sub-basins", "Discharge out of each sub-basin"],
-  ],
-  dS: [
-    ["scheme", "Dots", "Storage change as a dot on each sub-basin's river"],
-    ["fills", "Sub-basins", "Storage change of each sub-basin"],
+    ...SHAPES.map((s): [Mode, string, string] => [s, ...SHAPE_LABELS[s]]),
   ],
 };
+const isShape = (m: Mode): m is Shape => (SHAPES as Mode[]).includes(m);
 
 const $ = (id: string) => document.getElementById(id)!;
 const rgb = (c: Color | RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Options): SchemeMap {
   const schemes = new Map<number, Status>();
-  const mode: Record<SchemeKind, Mode> = { Q: "scheme", dS: "scheme" };
+  const mode: Record<SchemeKind, Mode> = { Q: "scheme" };
   let hover: { subBasin: number; value: number; kind: SchemeKind } | null = null;
   let lastMajor: number | null = null;
   const slider = $("bs-simplify");
@@ -178,11 +178,11 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
 
   // --- The switches, one per kind, in their layers' sections --------------------------------
   const toggles = {} as Record<SchemeKind, HTMLElement>;
-  for (const kind of ["Q", "dS"] as SchemeKind[]) {
+  for (const kind of ["Q"] as SchemeKind[]) {
     const toggle = document.createElement("div");
     toggle.className = "wb-vars";
     toggle.setAttribute("role", "radiogroup");
-    toggle.setAttribute("aria-label", kind === "Q" ? "Discharge shown" : "Storage change shown");
+    toggle.setAttribute("aria-label", "Discharge shown");
     toggle.style.margin = "6px 0 2px";
     toggle.hidden = true;
     toggle.innerHTML = MODES[kind]
@@ -290,11 +290,16 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
 
   return {
     isScheme(kind, major) {
-      return !!kind && major !== null && mode[kind] !== "fills";
+      return !!kind && major !== null && !isShape(mode[kind]);
+    },
+
+    shape(kind) {
+      const m = mode[kind];
+      return isShape(m) ? m : "fill";
     },
 
     showSwitches(shown, major) {
-      for (const kind of ["Q", "dS"] as SchemeKind[]) {
+      for (const kind of ["Q"] as SchemeKind[]) {
         const s = major === null ? undefined : shown.find((x) => x.kind === kind);
         const toggle = toggles[kind];
         toggle.hidden = !s;
@@ -337,7 +342,6 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       const ids = [...scheme.nodes.keys()];
       const lines: SchemeLineStyle[] = [];
       const arrows: SchemeArrow[] = [];
-      let dots: SchemeDot[] = [];
       let layer: SchemeParticles | undefined;
 
       if (q && particles) {
@@ -365,42 +369,16 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
         out.set("Q", { status: "", key: { kind: "lines", items: [top / 10, top / 2, top].map((v) => ({ value: v, size: width(v), color })) } });
       }
 
-      const ds = layers.find((l) => l.kind === "dS");
-      if (ds) {
-        const values = ids.map(ds.value).filter(Number.isFinite);
-        const ref = legend.hold(ds.range, quantile(values.map(Math.abs), 0.98) || 1);
-        const radius = (v: number) => Math.min(DS_MAX_PX, Math.max(DS_MIN_PX, Math.sqrt(Math.abs(v) / ref) * DS_PX));
-        dots = ids
-          .map((id) => ({ id, v: ds.value(id) }))
-          .filter(({ v }) => Number.isFinite(v))
-          .map(({ id, v }) => ({
-            position: scheme.dots.get(id)!,
-            radius: radius(v),
-            color: v >= 0 ? theme.storageRise : theme.storageFall,
-            subBasin: id,
-            value: v,
-          }))
-          // Big dots first, so small ones beside them stay visible.
-          .sort((a, b) => b.radius - a.radius);
-        const top = nice(ref);
-        const items = ([[top / 4, theme.storageRise, "+"], [top, theme.storageRise, "+"], [top, theme.storageFall, "−"]] as const)
-          .map(([v, c, sign]) => ({ value: v, size: radius(v), color: rgb(c), sign }));
-        out.set("dS", { status: "", key: { kind: "circles", items } });
-      }
-
-      // The tooltip's: a dot (as given by the map: its sub-basin and value) or a river.
-      const isDot = (item: { subBasin: number; value: number }) => dots.some((d) => d.subBasin === item.subBasin && d.value === item.value);
       map.setBasinScheme({
         key: mapKey,
         color: theme.scheme,
         casing: theme.schemeCasing,
         lines,
         arrows,
-        dots,
         particles: layer,
         subBasins: new Set(q ? ids : []),
         onHover(item) {
-          const next = item && { ...item, kind: (isDot(item) ? "dS" : "Q") as SchemeKind };
+          const next = item && { ...item, kind: "Q" as SchemeKind };
           if (next?.subBasin === hover?.subBasin && next?.value === hover?.value) return;
           hover = next;
           onHover();
@@ -412,6 +390,14 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
 
     hovered() {
       return drawnScheme ? hover : null;
+    },
+
+    riverPoints(major) {
+      // (A failed load is tried again once another basin has been picked, as in draw.)
+      if (major !== lastMajor) for (const [id, s] of schemes) if (s.kind === "error") schemes.delete(id);
+      lastMajor = major;
+      const s = status(major);
+      return s.kind === "ready" ? s.scheme.dots : s.kind === "loading" ? LOADING : s.message;
     },
   };
 }
@@ -466,10 +452,4 @@ function riverParticles(
   const { count, speed, fade, pointSize } = tune;
   const layer: SchemeParticles = { id: String(major), network: net, arcs, colors, q, subBasin: net.subBasin, count, speed, fade, pointSize };
   return { layer, ref, width };
-}
-
-/** The p-th quantile (0–1) of the values. */
-function quantile(values: number[], p: number): number {
-  const sorted = values.slice().sort((a, b) => a - b);
-  return sorted.length ? sorted[Math.min(sorted.length - 1, Math.round(p * (sorted.length - 1)))] : NaN;
 }

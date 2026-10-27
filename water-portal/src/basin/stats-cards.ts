@@ -374,8 +374,13 @@ export interface BasinMapSpec {
   listed?: Set<number>;
   /** Why the map has no values (yet), for the legend. */
   status?: string;
-  /** Discharge or storage change per sub-basin: can be drawn as the water balance scheme instead (scheme-map.ts). */
-  scheme?: "Q" | "dS";
+  /** Discharge per sub-basin: can be drawn as the water balance scheme instead (scheme-map.ts). */
+  scheme?: "Q";
+  /**
+   * Storage change per sub-basin: its circles and bars stand on each sub-basin's river
+   * (the scheme's dots, scheme.ts), and it's first drawn as circles, green rising and red falling.
+   */
+  onRivers?: boolean;
   /** Precipitation or evapotranspiration per sub-basin: can be drawn as rain or vapour instead (effects-map.ts). */
   effect?: "rain" | "vapour";
 }
@@ -413,7 +418,8 @@ function measureMap(c: BasinCtx, m: MeasureKey, level: "major" | "sub", mode: "v
     value: (id) => (anomaly ? anomalyOf(c, m, area(id)) : valueOf(c, m, area(id))),
     ramp: anomaly ? (m === "aeti" || m === "dS" ? STYLES.dS.ramp : BALANCE_RAMP) : def.ramp,
     scale: anomaly ? "diverging" : def.scale,
-    scheme: !anomaly && level === "sub" ? def.flux?.v : undefined,
+    scheme: !anomaly && level === "sub" && m === "Q" ? "Q" : undefined,
+    onRivers: !anomaly && level === "sub" && m === "dS",
     effect: !anomaly && level === "sub" ? EFFECTS[m] : undefined,
     only,
     listed,

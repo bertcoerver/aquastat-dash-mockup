@@ -4,7 +4,7 @@
  *
  * The areas' fills use deck.gl's own transitions (`transitions` on the layer): they
  * pair the values by index, which is fine for them, as each tile's features keep their
- * order. The circles, bars and scheme lines and dots don't: they're sorted by size, so
+ * order. The circles, bars and scheme lines don't: they're sorted by size, so
  * a step reorders them, and deck.gl would slide them from one place to another. Those
  * are eased here instead, paired by a key of each (its area, say).
  */

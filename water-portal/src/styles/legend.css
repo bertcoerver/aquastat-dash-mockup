@@ -274,11 +274,21 @@
   cursor: default;
   outline: none;
 }
-/* Basin view: the water balance scheme's key (line widths, dot sizes) in place of the ramp. */
+/* Basin view: the water balance scheme's key (line widths) in place of the ramp. */
 .scheme-key {
   display: block;
   margin-top: 6px;
   overflow: visible;
+}
+/* Circles' and bars' sizes (panels/shape-style.ts): a menu, under their colours' key. */
+.legend-sizes {
+  margin-top: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.legend-sizes > .scheme-key {
+  margin-top: 0;
 }
 .scheme-key[hidden] {
   display: none;

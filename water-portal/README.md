@@ -59,7 +59,7 @@ water-portal/
 │   ├── data/               Country, major basin and sub-basin lists (name, ID, bounding
 │   │   │                   box; for sub-basins also their major basin, where they drain and area)
 │   │   ├── rivers/         The river network per major basin (<id>.bin), for the water balance scheme
-│   │   ├── sub-basin-middles.json  A point inside each sub-basin, for its storage change dot
+│   │   ├── sub-basin-middles.json  A point inside each sub-basin, for its circle or bar
 │   │   └── model/          Precomputed Q and ΔS (not in git; see Notes: the water balance model)
 │   └── tiles/              Vector tiles ({z}/{x}/{y}.pbf)
 │       ├── m49/            Country areas
@@ -81,7 +81,7 @@ water-portal/
     │   ├── sub-basin-network.ts  Sub-basins upstream of a sub-basin
     │   ├── wapor-legend.ts Legend for the WaPOR raster, with the NDVI quality slider
     │   ├── wapor-player.ts Playback (Local view): frames, loading ahead, timing
-    │   ├── tween.ts        Eases the circles, bars and scheme lines and dots from one map to the next
+    │   ├── tween.ts        Eases the circles, bars and scheme lines from one map to the next
     │   └── layers/         One file per kind of layer
     │       ├── tile-urls.ts  Where each tile set lives (local or FAO's bucket)
     │       ├── countries.ts  M49 country areas (land; what clicks hit), the selected one's outline,
@@ -94,7 +94,7 @@ water-portal/
     │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
-    │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, storage change dots, particles
+    │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, particles
     │       ├── river-particles.ts  Particles streaming down the rivers (river-flow-poc's wind map)
     │       ├── rain.ts       Rain falling as densely as a grid says (river-flow-poc's rain page)
     │       ├── vapour.ts     Vapour rising as densely as a grid says, transpiration and evaporation
@@ -110,7 +110,7 @@ water-portal/
     │   ├── stats-cards.ts  The statistics topics: tiles, charts and each one's map
     │   ├── groups.ts       The major basins' groups: by where the water goes, by climate
     │   ├── rivers.ts       Loads a major basin's river network and the sub-basins' middles
-    │   ├── scheme.ts       The water balance scheme: lines along the rivers, dots, simplification
+    │   ├── scheme.ts       The water balance scheme: lines along the rivers, a point on each sub-basin's river, simplification
     │   ├── scheme-map.ts   The scheme on the map: the legend's switch, key and simplify slider
     │   ├── basin-grids.ts  WaPOR's PCP, AETI and T over a range on a grid over a major basin, masked to it
     │   ├── effects-map.ts  Precipitation as rain, evapotranspiration as vapour: the legend's switch, key and sliders
@@ -126,6 +126,7 @@ water-portal/
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
     │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
     │   ├── shape-switch.ts A map's switch: the areas' colours, circles or 3D bars
+    │   ├── shape-style.ts  How circles and bars look: a menu on their key (colours, full size)
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
     │   └── load-bar.ts     Load bar under the graph pane's heading while anything loads
     ├── toolbar/
@@ -181,25 +182,34 @@ water-portal/
 - **Map layers** (Basin and Country views, [src/panels/legend.ts](src/panels/legend.ts)): the
   legend's title is a checklist of the maps, and several can be on the map at once, one per way
   of drawing them (the checklist says which): a fill, circles, 3D bars, and the scheme's discharge
-  lines and storage change dots (Basin). Checking a map replaces the one drawn the
+  lines (Basin). Checking a map replaces the one drawn the
   same way; a previewed or pinned chart's map takes its place for the while.
 - **Colours, circles or 3D bars** ([src/panels/shape-switch.ts](src/panels/shape-switch.ts)): a
   switch in a map's legend section draws it as the areas' colours, a circle on each (area: the
   value) or a bar on each (height: the value), coloured as the fill would be; amounts (Country)
   are circles or bars. Switched into a shape another map is drawn in, the map takes it and the
   other moves to the shape this one left (or another free one it can take); only with none
-  free is it replaced. The change eases (map/tween.ts): the new circles grow and bars rise
+  free is it replaced. The basin's discharge, precipitation and evapotranspiration maps have
+  the same three in their own switch, beside their scheme or effect. The change eases (map/tween.ts): the new circles grow and bars rise
   while the old ones shrink away and the colours fade, and the switch's highlight, which goes
-  with its map from section to section, slides. Circles and bars of values
-  have the 98th percentile at full size, so a few outliers don't flatten the rest (those above
-  grow to at most 1.6 ×); an amount's circles have the largest. Bars tilt the map while shown
-  and stay the same height in pixels as you zoom. In the Basin view they stand at the sub-basins'
-  middles, and a major basin's at the middle of its sub-basin nearest the middle of them all.
-  The maps that have their own switch (discharge, storage change, precipitation and
-  evapotranspiration of a basin's sub-basins) don't get this one. Each layer has its
+  with its map from section to section, slides. Bars tilt the map while shown and stay the same
+  height in pixels as you zoom. In the Basin view they stand at the sub-basins' middles, and a
+  major basin's at the middle of its sub-basin nearest the middle of them all; storage change's
+  on each sub-basin's river near its middle (the scheme's, below: they wait for the river
+  network). Circles on sub-basins are smaller (12 px at the reference value) than on countries
+  and major basins (26 px), as there are many, close together. The maps that have their own
+  switch (discharge, precipitation and evapotranspiration of a basin's sub-basins) don't get this one.
+- **How circles and bars look** ([src/panels/shape-style.ts](src/panels/shape-style.ts)): a key
+  of their sizes, three of them labelled with their values, under their colours' key, is a menu,
+  as the colour ramp is (each map keeps its own). Colours: the map's own (its ramp or classes,
+  an amount's one colour) or, for a map of values either side of zero (a diverging ramp), green
+  above zero and red below, the key of sizes then showing both in place of the ramp. Full size:
+  the 98th percentile, so a few outliers don't flatten the rest (those above grow to at most
+  1.6 ×), or the largest value. Values start at the 98th percentile and an amount's circles
+  at the largest; storage change (Basin) starts as circles, green rising and red falling. Each layer has its
   section in the legend (its key: a colour ramp, classes or sizes), and the tooltip lists them all.
 - **The lock** (a padlock in each legend's title) keeps the ranges as they are, so other periods
-  and places compare: the colour ramps' domains, the circles', lines' and dots' sizes, and the
+  and places compare: the colour ramps' domains, the circles', bars' and lines' sizes, and the
   WaPOR colour map. Each map keeps the range it had when first shown since the lock went on, per
   unit (`LayerLegend.hold`); the stretch menu is off meanwhile. Picking another WaPOR variable unlocks.
 - **Circles** (proportional symbols) are drawn without a depth test like every layer,
@@ -226,7 +236,7 @@ water-portal/
 - **Changes on the map are eased in** (a 400 ms ease-out; while a range plays, evenly
   over the whole step, so the map flows from one step to the next). The areas' fills
   use deck.gl's `transitions`, which pair old and new values by index. The circles,
-  bars and scheme lines and dots are sorted by size, so a step reorders them and
+  bars and scheme lines are sorted by size, so a step reorders them and
   deck.gl would slide them between places; [src/map/tween.ts](src/map/tween.ts) eases
   those instead, paired by key (their area); ones that come grow from nothing, and ones
   that go shrink away (so a map switched to circles or bars grows in).
@@ -312,20 +322,20 @@ water-portal/
   keeping its length, and stops at the view's last one; played from there, it starts over
   from the first. Nothing is loaded ahead: each frame just sets the range.
 - **The water balance scheme** ([src/basin/scheme.ts](src/basin/scheme.ts), from
-  river-flow-poc's `scheme.html`): with a major basin selected, the discharge and storage change
-  maps of its sub-basins have a switch in the legend. Discharge: **Network** (lines along the
-  rivers, as wide as the discharge they carry), **Particles** (see below) or **Sub-basins** (fills). Storage change:
-  **Dots** (a dot on each sub-basin's river near its middle, its area the change, green rising,
-  red falling) or **Sub-basins**. In a sub-basin, the line runs from each upstream sub-basin's
+  river-flow-poc's `scheme.html`): with a major basin selected, the discharge map of its
+  sub-basins has a switch in the legend: **Network** (lines along the rivers, as wide as the
+  discharge they carry), **Particles** (see below), or the other maps' **Colours**, **Circles**
+  or **3D bars**. Each sub-basin has a point on its river near its middle (where storage
+  change's circles and bars stand). In a sub-basin, the line runs from each upstream sub-basin's
   outlet down the network to where the river leaves it; a piece carries the outflow of the
-  upstream sub-basins passing through it and, below the dot, the sub-basin's own gain (where it
+  upstream sub-basins passing through it and, below that point, the sub-basin's own gain (where it
   loses water, everything is scaled down to its outflow), so widths are linear and add up where
   rivers join, and each outlet's width is that sub-basin's outflow. Outlets are traced from
   upstream down rather than taken as the end of a sub-basin's biggest arc: the network has
   parallel duplicate arcs, and the river traced along one twin never reaches the other's end.
   Where the network doesn't connect, the line is straight; water from other major basins counts
-  as a sub-basin's own gain. The widest line is the basin's largest outflow in the period, a dot
-  of 12 px the 98th percentile of |ΔS|; the legend shows a key of sizes instead of the ramp. The
+  as a sub-basin's own gain. The widest line is the basin's largest outflow in the period; the
+  legend shows a key of widths instead of the ramp. The
   **Simplify** slider (discharge only) simplifies the lines between junctions (Douglas–Peucker)
   to 0–6 % of the basin's size (1.5 % at first): at 0 they are the network as stored, itself
   simplified to ~500 m from FAO's `rivers_world_47950`. The river network
@@ -344,8 +354,8 @@ water-portal/
   settings** copies them as JSON. The defaults are `PARTICLES` in `scheme-map.ts`.
 - **Precipitation as rain, evapotranspiration as vapour** ([src/basin/effects-map.ts](src/basin/effects-map.ts),
   from river-flow-poc's `rain.html` and `et.html`): with a major basin selected, the precipitation
-  and evapotranspiration maps of its sub-basins have a switch in the legend: **Sub-basins** (fills,
-  as before) or **Rain** / **Vapour**. Each is a layer of its own (the legend's `rain` and `vapour`
+  and evapotranspiration maps of its sub-basins have a switch in the legend: the other maps' **Colours**,
+  **Circles** or **3D bars**, or **Rain** / **Vapour**. Each is a layer of its own (the legend's `rain` and `vapour`
   slots), so both can show at once, over another map's fills. They follow WaPOR's rasters rather
   than the sub-basins' means ([src/basin/basin-grids.ts](src/basin/basin-grids.ts)): the mean
   mm/day over the period, added up from the same rasters the WaPOR map would use (wapor.ts's

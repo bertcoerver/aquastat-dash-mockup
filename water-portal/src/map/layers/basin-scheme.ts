@@ -1,4 +1,4 @@
-import { IconLayer, PathLayer, ScatterplotLayer } from "@deck.gl/layers";
+import { IconLayer, PathLayer } from "@deck.gl/layers";
 import type { Color } from "../theme";
 import type { Eased, Timing } from "../tween";
 import { RiverParticlesLayer, type ParticleNetwork } from "./river-particles";
@@ -25,17 +25,6 @@ export interface SchemeArrow {
   value: number;
 }
 
-/** A sub-basin's storage change dot. */
-export interface SchemeDot {
-  position: [number, number];
-  /** CSS pixels. */
-  radius: number;
-  color: Color;
-  subBasin: number;
-  /** Its storage change (for the tooltip). */
-  value: number;
-}
-
 /** Discharge as particles streaming down the rivers (RiverParticlesLayer). */
 export interface SchemeParticles {
   /** Names the network: a new one gets new layers. */
@@ -59,22 +48,20 @@ export interface BasinScheme {
   key: string;
   lines: SchemeLineStyle[];
   arrows: SchemeArrow[];
-  dots: SchemeDot[];
   particles?: SchemeParticles;
-  /** The lines' colour, and the edge around lines and dots (so they read over any fill). */
+  /** The lines' colour, and the edge around them (so they read over any fill). */
   color: Color;
   casing: Color;
   /** Sub-basins whose rivers the lines replace: the river tiles leave them out there. */
   subBasins: Set<number>;
-  /** The line, arrow or dot under the pointer: its sub-basin and value (null: none). */
+  /** The line or arrow under the pointer: its sub-basin and value (null: none). */
   onHover?(hovered: { subBasin: number; value: number } | null): void;
 }
 
-/** The lines, arrows and dots as drawn (eased by map.ts), and how the particles' rivers ease. */
+/** The lines and arrows as drawn (eased by map.ts), and how the particles' rivers ease. */
 export interface SchemeShown {
   lines: Eased<SchemeLineStyle>;
   arrows: Eased<SchemeArrow>;
-  dots: Eased<SchemeDot>;
   transition: Timing;
 }
 
@@ -93,16 +80,16 @@ const ARROW = {
 const HIT_WIDTH = 8;
 
 /**
- * The discharge network (lines as wide as their discharge, arrows at the mouths) and the
- * storage change dots, in pixels so they read the same at any zoom. Hovering the lines
- * uses a wider, invisible copy underneath, as the thin ones are hard to hit. Or, with
- * particles, the rivers they stream down in place of the lines (the dots still on top).
+ * The discharge network (lines as wide as their discharge, arrows at the mouths), in
+ * pixels so it reads the same at any zoom. Hovering the lines uses a wider, invisible
+ * copy underneath, as the thin ones are hard to hit. Or, with particles, the rivers they
+ * stream down in place of the lines.
  */
 export function basinSchemeLayers(scheme: BasinScheme | null, shown: SchemeShown) {
   if (!scheme) return [];
   const hover = (info: { object?: { subBasin: number; value: number } | null }) =>
     void scheme.onHover?.(info.object ? { subBasin: info.object.subBasin, value: info.object.value } : null);
-  if (scheme.particles) return [...particleLayers(scheme, scheme.particles, shown.transition), dotsLayer(scheme, shown.dots, hover)];
+  if (scheme.particles) return particleLayers(scheme, scheme.particles, shown.transition);
   const { lines, arrows } = shown;
   const common = {
     data: lines.items,
@@ -143,31 +130,7 @@ export function basinSchemeLayers(scheme: BasinScheme | null, shown: SchemeShown
       onHover: hover,
       parameters: { depthCompare: "always" },
     }),
-    dotsLayer(scheme, shown.dots, hover),
   ];
-}
-
-function dotsLayer(
-  scheme: BasinScheme,
-  dots: Eased<SchemeDot>,
-  hover: (info: { object?: { subBasin: number; value: number } | null }) => void,
-) {
-  return new ScatterplotLayer<SchemeDot>({
-    id: "scheme-dots",
-    data: dots.items,
-    getPosition: (d) => d.position,
-    getRadius: (d) => d.radius,
-    getFillColor: (d) => d.color,
-    getLineColor: scheme.casing,
-    radiusUnits: "pixels",
-    stroked: true,
-    lineWidthUnits: "pixels",
-    getLineWidth: 1,
-    updateTriggers: { getRadius: dots.key, getFillColor: dots.key },
-    pickable: Boolean(scheme.onHover),
-    onHover: hover,
-    parameters: { depthCompare: "always" },
-  });
 }
 
 const pathData = new WeakMap<ParticleNetwork, object>();

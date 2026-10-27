@@ -14,7 +14,7 @@ import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
 import { barsLayer, type Bar } from "./layers/bars";
-import { basinSchemeLayers, PARTICLES_ID, type BasinScheme, type SchemeArrow, type SchemeDot, type SchemeLineStyle } from "./layers/basin-scheme";
+import { basinSchemeLayers, PARTICLES_ID, type BasinScheme, type SchemeArrow, type SchemeLineStyle } from "./layers/basin-scheme";
 import { EFFECTS_ID, effectGroundLayers, effectLayers, type BasinEffects } from "./layers/basin-effects";
 import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
@@ -67,8 +67,7 @@ export interface WaterMap {
   setBasinStatFills(fills: BasinStatFills | null): void;
   /**
    * Basin view: the water balance scheme (basin-stats.ts): discharge as lines along the
-   * rivers, in place of the river tiles' in their sub-basins, and storage change as dots
-   * (null: none). By `key`, as above.
+   * rivers, in place of the river tiles' in their sub-basins (null: none). By `key`, as above.
    */
   setBasinScheme(scheme: BasinScheme | null): void;
   /** Basin view: precipitation as rain, evapotranspiration as vapour (basin-stats.ts; null: none). By `key`, as above. */
@@ -183,11 +182,10 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     // (A line's path is the scheme's own: the same array as long as the scheme is.)
     lines: tween<SchemeLineStyle>((l) => l.path, { width: 0 }),
     arrows: tween<SchemeArrow>((a) => a.subBasin, { size: 0 }),
-    dots: tween<SchemeDot>((d) => d.subBasin, { radius: 0 }),
   };
   const schemeShown = () => {
     const shown = <T>(t: { get(): { key: string; items: T[] } | null }) => t.get() ?? { key: "", items: [] };
-    return { lines: shown(schemeTweens.lines), arrows: shown(schemeTweens.arrows), dots: shown(schemeTweens.dots), transition: timing() };
+    return { lines: shown(schemeTweens.lines), arrows: shown(schemeTweens.arrows), transition: timing() };
   };
 
   const map = new maplibregl.Map({
@@ -572,7 +570,6 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       state.scheme = scheme;
       schemeTweens.lines.set(scheme && { key: scheme.key, items: scheme.lines });
       schemeTweens.arrows.set(scheme && { key: scheme.key, items: scheme.arrows });
-      schemeTweens.dots.set(scheme && { key: scheme.key, items: scheme.dots });
       render();
       animate();
     },

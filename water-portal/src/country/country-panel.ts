@@ -12,7 +12,8 @@
  * the selected country in view where both fit (see flyToArea).
  * Hovering a country on the map shows its value. A switch in a map's legend section draws
  * it as the countries' colours, circles or 3D bars (panels/shape-switch.ts); the amounts'
- * maps are circles or bars. A colour ramp in the legend is a menu
+ * maps are circles or bars. Their key of sizes is a menu of how they look
+ * (panels/shape-style.ts: the map's colours or by sign, the full size). A colour ramp in the legend is a menu
  * of how much of the countries' values it spans (panels/ramp-menu.ts), unless the map
  * has a fixed range (a share, 0–100%).
  *
@@ -23,7 +24,7 @@ import { flyTo, type Box } from "../map/fly-to";
 import { mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale } from "../basin/variables";
-import { SLOT_HINTS, initLayerLegend, nice, onePerSlot, toggled, type LegendKey } from "../panels/legend";
+import { SLOT_HINTS, initLayerLegend, onePerSlot, toggled, type LegendKey, type SizesKey } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import { dkY } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
@@ -32,6 +33,7 @@ import { WORLD, latestYear, loadTopic, periodLabel, type Period, type Topic } fr
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { slideSelection } from "../panels/segmented";
 import { SHAPE_NOTES, SHAPES, initShapeSwitch, shapeSizes, type Shape } from "../panels/shape-switch";
+import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } from "../panels/shape-style";
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
 
@@ -197,6 +199,23 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
         drawMap();
       },
     },
+    // How a map's circles or bars look: a menu on their sizes.
+    sizes: {
+      options(slot) {
+        const spec = current?.layers.find((l) => l.slot === slot)?.spec;
+        return spec ? styles.menu(spec.title, initialStyle(spec, slot as Shape), signed(spec)) : { options: [], current: [] };
+      },
+      onPick(slot, id) {
+        const spec = current?.layers.find((l) => l.slot === slot)?.spec;
+        if (!spec) return;
+        styles.pick(spec.title, id);
+        drawMap();
+      },
+      title(slot) {
+        const layer = current?.layers.find((l) => l.slot === slot);
+        return layer ? describeStyle(styleOf(layer.spec, layer.slot), layer.slot) : "";
+      },
+    },
     // Clicking a class's swatch hides that class on the map, or shows it again.
     onClass(slot, index) {
       const set = state.hiddenClasses.get(current?.layers.find((l) => l.slot === slot)?.spec.id ?? "");
@@ -232,6 +251,12 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     spec.style.kind === "circles" ? ["circles", "bars"] : spec.style.kind === "categories" ? ["fill"] : SHAPES;
   /** How a map is drawn (its slot). */
   const slotOf = (spec: MapSpec): Shape => shapes.shape(spec.title, shapesOf(spec));
+  // How a map's circles or bars look: its colours, or by sign; an amount's largest circle
+  // at full size, else the 98th percentile.
+  const styles = initShapeStyles();
+  const initialStyle = (spec: MapSpec, slot: Shape): ShapeStyle => ({ colours: "map", full: spec.style.kind === "circles" && slot === "circles" ? 1 : 0.98 });
+  const signed = (spec: MapSpec) => spec.style.kind === "ramp" && spec.style.scale === "diverging";
+  const styleOf = (spec: MapSpec, slot: Shape) => styles.get(spec.title, initialStyle(spec, slot), signed(spec));
 
   // The map tooltip follows the pointer (to its right).
   const mapEl = map.map.getContainer();
@@ -382,8 +407,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   // --- The map ---------------------------------------------------------------------------------
-  /** The reference bar's height in the legend, px. */
-  const BAR_KEY_PX = 24;
 
   function drawMap() {
     if (!current) return;
@@ -399,7 +422,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     for (const { spec } of layers) if (!state.hiddenClasses.has(spec.id)) state.hiddenClasses.set(spec.id, new Set(spec.hidden));
     const hiddenKey = layers.map((l) => [...state.hiddenClasses.get(l.spec.id)!].sort().join(",")).join("|");
     const key =
-      `${layers.map((l) => `${l.spec.id}:${l.slot}`).join()}:${state.stretch}:${ctx.label}:${area ?? ""}:` +
+      `${layers.map((l) => `${l.spec.id}:${l.slot}:${Object.values(styleOf(l.spec, l.slot)).join("/")}`).join()}:${state.stretch}:${ctx.label}:${area ?? ""}:` +
       `${ctx.country?.m49 ?? ""}:${hiddenKey}:${legend.lockKey()}`;
     const theme = map.theme;
     // Countries outside the rows' countries are hidden (plain land), like a class switched
@@ -410,6 +433,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const symbols: CountrySymbol[] = [];
     const bars: Bar[] = [];
     const keys = new Map<string, LegendKey | null>();
+    const sizes = new Map<string, SizesKey>();
+    const css = (c: Color, alpha = 1) => `rgb(${c[0]} ${c[1]} ${c[2]} / ${alpha})`;
 
     for (const { spec, slot } of layers) {
       const p = paint(spec, picked ? new Set<number>() : null, outside);
@@ -421,29 +446,28 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
         }
         continue;
       }
-      // Circles (area) or bars (height) by the value: an amount's largest circle at full
-      // size, else the 98th percentile (locked: as when the lock was put on).
+      // Circles (area) or bars (height) by the value, the style's at full size (locked: as
+      // when the lock was put on); in the map's colours, or by sign.
+      const style = styleOf(spec, slot);
+      const bySign = style.colours === "sign";
       const values = countries.map((m49) => Math.abs(spec.value(m49)));
-      const size = shapeSizes(values, spec.style.kind === "circles" && slot === "circles" ? 1 : 0.98, (ref) => legend.hold(`${spec.title}:${spec.unit}:${slot}`, ref));
+      const size = shapeSizes(values, style.full, (ref) => legend.hold(`${spec.title}:${spec.unit}:${slot}:${style.full}`, ref));
       countries.forEach((m49, i) => {
         const v = values[i];
         const center = centerOf.get(m49);
-        const c = p.color(m49);
-        if (!center || !(v > 0) || !c || c === "off") return;
+        const own = p.color(m49);
+        if (!center || !(v > 0) || !own || own === "off") return;
+        const c = bySign ? signColor(spec.value(m49), theme.storageRise, theme.storageFall) : own;
         if (slot === "circles") {
           // (An amount's in white, as before; others in a darker shade, as their colours can be pale.)
           const line: Color = spec.style.kind === "circles" ? [255, 255, 255, 220] : [c[0] * 0.6, c[1] * 0.6, c[2] * 0.6, 230];
           symbols.push({ id: `${m49}`, position: center, radius: size.radius(v), fill: [c[0], c[1], c[2], 170], line });
         } else bars.push({ position: center, height: size.height(v), color: [c[0], c[1], c[2], 255] });
       });
-      // An amount's key is of its sizes (other maps keep their colours' key).
-      if (spec.style.kind === "circles") {
-        const top = nice(size.ref);
-        const color = hexToColor(spec.style.color);
-        const css = `rgb(${color[0]} ${color[1]} ${color[2]} / ${slot === "circles" ? 0.6 : 1})`;
-        const px = (v: number) => (slot === "circles" ? size.radius(v) : BAR_KEY_PX * size.height(v));
-        keys.set(slot, { kind: slot, items: [top / 10, top / 2, top].map((v) => ({ value: v, size: px(v), color: css })) });
-      }
+      // The key of their sizes; by sign, or an amount's (in one colour), in place of the colours'.
+      const one = spec.style.kind === "circles" ? css(hexToColor(spec.style.color), slot === "circles" ? 0.6 : 1) : css(theme.border, 0.6);
+      sizes.set(slot, sizeKey(slot, size, style, { one, rise: css(theme.storageRise), fall: css(theme.storageFall) }));
+      if (bySign || spec.style.kind === "circles") keys.set(slot, null);
     }
     // Small circles on top of big ones.
     symbols.sort((a, b) => b.radius - a.radius);
@@ -475,6 +499,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
         period: shownPeriod(ctx),
         unit: spec.unit,
         key: keys.get(slot) ?? null,
+        sizes: sizes.get(slot) ?? null,
         // Once, under the last section.
         status: slot === layers.at(-1)!.slot ? status : "",
       })),

@@ -1,6 +1,6 @@
 /*
- * The river network of a major basin, for the Basin view's discharge network and storage
- * change dots (scheme.ts).
+ * The river network of a major basin, for the Basin view's discharge network and where
+ * storage change's circles stand (scheme.ts).
  *
  * The network (public/data/rivers/<id>.bin, scripts/build-rivers.mjs) is FAO's river arcs
  * with their upstream area (from a flow accumulation raster), their sub-basin and the arc

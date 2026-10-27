@@ -1,7 +1,8 @@
 /*
  * Basin view: the selected major basin's precipitation as rain, and its
  * evapotranspiration as vapour rising through a heat shimmer (river-flow-poc's rain and
- * evapotranspiration pages), instead of as sub-basin fills.
+ * evapotranspiration pages), instead of as the sub-basins' colours, circles or 3D bars
+ * (panels/shape-switch.ts).
  *
  * Both follow WaPOR's rasters over the period (basin-grids.ts: the mean per day, on a
  * grid over the basin, nothing outside it), so they're finer than the sub-basins: the
@@ -12,9 +13,9 @@
  *
  * Like the scheme (scheme-map.ts), basin-stats.ts asks for it for the maps that allow it
  * (BasinMapSpec.effect: precipitation or evapotranspiration per sub-basin), and a switch
- * in each one's legend section picks between it and the fills. For now each section also
- * has sliders for how they're drawn (RAIN_TUNING, VAPOUR_TUNING), to find the best
- * settings.
+ * in each one's legend section picks between it and the other maps' shapes. For now
+ * each section also has sliders for how they're drawn (RAIN_TUNING, VAPOUR_TUNING), to
+ * find the best settings.
  */
 import type { BasinEffects, EffectGround } from "../map/layers/basin-effects";
 import type { EffectGrid } from "../map/layers/rain";
@@ -23,6 +24,7 @@ import type { Color } from "../map/theme";
 import type { LayerLegend, LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
 import { slideSelection } from "../panels/segmented";
+import { SHAPES, SHAPE_LABELS, type Shape } from "../panels/shape-switch";
 import type { MajorBasin } from "../toolbar/place-picker";
 import type { DayRange } from "../toolbar/range-rules";
 import { loadBasinGrid, type BasinGrid } from "./basin-grids";
@@ -41,6 +43,8 @@ interface Options {
 export interface EffectsMap {
   /** Whether a map of `kind` (BasinMapSpec.effect; undefined: not allowed) of major basin `major` is drawn as the effect. */
   isEffect(kind: EffectKind | undefined, major: number | null): boolean;
+  /** The shape a map of `kind` is drawn in when it isn't the effect. */
+  shape(kind: EffectKind): Shape;
   /** Show each kind's switch in its section of the legend (`shown`: the maps of the kinds on the map, in their slots). */
   showSwitches(shown: { kind: EffectKind; slot: string }[], major: number | null): void;
   /**
@@ -50,7 +54,7 @@ export interface EffectsMap {
   draw(major: number | null, range: DayRange | null, kinds: EffectKind[]): Map<EffectKind, { status: string; key: LegendKey | null }>;
 }
 
-type Mode = "fills" | "effect";
+type Mode = Shape | "effect";
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; grids: BasinGrid[] };
 type RGB = [number, number, number];
 
@@ -172,11 +176,11 @@ const VAPOUR_GROUND: [number, Color][] = [
 
 const MODES: Record<EffectKind, [Mode, string, string][]> = {
   rain: [
-    ["fills", "Sub-basins", "Precipitation of each sub-basin"],
+    ...SHAPES.map((s): [Mode, string, string] => [s, ...SHAPE_LABELS[s]]),
     ["effect", "Rain", "Precipitation as rain, as much as WaPOR's raster says"],
   ],
   vapour: [
-    ["fills", "Sub-basins", "Evapotranspiration of each sub-basin"],
+    ...SHAPES.map((s): [Mode, string, string] => [s, ...SHAPE_LABELS[s]]),
     ["effect", "Vapour", "Evapotranspiration as vapour rising, as much as WaPOR's raster says"],
   ],
 };
@@ -187,7 +191,7 @@ const rgb3 = (c: Color): RGB => [c[0], c[1], c[2]];
 export function initEffectsMap({ map, majorBasins, legend, onChange }: Options): EffectsMap {
   const boxes = new Map(majorBasins.map((b) => [b.id, b.bbox]));
   const statuses = new Map<string, Status>();
-  const mode: Record<EffectKind, Mode> = { rain: "fills", vapour: "fills" };
+  const mode: Record<EffectKind, Mode> = { rain: "fill", vapour: "fill" };
   let lastMajor: number | null = null;
 
   // --- The switches, one per kind, in their layers' sections --------------------------------
@@ -254,6 +258,11 @@ export function initEffectsMap({ map, majorBasins, legend, onChange }: Options):
   return {
     isEffect(kind, major) {
       return !!kind && major !== null && boxes.has(major) && mode[kind] === "effect";
+    },
+
+    shape(kind) {
+      const m = mode[kind];
+      return m === "effect" ? "fill" : m;
     },
 
     showSwitches(shown, major) {
