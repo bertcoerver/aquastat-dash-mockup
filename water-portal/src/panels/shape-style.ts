@@ -30,7 +30,7 @@ const BAR_KEY_PX = 24;
 export interface ShapeStyles {
   /** A map's style: as picked in its menu, else `initial`. `signed`: whether it can be coloured by sign. */
   get(title: string, initial: ShapeStyle, signed: boolean): ShapeStyle;
-  /** Its menu: the colours (sign only when `signed`) and the full size, the style's checked. */
+  /** Its menu: the colours (only when `signed`: else the map's are the only ones) and the full size, the style's checked. */
   menu(title: string, initial: ShapeStyle, signed: boolean): { options: MenuOption[]; current: string[] };
   /** An option of its menu picked. */
   pick(title: string, id: string): void;
@@ -46,7 +46,7 @@ export function initShapeStyles(): ShapeStyles {
     get,
     menu(title, initial, signed) {
       const style = get(title, initial, signed);
-      const colours: ShapeColours[] = signed ? ["map", "sign"] : ["map"];
+      const colours: ShapeColours[] = signed ? ["map", "sign"] : [];
       return {
         options: [
           ...colours.map((c) => ({ id: `colours:${c}`, label: COLOURS[c], hint: "Colours" })),

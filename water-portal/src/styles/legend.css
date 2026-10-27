@@ -390,6 +390,18 @@
   margin-left: auto;
   padding-left: 12px;
 }
+/* A group's heading (title-menu.ts), with a line above it after the first. */
+.title-menu-group {
+  padding: 8px 8px 2px;
+  font: 600 10px/1.4 var(--sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.title-menu-group:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+}
 /* The particles' settings (basin/scheme-map.ts): for now, sliders to find the best ones. */
 .particle-tuning:not([hidden]) {
   display: grid;

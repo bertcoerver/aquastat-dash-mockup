@@ -17,6 +17,8 @@
  *
  * An option can have a row of icons to its right, one of them picked (how a map is
  * drawn, say): a click on one, or ←/→ on the option, picks another (onIcon).
+ *
+ * Options can be in groups: a heading goes before each group (its options together).
  */
 
 export interface MenuOption {
@@ -24,6 +26,8 @@ export interface MenuOption {
   label: string;
   /** A note to the right, e.g. how the option is drawn. */
   hint?: string;
+  /** Its group's name, a heading above the group. */
+  group?: string;
   /** Icons to the right (`html`: an <svg>), and the id of the one picked. */
   icons?: { id: string; html: string; label: string; title: string }[];
   icon?: string;
@@ -66,7 +70,7 @@ export function initTitleMenu(
     chosen = new Set(Array.isArray(current) ? current : current === null ? [] : [current]);
     shown = all;
     list.replaceChildren(
-      ...all.map((o, i) => {
+      ...all.flatMap((o, i) => {
         const li = document.createElement("li");
         li.id = `${list.id}-${i}`;
         li.role = "option";
@@ -90,7 +94,12 @@ export function initTitleMenu(
           const picked = o.icons.find((c) => c.id === o.icon);
           if (picked) li.setAttribute("aria-label", `${o.label}, as ${picked.label.toLowerCase()}`);
         }
-        return li;
+        if (!o.group || o.group === all[i - 1]?.group) return [li];
+        const heading = document.createElement("li");
+        heading.className = "title-menu-group";
+        heading.role = "presentation";
+        heading.textContent = o.group;
+        return [heading, li];
       }),
     );
     return all.findIndex((o) => chosen.has(o.id));

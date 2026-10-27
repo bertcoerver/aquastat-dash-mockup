@@ -5,7 +5,8 @@
  * each with number tiles and chart cards (cards.ts).
  *
  * Every tile and card has a map that goes with it: hovering previews it, clicking pins
- * it (map-drivers.ts); unpinned, the map shows the topic's first tile. Within a card,
+ * it (map-drivers.ts); unpinned, the map shows the topic's first tile. The legend lists the
+ * maps of all the topics, so maps of different topics can be shown together. Within a card,
  * hovering a row picks out that area's countries on the map, hovering a series in a
  * legend maps that series, and clicking a year on a line chart sets the year in the
  * top bar. For a range of years, every value is the mean of its yearly values. Clicking a row of a region (or country) also flies the map there, keeping
@@ -135,9 +136,10 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     render();
   });
 
-  function load() {
-    const topic = state.topic;
-    if (state.status.get(topic)?.kind === "ready") return;
+  /** Load a topic's data: the tab's, or that of a map of another topic on the map. */
+  function load(topic = state.topic) {
+    const kind = state.status.get(topic)?.kind;
+    if (kind === "ready" || kind === "loading") return;
     state.status.set(topic, { kind: "loading" });
     loadTopic(topic).then(
       () => {
@@ -174,8 +176,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   });
 
   // --- The legend ----------------------------------------------------------------------------
-  // Its title is a checklist of the topic's maps, each once (several charts can share one),
-  // in the order of the tiles and cards, with the icons of how each can be drawn; each one
+  // Its title is a checklist of all the topics' maps, each once (several charts can share one),
+  // under their topics, in the order of the tiles and cards, with the icons of how each can be drawn; each one
   // on the map has a section (panels/legend.ts). A map not on the map is offered in a free
   // slot, if there is one. Checking one unpins the chart that was pinned (its map stays).
   const legend = initLayerLegend($("cp-legend"), {
@@ -186,10 +188,10 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const ctx = current.ctx;
       const on = current.layers.map((l) => optionId(ctx, l.spec));
       const taken = new Set<string>(current.layers.map((l) => l.slot));
-      const options = menuMaps(ctx).map(({ id, spec }) => {
+      const options = menuMaps(ctx).map(({ id, spec, group }) => {
         const m = shapesOf(spec);
         const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
-        return { id, label: spec.title, icons, icon: on.includes(id) ? m.current : freeShape(m, taken) };
+        return { id, label: spec.title, group, icons, icon: on.includes(id) ? m.current : freeShape(m, taken) };
       });
       return { options, current: on };
     },
@@ -256,14 +258,13 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     onLock: () => drawMap(),
   });
 
-  /** The topic's maps, each once, in the order of the tiles and cards. */
-  function menuMaps(ctx: Ctx): { id: string; spec: MapSpec }[] {
-    const topic = topicDef();
+  /** All the topics' maps, each once (under the first topic that has it), in the order of the tiles and cards. */
+  function menuMaps(ctx: Ctx): { id: string; spec: MapSpec; group: string }[] {
     const seen = new Set<string>();
-    return [
-      ...topic.tiles.map((t) => ({ id: t.id, spec: t.map(ctx) })),
-      ...topic.cards.map((c) => ({ id: c.id, spec: c.map(ctx, null) })),
-    ].filter(({ spec }) => !seen.has(spec.title) && !!seen.add(spec.title));
+    return TOPICS.flatMap((topic) => [
+      ...topic.tiles.map((t) => ({ id: t.id, spec: t.map(ctx), group: topic.label })),
+      ...topic.cards.map((c) => ({ id: c.id, spec: c.map(ctx, null), group: topic.label })),
+    ]).filter(({ spec }) => !seen.has(spec.title) && !!seen.add(spec.title));
   }
   /** The checklist's option for a map (by its title, as charts share maps). */
   const optionId = (ctx: Ctx, spec: MapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
@@ -313,6 +314,9 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   const topicDef = (): TopicDef => TOPICS.find((t) => t.id === state.topic)!;
+  /** The topic a tile or card is in: the tab's, else the first other that has it (undefined: none). */
+  const topicOf = (id: string): TopicDef | undefined =>
+    [topicDef(), ...TOPICS].find((t) => t.tiles.some((m) => m.id === id) || t.cards.some((c) => c.id === id));
 
   function context(): Ctx | null {
     const latest = latestYear();
@@ -419,7 +423,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   /** The maps on the map: those checked in the legend (else the first tile's), with the previewed or pinned one in its slot. */
   function shownLayers(ctx: Ctx): Layer[] {
     const topic = topicDef();
-    const known = (id: string) => topic.tiles.some((t) => t.id === id) || topic.cards.some((c) => c.id === id);
+    const known = (id: string) => !!topicOf(id);
     const kept = state.chosen.get(state.topic);
     const chosen = (kept ?? []).filter(known);
     const lead = leadDriver();
@@ -438,7 +442,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   function specFor(ctx: Ctx, d: Driver): MapSpec {
-    const topic = topicDef();
+    const topic = topicOf(d.id) ?? topicDef();
     const tile = topic.tiles.find((t) => t.id === d.id);
     if (tile) return tile.map(ctx);
     const card = topic.cards.find((c) => c.id === d.id) ?? topic.cards[0];
@@ -456,6 +460,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const { ctx } = current;
     const layers = shownLayers(ctx);
     current.layers = layers;
+    // A map of another topic needs its data (drawn again once loaded).
+    for (const { d } of layers) load(topicOf(d.id)?.id);
     // A series hovered in the pinned card keeps the pinned row's countries picked out.
     const area = areaOf(drivers.preview()) ?? areaOf(state.pinned.get(state.topic));
     // A row of a regional chart picks out its countries.
