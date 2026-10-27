@@ -156,7 +156,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       customAttribution: "FAO M49 &amp; SDG 6 basins · HydroLAKES · HydroSHEDS",
     },
   });
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: false }), "bottom-right");
+  // The URL keeps the place and the zoom, not a tilt or turn (the bars' tilt, say):
+  // always opened flat, north up.
+  map.jumpTo({ pitch: 0, bearing: 0 });
+  // The compass shows the tilt too: dragged, it turns and tilts the map; clicked, it
+  // puts it back flat, north up.
+  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
   // MapLibre spells the credits out at first, until the map is moved; keep them to the
   // ⓘ from the start (they show on a click).
   const attrib = container.querySelector(".maplibregl-ctrl-attrib")!;
