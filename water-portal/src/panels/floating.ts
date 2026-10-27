@@ -29,14 +29,20 @@ export function makeResizable(pane: HTMLElement, key: string, { centered = false
   });
 }
 
-/** Forget every pane's width and lay the page out afresh. */
+/** Forget every pane's width: each goes back to its CSS's. (Not by reloading: in Safari, a reload from script leaves the map drawn in a strip at the top.) */
 export function resetLayout() {
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
     // Nothing was kept, then.
   }
-  location.reload();
+  for (const key of Object.keys(widths)) delete widths[key];
+  for (const pane of [...panes.values()].flat()) {
+    pane.style.removeProperty("width");
+    pane.style.removeProperty("--pane-w");
+    pane.classList.remove("sized");
+  }
+  window.dispatchEvent(new Event("panes-moved"));
 }
 
 function resizeFrom(down: PointerEvent, pane: HTMLElement, key: string, grip: HTMLElement) {

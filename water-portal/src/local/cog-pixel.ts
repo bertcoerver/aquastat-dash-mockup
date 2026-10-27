@@ -8,14 +8,22 @@
  * WaPOR raster before the pixel's tile. Only the full resolution image is needed here,
  * so this reads its IFD itself (the first, in a COG):
  *
- *   1. the first 16 KiB: the header and the first IFD (a COG keeps them at the start),
- *      then the georeferencing, which GDAL puts after the tile offsets (~150 bytes)
+ *   1. the first KiB: the header and the first IFD (a COG keeps them at the start; a
+ *      WaPOR one ends at byte 616), then the georeferencing, which GDAL puts after the
+ *      tile offsets (~150 bytes)
  *   2. the tile's entries in TileOffsets and TileByteCounts (8 bytes each, at once)
  *   3. the tile, decoded by the map's decoder pool (it's compressed as a whole)
  *
- * About 70 KB and 5 requests per raster; the parsed IFD is kept, so another point in
- * the same raster needs only 2 and 3. The compressed tiles are kept too (see TILE_CACHE_BYTES):
- * a WaPOR tile spans 0.75° at 300 m, so points clicked near each other often share one.
+ * The rasters in one folder (a WaPOR mapset: every dekad of a variable at a level) are
+ * laid out alike: the same grid, and the same IFD at the same place. So after the
+ * first, a raster is read with that one's layout (see LAYOUTS): 2 and 3 straight away,
+ * while 1 is read alongside, only its first KiB, to check that it is laid out the same
+ * (else it's read again on its own). That's two round trips per raster instead of four,
+ * and about 40 KB of a WaPOR L1 dekad, nearly all of it the tile.
+ *
+ * The parsed IFD is kept, so another point in the same raster needs only 2 and 3. The
+ * compressed tiles are kept too (see TILE_CACHE_BYTES): a WaPOR tile spans 0.75° at
+ * 300 m, so points clicked near each other often share one.
  *
  * The map reads whole tiles this way too (cogTile), where a raster is sampled onto a
  * finer grid at full resolution (see wapor.ts, resampledTile).
@@ -25,7 +33,8 @@
 import { defaultDecoderPool, type DecoderMetadata, type DecoderPool, type RasterTypedArray } from "@developmentseed/geotiff";
 import type { LngLat } from "../map/places";
 
-const HEADER_BYTES = 16 * 1024;
+/** The first read of a raster: its header and first IFD, read on if the IFD is longer. */
+const HEADER_BYTES = 1024;
 
 /** TIFF tags read from the first IFD. */
 const TAG = {
@@ -71,9 +80,17 @@ interface Image {
   tileByteCounts: Entry;
   compression: Parameters<DecoderPool["decode"]>[1];
   metadata: DecoderMetadata;
+  /** Its IFD's entries, and the values of those in the header: the same in rasters laid out alike. */
+  layout: string;
+  /**
+   * Read with another raster's layout (see LAYOUTS): resolves once its own IFD is
+   * found to be the same, rejects with LayoutChanged if it isn't.
+   */
+  checked?: Promise<void>;
 }
 
 class Missing extends Error {}
+class LayoutChanged extends Error {}
 
 /** A request that hangs would hold up the whole series: it's given up on, and tried again. */
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -100,31 +117,97 @@ async function readRangeOnce(url: string, start: number, length: number, signal:
   return res.status === 206 ? buffer : buffer.slice(start, start + length);
 }
 
-/** Parsed IFDs, by URL (a few hundred numbers each). Failed reads are tried again. */
+/**
+ * Parsed IFDs, by URL (a few hundred numbers each). Failed reads are tried again. The
+ * header reads are shared by whoever asks for the raster, so they aren't aborted by
+ * any one of them (they're a KiB or so).
+ */
 const images = new Map<string, Promise<Image>>();
 
-function openImage(url: string, signal?: AbortSignal): Promise<Image> {
+/** A raster read on its own, by folder: the layout the folder's other rasters are read with. */
+const LAYOUTS = new Map<string, Promise<Image>>();
+const folderOf = (url: string) => url.slice(0, url.lastIndexOf("/"));
+
+/** A raster's image: with its folder's layout if there is one, unless `own`. */
+function openImage(url: string, own = false): Promise<Image> {
   let image = images.get(url);
   if (!image) {
-    image = readImage(url, signal);
+    const folder = folderOf(url);
+    const layout = own ? undefined : LAYOUTS.get(folder);
+    // (If the folder's first raster can't be read, this one is read on its own.)
+    image = layout ? layout.then((like) => alike(url, like), () => readImage(url)) : readImage(url);
+    if (!LAYOUTS.has(folder)) {
+      LAYOUTS.set(folder, image);
+      image.catch(() => LAYOUTS.get(folder) === image && LAYOUTS.delete(folder));
+    }
     images.set(url, image);
     image.catch((err) => err instanceof Missing || images.delete(url));
   }
   return image;
 }
 
-async function readImage(url: string, signal?: AbortSignal): Promise<Image> {
-  const head = new DataView(await readRange(url, 0, HEADER_BYTES, signal));
+/** A raster with another's layout, checked against its own IFD alongside (see Image.checked). */
+function alike(url: string, like: Image): Image {
+  const checked = readIfd(url).then((ifd) => {
+    if (ifd.layout !== like.layout) throw new LayoutChanged(url);
+  });
+  checked.catch(() => {}); // (handled by whichever reads it: see read)
+  return { ...like, url, checked };
+}
+
+/**
+ * Run `use` on a raster's image; null if there's no such raster (not published yet).
+ * With another raster's layout, `use` runs while the layout is checked; if it's not
+ * the same, the raster is read again on its own, and its tiles read with the other
+ * layout are dropped.
+ */
+async function read<T>(url: string, use: (image: Image) => Promise<T>, own = false): Promise<T | null> {
+  let image: Image | null = null;
+  try {
+    image = await openImage(url, own);
+    const [value] = await Promise.all([use(image), image.checked]);
+    return value;
+  } catch (err) {
+    if (err instanceof Missing) {
+      // Not published yet: remembered, as when readImage finds that (see openImage).
+      if (image?.checked) {
+        const missing = Promise.reject(err);
+        missing.catch(() => {});
+        images.set(url, missing);
+      }
+      return null;
+    }
+    if (image?.checked) images.delete(url); // (checked again next time)
+    if (!(err instanceof LayoutChanged)) throw err;
+    for (const key of tiles.keys()) if (key.endsWith(` ${url}`)) tiles.delete(key);
+    return read(url, use, true);
+  }
+}
+
+/** A raster's header and first IFD. */
+interface Ifd {
+  head: DataView;
+  le: boolean;
+  entries: Map<number, Entry>;
+  /** See Image.layout. */
+  layout: string;
+}
+
+async function readIfd(url: string): Promise<Ifd> {
+  let head = new DataView(await readRange(url, 0, HEADER_BYTES));
   const le = head.getUint16(0) === 0x4949; // "II"
   const big = head.getUint16(2, le) === 43; // BigTIFF
+  const ifd = big ? Number(head.getBigUint64(8, le)) : head.getUint32(4, le);
+  const [first, size, inline] = big ? [ifd + 8, 20, 8] : [ifd + 2, 12, 4];
+  // The entry count, and the entries: read on if they're beyond the first read.
+  const countEnd = ifd + (big ? 8 : 2);
+  if (countEnd > head.byteLength) head = new DataView(await readRange(url, 0, countEnd));
+  const count = big ? Number(head.getBigUint64(ifd, le)) : head.getUint16(ifd, le);
+  if (first + count * size > head.byteLength) head = new DataView(await readRange(url, 0, first + count * size));
   const u16 = (at: number) => head.getUint16(at, le);
   const u32 = (at: number) => head.getUint32(at, le);
   const u64 = (at: number) => Number(head.getBigUint64(at, le));
 
-  const ifd = big ? u64(8) : u32(4);
-  const count = big ? u64(ifd) : u16(ifd);
-  const [first, size, inline] = big ? [ifd + 8, 20, 8] : [ifd + 2, 12, 4];
-  if (first + count * size > head.byteLength) throw new Error(`The first IFD isn't in the first ${HEADER_BYTES} bytes: ${url}`);
   const entries = new Map<number, Entry>();
   for (let i = 0; i < count; i++) {
     const at = first + i * size;
@@ -134,6 +217,21 @@ async function readImage(url: string, signal?: AbortSignal): Promise<Image> {
     const fits = n * (TYPE_SIZE[type] ?? 1) <= inline;
     entries.set(u16(at), { type, count: n, offset: fits ? valueAt : big ? u64(valueAt) : u32(valueAt) });
   }
+  // The entries read, and the values among them that are in the header (the image's
+  // size, tiling, compression…; not the tile offsets or georeferencing).
+  const layout = [...entries]
+    .filter(([tag]) => Object.values(TAG).includes(tag))
+    .map(([tag, { type, count: n, offset }]) => {
+      const bytes = n * (TYPE_SIZE[type] ?? 1);
+      const value = offset + bytes <= head.byteLength && bytes <= 64 ? new Uint8Array(head.buffer, offset, bytes).join(".") : "";
+      return `${tag}:${type}:${n}:${offset}:${value}`;
+    })
+    .join(" ");
+  return { head, le, entries, layout };
+}
+
+async function readImage(url: string): Promise<Image> {
+  const { head, le, entries, layout } = await readIfd(url);
 
   // Values out of the header: in a GDAL COG, the georeferencing comes after the tile
   // offsets. They're next to each other, so one read gets them all.
@@ -146,7 +244,7 @@ async function readImage(url: string, signal?: AbortSignal): Promise<Image> {
   if (outside.length) {
     const start = Math.min(...outside.map((e) => e.offset));
     const end = Math.max(...outside.map((e) => e.offset + byteSize(e)));
-    if (end - start <= 64 * 1024) extra = { start, buffer: await readRange(url, start, end - start, signal) };
+    if (end - start <= 64 * 1024) extra = { start, buffer: await readRange(url, start, end - start) };
   }
   const values = async (tag: number): Promise<number[] | null> => {
     const entry = entries.get(tag);
@@ -157,7 +255,7 @@ async function readImage(url: string, signal?: AbortSignal): Promise<Image> {
         ? new DataView(head.buffer, entry.offset, bytes)
         : extra && entry.offset >= extra.start && entry.offset + bytes <= extra.start + extra.buffer.byteLength
           ? new DataView(extra.buffer, entry.offset - extra.start, bytes)
-          : new DataView(await readRange(url, entry.offset, bytes, signal));
+          : new DataView(await readRange(url, entry.offset, bytes));
     return Array.from({ length: entry.count }, (_, i) => readValue(view, entry.type, i, le));
   };
   const one = async (tag: number, fallback: number) => (await values(tag))?.[0] ?? fallback;
@@ -211,6 +309,7 @@ async function readImage(url: string, signal?: AbortSignal): Promise<Image> {
     tileOffsets,
     tileByteCounts,
     compression: compression as Image["compression"],
+    layout,
     metadata: {
       sampleFormat: sampleFormat as DecoderMetadata["sampleFormat"],
       bitsPerSample,
@@ -304,28 +403,16 @@ async function readTile(image: Image, index: number, signal?: AbortSignal): Prom
 }
 
 /** A raster's pixel size, in its CRS's units (degrees for WaPOR); null if there's no such raster. */
-export async function cogPixelSize(url: string, signal?: AbortSignal): Promise<[number, number] | null> {
-  try {
-    const { transform: [a, b, , d, e] } = await openImage(url, signal);
-    return [Math.hypot(a, d), Math.hypot(b, e)];
-  } catch (err) {
-    if (err instanceof Missing) return null;
-    throw err;
-  }
+export function cogPixelSize(url: string): Promise<[number, number] | null> {
+  return read(url, async ({ transform: [a, b, , d, e] }) => [Math.hypot(a, d), Math.hypot(b, e)]);
 }
 
 /** What the map needs of a raster's full resolution image (see cogTile). */
 export type CogImage = Pick<Image, "width" | "height" | "tileWidth" | "tileHeight" | "transform" | "nodata">;
 
 /** A raster's full resolution image; null if there's no such raster. */
-export async function cogImage(url: string, signal?: AbortSignal): Promise<CogImage | null> {
-  try {
-    const { width, height, tileWidth, tileHeight, transform, nodata } = await openImage(url, signal);
-    return { width, height, tileWidth, tileHeight, transform, nodata };
-  } catch (err) {
-    if (err instanceof Missing) return null;
-    throw err;
-  }
+export function cogImage(url: string): Promise<CogImage | null> {
+  return read(url, async ({ width, height, tileWidth, tileHeight, transform, nodata }) => ({ width, height, tileWidth, tileHeight, transform, nodata }));
 }
 
 /**
@@ -333,10 +420,13 @@ export async function cogImage(url: string, signal?: AbortSignal): Promise<CogIm
  * tileWidth × tileHeight (a TIFF pads its edge tiles). A sparse tile is all NaN.
  */
 export async function cogTile(url: string, col: number, row: number, signal?: AbortSignal): Promise<RasterTypedArray> {
-  const image = await openImage(url, signal);
-  const { tileWidth: tw, tileHeight: th } = image;
-  const bytes = await compressedTile(image, row * Math.ceil(image.width / tw) + col, signal);
-  if (!bytes) return new Float32Array(tw * th).fill(Number.NaN);
+  const tile = await read(url, async (image) => {
+    const { tileWidth: tw, tileHeight: th } = image;
+    return { image, bytes: await compressedTile(image, row * Math.ceil(image.width / tw) + col, signal), size: tw * th };
+  });
+  if (!tile) throw new Missing(`404 ${url}`);
+  const { image, bytes, size } = tile;
+  if (!bytes) return new Float32Array(size).fill(Number.NaN);
   const decoded = await defaultDecoderPool().decode(bytes.slice(0), image.compression, image.metadata);
   if (decoded.layout === "band-separate") return decoded.bands[0];
   const n = image.metadata.samplesPerPixel;
@@ -349,24 +439,20 @@ export async function cogTile(url: string, col: number, row: number, signal?: Ab
  * outside it, or no such raster (not published yet).
  */
 export async function cogPixel(url: string, [x, y]: LngLat, signal?: AbortSignal): Promise<number | null> {
-  let image: Image;
-  try {
-    image = await openImage(url, signal);
-  } catch (err) {
-    if (err instanceof Missing) return null;
-    throw err;
-  }
-  const [a, b, c, d, e, f] = image.transform;
-  // The inverse of the transform.
-  const det = a * e - b * d;
-  const col = Math.floor((e * (x - c) - b * (y - f)) / det);
-  const row = Math.floor((a * (y - f) - d * (x - c)) / det);
-  if (col < 0 || row < 0 || col >= image.width || row >= image.height) return null;
-
+  const tile = await read(url, async (image) => {
+    const [a, b, c, d, e, f] = image.transform;
+    // The inverse of the transform.
+    const det = a * e - b * d;
+    const col = Math.floor((e * (x - c) - b * (y - f)) / det);
+    const row = Math.floor((a * (y - f) - d * (x - c)) / det);
+    if (col < 0 || row < 0 || col >= image.width || row >= image.height) return null;
+    const { tileWidth: tw, tileHeight: th } = image;
+    const index = Math.floor(row / th) * Math.ceil(image.width / tw) + Math.floor(col / tw);
+    return { image, col, row, bytes: await compressedTile(image, index, signal) };
+  });
+  if (!tile?.bytes) return null;
+  const { image, col, row, bytes } = tile;
   const { tileWidth: tw, tileHeight: th } = image;
-  const index = Math.floor(row / th) * Math.ceil(image.width / tw) + Math.floor(col / tw);
-  const bytes = await compressedTile(image, index, signal);
-  if (!bytes) return null;
   // The pool may hand the buffer to a worker: give it a copy, the cache keeps its own.
   const decoded = await defaultDecoderPool().decode(bytes.slice(0), image.compression, image.metadata);
   const p = (row % th) * tw + (col % tw);

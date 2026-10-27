@@ -711,7 +711,7 @@ async function levelSource(url: string, pixel: number, signal?: AbortSignal): Pr
  * of the bytes of a few tiles' worth of sampling.
  */
 async function fullSource(url: string, signal?: AbortSignal): Promise<SampleSource> {
-  const image = await cogImage(url, signal);
+  const image = await cogImage(url);
   if (!image) throw new Error(`No such raster: ${url}`);
   const { transform, width, height, tileWidth, tileHeight, nodata } = image;
   const tile = (x: number, y: number) =>
