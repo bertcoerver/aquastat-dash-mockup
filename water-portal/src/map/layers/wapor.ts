@@ -77,6 +77,11 @@ export interface WaporVariable {
   /** What the map shows until the view's own range is known, per day. */
   ramp: WaporRamp;
   /**
+   * WaPOR's own default style for its rasters of each kind (see waporStyleRamp). None
+   * if made from `parts`.
+   */
+  styles?: Partial<Record<BlockKind, WaporRamp>>;
+  /**
    * Made from other variables instead of rasters of its own: their values, each times
    * its sign, on `grid`'s grid (the others' are sampled onto it, so it should be the
    * finest). Its quality raster is `grid`'s.
@@ -98,6 +103,30 @@ export interface WaporVariable {
   ratioMin?: number;
 }
 
+/**
+ * WaPOR's default styles, by code (the catalogue's mapset gives its defaultStyleCode:
+ * https://data.apps.fao.org/gismgr/api/v2/catalog/workspaces/WAPOR-3/styles/AETI-M),
+ * in their rasters' units (per day, the month's total, the year's) instead of raw
+ * values. Without their flag stops (AETI-D's 254, RET-E's 255).
+ */
+const YlGnBu5 = ["#f0f9e8", "#bae4bc", "#7bccc4", "#43a2ca", "#0868ac"];
+const RET7 = ["#fffaf0", "#fef0d9", "#fdcc8a", "#fc8d59", "#e34a33", "#b30000", "#680d10"];
+const PCP11 = ["#f0f9e8", "#d8f0d5", "#c0e7c1", "#a5dcbf", "#89d2c2", "#6ec3c6", "#56b0c8", "#3c9cc7", "#2282ba", "#0868ac", "#0745a2"];
+const NPP5 = ["#d9d9d9", "#ebefc6", "#ccd990", "#99b632", "#68763d"];
+const STYLES = {
+  AETI_D: { quantities: [0.1, 2.5, 5, 7.5, 10], colors: ["#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"] },
+  AETI_M: { quantities: [10, 40, 80, 120, 160], colors: YlGnBu5 },
+  AETI_A: { quantities: [100, 400, 800, 1200, 1600], colors: YlGnBu5 },
+  RET_E: { quantities: [1, 2.5, 5, 7.5, 10], colors: ["#fef0d9", "#fdcc8a", "#fc8d59", "#e34a33", "#b30000"] },
+  RET_M: { quantities: [0, 100, 150, 200, 250, 300, 350], colors: RET7 },
+  RET_A: { quantities: [0, 1000, 1500, 2000, 2500, 3000, 3500], colors: RET7 },
+  PCP_E: { quantities: [0, 1, 5, 10, 15], colors: ["#e6e6e6", "#bae4bc", "#7bccc4", "#43a2ca", "#0868ac"] },
+  PCP_M: { quantities: [0, 10, 25, 50, 75, 100, 125, 150, 200, 250, 300], colors: PCP11 },
+  PCP_A: { quantities: [0, 100, 250, 500, 750, 1000, 1250, 1500, 2000, 2500, 3000], colors: PCP11 },
+  NPP: { quantities: [0, 0.5, 1.5, 3, 6], colors: NPP5 },
+  NPP_M: { quantities: [0, 15, 45, 90, 180], colors: NPP5 },
+} satisfies Record<string, WaporRamp>;
+
 /** In the order of the legend's menu. Published periods as in WaPOR's catalogue. */
 export const WAPOR_VARIABLES: WaporVariable[] = [
   {
@@ -112,6 +141,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     l2: true,
     quality: true,
     ramp: { quantities: [0.1, 2.5, 5, 7.5, 10], colors: ["#ffffcc", "#a1dab4", "#41b6c4", "#2c7fb8", "#253494"] },
+    styles: { D: STYLES.AETI_D, M: STYLES.AETI_M, A: STYLES.AETI_A },
   },
   {
     id: "RET",
@@ -124,6 +154,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     kinds: ["D", "M", "A"],
     quality: false, // (another grid)
     ramp: { quantities: [0, 2, 4, 6, 8], colors: ["#ffffb2", "#fecc5c", "#fd8d3c", "#f03b20", "#bd0026"] },
+    styles: { D: STYLES.RET_E, M: STYLES.RET_M, A: STYLES.RET_A },
   },
   {
     id: "T",
@@ -137,6 +168,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     l2: true,
     quality: true,
     ramp: { quantities: [0, 1.5, 3, 4.5, 6], colors: ["#f7fcf5", "#c7e9c0", "#74c476", "#238b45", "#00441b"] },
+    styles: { D: STYLES.AETI_D, A: STYLES.AETI_A }, // (WaPOR's are AETI's)
   },
   {
     id: "E",
@@ -150,6 +182,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     l2: true,
     quality: true,
     ramp: { quantities: [0, 1, 2, 3, 4], colors: ["#ffffe5", "#fee391", "#fe9929", "#cc4c02", "#662506"] },
+    styles: { D: STYLES.AETI_D, A: STYLES.AETI_A }, // (WaPOR's are AETI's)
   },
   {
     id: "I",
@@ -163,6 +196,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     l2: true,
     quality: true,
     ramp: { quantities: [0, 0.25, 0.5, 0.75, 1], colors: ["#fcfbfd", "#dadaeb", "#9e9ac8", "#6a51a3", "#3f007d"] },
+    styles: { D: STYLES.AETI_D, A: STYLES.AETI_A }, // (WaPOR's are AETI's)
   },
   {
     id: "PCP",
@@ -175,6 +209,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     kinds: ["D", "M", "A"],
     quality: false, // (another grid)
     ramp: { quantities: [0, 2.5, 5, 10, 20], colors: ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"] },
+    styles: { D: STYLES.PCP_E, M: STYLES.PCP_M, A: STYLES.PCP_A },
   },
   {
     id: "NPP",
@@ -188,6 +223,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     l2: true,
     quality: true,
     ramp: { quantities: [0, 1, 2, 3, 4], colors: ["#ffffcc", "#d9f0a3", "#78c679", "#238443", "#004529"] },
+    styles: { D: STYLES.NPP, M: STYLES.NPP_M },
   },
   {
     id: "PCP-AETI",
@@ -1151,6 +1187,34 @@ function sumTiles(rasters: RasterTile[], factors: number[], signed = false) {
 
 /** How much of the values in view the colour map spans: all, or without this % at either end. */
 export type WaporStretch = 0 | 1 | 5;
+
+/** A raster of each kind's days, nominally (a dekad's is per day). */
+const KIND_DAYS: Record<BlockKind, number> = { D: 1, M: 365 / 12, A: 365 };
+/** How long a raster of each kind is, in days. */
+const KIND_LENGTH: Record<BlockKind, number> = { D: 10, M: 365 / 12, A: 365 };
+/** The kind of raster that's in these units. */
+const KIND_OF: Partial<Record<WaporPer, BlockKind>> = { day: "D", month: "M", year: "A" };
+
+/**
+ * WaPOR's own colour map for a period, shown `per` day, month, year or in total, per day
+ * (as the map): its default style for rasters in that unit (a dekad's per day, a month's
+ * per month, …; in total, for those nearest the period in length). If WaPOR has no such
+ * style for the variable (no M for T), the nearest in length that it has, scaled. Null
+ * for a variable WaPOR doesn't publish (made from others).
+ */
+export function waporStyleRamp({ variable, days, resolution }: WaporPeriod, per: WaporPer): WaporRamp | null {
+  const styles = variable.styles;
+  if (!styles) return null;
+  const nearest = (length: number, kinds: BlockKind[]) =>
+    kinds.reduce((a, b) => (Math.abs(Math.log(length / KIND_LENGTH[a])) <= Math.abs(Math.log(length / KIND_LENGTH[b])) ? a : b));
+  const wanted = KIND_OF[per] ?? nearest(days, ["D", "M", "A"]);
+  const kind = nearest(KIND_LENGTH[wanted], Object.keys(styles) as BlockKind[]);
+  // So the legend's numbers are the style's own: what it multiplies a value per day by.
+  const perDay =
+    kind === "D" ? 1 : per === "total" ? (RESOLUTIONS[kind] === resolution ? days : KIND_DAYS[kind]) : kind === wanted ? PER_DAYS[per] : KIND_DAYS[kind];
+  const { quantities, colors } = styles[kind]!;
+  return { quantities: quantities.map((q) => q / perDay), colors };
+}
 
 /** At most this many of the values in view are sorted for the percentiles (evenly spread). */
 const SAMPLE = 2 ** 18;

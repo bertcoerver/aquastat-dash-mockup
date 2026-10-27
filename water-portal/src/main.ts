@@ -4,17 +4,19 @@ import { loadModelFiles } from "./basin/model";
 import { MODEL_SHOWN, initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
 import {
+  WAPOR_UNITS,
   WAPOR_VARIABLES,
   checkedWaporPeriod,
   onWaporLevel,
   onWaporTile,
   waporPeriod,
   waporShownLevel,
+  waporStyleRamp,
   waporViewRange,
   type CheckedWaporPeriod,
   type WaporLevel,
   type WaporPeriod,
-  type WaporStretch,
+  type WaporUnits,
 } from "./map/layers/wapor";
 import type { WaporRamp } from "./map/layers/wapor-shader";
 import { createMap } from "./map/map";
@@ -27,6 +29,7 @@ import { initWaporLegend } from "./map/wapor-legend";
 import { initWaporPlayer, type PlaybackStatus } from "./map/wapor-player";
 import { makeResizable } from "./panels/floating";
 import { makeFoldable } from "./panels/foldable";
+import type { RampChoice } from "./panels/ramp-menu";
 import { initLayersMenu } from "./panels/layers-menu";
 import { initLoadBar } from "./panels/load-bar";
 import { initThemeSwitch } from "./panels/theme-switch";
@@ -249,7 +252,8 @@ const layersMenu = initLayersMenu(setLayerVisible);
  */
 let waporVariable = WAPOR_VARIABLES[0];
 let waporMaxGap: number | null = null;
-let waporStretch: WaporStretch = 1;
+let waporStretch: RampChoice = 1;
+let waporUnits: WaporUnits = WAPOR_UNITS[0]; // (WaPOR's own colour map is the one for them)
 let waporLocked = false; // the legend's lock: the colour map stays as it is
 let stretchTimer = 0; // (before initWaporLegend, which calls onStretch)
 const waporLegend = initWaporLegend({
@@ -274,7 +278,11 @@ const waporLegend = initWaporLegend({
     waporLegend.ramp(variable.ramp);
     showWapor(view === "local" ? waporRange : null);
   },
-  onUnits: (units) => localPanel.setUnits(units),
+  onUnits(units) {
+    waporUnits = units;
+    localPanel.setUnits(units);
+    stretchWapor();
+  },
   onLock(locked) {
     waporLocked = locked;
     stretchWapor();
@@ -288,8 +296,10 @@ const localPanel = initLocalPanel({
   setDays: (days) => toolbarApi?.setDays(days),
   // The chart's y axis title goes through the units, as the legend's menu.
   onUnits(units) {
+    waporUnits = units;
     waporLegend.setUnits(units);
     localPanel.setUnits(units);
+    stretchWapor();
   },
 });
 let waporWanted: string | null = null; // the variable and range, as "AETI start-end" (days)
@@ -338,7 +348,8 @@ function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boo
 }
 
 /**
- * The colour map spans the values on screen (see the stretch button in the legend):
+ * The colour map spans the values on screen (see the stretch button in the legend), or
+ * is WaPOR's own for the period and units:
  * worked out again when the view moves, a tile loads, or the period, quality filter or
  * stretch changes, at most every so often. While playing it's kept, so frames compare,
  * and while the legend's lock is on.
@@ -348,6 +359,14 @@ function stretchWapor() {
   clearTimeout(stretchTimer);
   stretchTimer = window.setTimeout(() => {
     if (!waporShown || playback !== "stopped" || waporLocked) return;
+    if (waporStretch === "wapor") {
+      const ramp = waporStyleRamp(waporShown, waporUnits.per);
+      if (ramp) {
+        setWaporRamp(ramp);
+        waporLegend.ramp(ramp);
+      }
+      return;
+    }
     const range = waporViewRange(waporShown, waporMaxGap, waporStretch);
     if (!range) return;
     let lo = range[0];
@@ -355,7 +374,7 @@ function stretchWapor() {
     // A signed variable's colours are centred on 0, as far either way.
     if (waporShown.variable.signed) [lo, hi] = [-1, 1].map((s) => s * Math.max(-lo, hi, 0.01));
     const ramp: WaporRamp = {
-      quantities: [0, 1, 2, 3, 4].map((i) => lo + ((hi - lo) * i) / 4) as WaporRamp["quantities"],
+      quantities: [0, 1, 2, 3, 4].map((i) => lo + ((hi - lo) * i) / 4),
       colors: waporShown.variable.ramp.colors,
     };
     setWaporRamp(ramp);

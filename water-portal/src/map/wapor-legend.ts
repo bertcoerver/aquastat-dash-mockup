@@ -3,13 +3,13 @@
  * the others, period, colour ramp and whether the raster is loading or not published
  * yet, a menu for the unit (per day, month or year, or the period's total; per m² or
  * over a pixel: only the numbers change), and on the ramp itself, one for how much of
- * the values in view the colours span. For a dekad of a 300 m variable it also has the quality slider,
+ * the values in view the colours span (or WaPOR's own range). For a dekad of a 300 m variable it also has the quality slider,
  * which hides pixels whose NDVI input is gap-filled over more dekads. A padlock in the
  * title locks the colours' range as it is (until it's unlocked or another variable is
  * picked). The markup lives in index.html.
  */
 import { initLock, ticksHtml } from "../panels/legend";
-import { DEFAULT_STRETCH, initRampMenu } from "../panels/ramp-menu";
+import { DEFAULT_STRETCH, initRampMenu, type RampChoice } from "../panels/ramp-menu";
 import { initTitleMenu } from "../panels/title-menu";
 import { fmtDay } from "../toolbar/dekads";
 import { flash } from "../toolbar/toolbar";
@@ -26,7 +26,6 @@ import {
   waporVariable,
   type WaporLevel,
   type WaporPeriod,
-  type WaporStretch,
   type WaporUnits,
   type WaporVariable,
 } from "./layers/wapor";
@@ -62,6 +61,9 @@ function describe(maxGap: number | null) {
   if (maxGap === 0) return "Observed this dekad only";
   return `Hiding gaps over ${maxGap} dekad${maxGap === 1 ? "" : "s"}`;
 }
+
+/** The least gap between the ramp's ticks, in % of its width. */
+const MIN_TICK_GAP = 14;
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -114,7 +116,7 @@ export function initWaporLegend({
 }: {
   variable: WaporVariable;
   onMaxGap: (maxGap: number | null) => void;
-  onStretch: (cut: WaporStretch) => void;
+  onStretch: (cut: RampChoice) => void;
   onVariable: (variable: WaporVariable) => void;
   onUnits: (units: WaporUnits) => void;
   onLock: (locked: boolean) => void;
@@ -136,6 +138,12 @@ export function initWaporLegend({
       }
       showVariable(waporVariable(id));
       onVariable(variable);
+      // One WaPOR doesn't publish has no range of WaPOR's own.
+      if (stretch === "wapor" && !variable.styles) {
+        stretch = DEFAULT_STRETCH;
+        rampMenu.set(stretch);
+        onStretch(stretch);
+      }
       // Not every variable has every unit (a ratio has no per month, year or pixel).
       const fit = fitUnits(variable, units);
       if (fit !== units) {
@@ -229,9 +237,17 @@ export function initWaporLegend({
   input.addEventListener("input", () => onMaxGap(update()));
   update(); // starts at "all", as the map does
 
-  // How much of the values in view the colours span: a menu on the ramp (none while locked).
-  const rampMenu = initRampMenu($("wapor-ramp") as HTMLButtonElement, "the values in view", DEFAULT_STRETCH, onStretch);
-  onStretch(DEFAULT_STRETCH);
+  // How much of the values in view the colours span, or WaPOR's own range: a menu on the
+  // ramp (none while locked).
+  let stretch: RampChoice = DEFAULT_STRETCH;
+  const rampMenu = initRampMenu(
+    $("wapor-ramp") as HTMLButtonElement,
+    "the values in view",
+    stretch,
+    (cut) => onStretch((stretch = cut)),
+    () => !!variable.styles,
+  );
+  onStretch(stretch);
   function lockRamp(locked: boolean) {
     rampMenu.setEnabled(!locked);
     onLock(locked);
@@ -241,13 +257,25 @@ export function initWaporLegend({
     lastRamp = ramp;
     const { quantities: q, colors } = ramp;
     // Stops sit where their value falls between the first and the last.
-    const span = q[4] - q[0];
+    const span = q[q.length - 1] - q[0];
     const at = (v: number) => ((v - q[0]) / span) * 100;
     $("wapor-ramp").style.background =
       `linear-gradient(to right, ${colors.map((c, i) => `${c} ${at(q[i])}%`).join(", ")})`;
-    // The ramp is per day and m², as the rasters.
+    // The ramp is per day and m², as the rasters. A tick for each stop, but not so close
+    // to the last one shown that the labels run into each other (WaPOR's PCP-M has 11);
+    // always one at either end.
     const k = unitFactor(variable, units, periodDays, area.m2 ?? Number.NaN);
-    $("wapor-ticks").innerHTML = ticksHtml(q.map((v) => ({ value: v * k, at: at(v) / 100 })));
+    const shown: number[] = [];
+    for (const v of q) {
+      if (shown.length && at(v) - at(shown[shown.length - 1]) < MIN_TICK_GAP) continue;
+      shown.push(v);
+    }
+    const last = q[q.length - 1];
+    if (shown[shown.length - 1] !== last) {
+      if (shown.length > 1 && at(last) - at(shown[shown.length - 1]) < MIN_TICK_GAP) shown.pop();
+      shown.push(last);
+    }
+    $("wapor-ticks").innerHTML = ticksHtml(shown.map((v) => ({ value: v * k, at: at(v) / 100 })));
   }
 
   return {

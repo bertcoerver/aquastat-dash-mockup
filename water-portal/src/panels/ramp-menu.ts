@@ -1,8 +1,9 @@
 /*
  * The colour ramp of a map legend as a menu (title-menu.ts): how much of the values the
  * colours span, all of them or without 1% or 5% at either end, so a few extreme ones
- * don't wash out the rest. The WaPOR legend's (of the values in view), the Basin and
- * Country legends' (of the basins' or countries' values). Expects this markup (see
+ * don't wash out the rest. The WaPOR legend's (of the values in view; for a variable
+ * WaPOR publishes, also WaPOR's own range), the Basin and Country legends' (of the
+ * basins' or countries' values). Expects this markup (see
  * index.html):
  *
  *   <button class="legend-ramp ramp-menu" aria-haspopup="listbox" aria-expanded="false">
@@ -19,9 +20,16 @@ export const STRETCHES: WaporStretch[] = [0, 1, 5];
 /** What starts out picked. */
 export const DEFAULT_STRETCH: WaporStretch = 1;
 
+/** A stretch, or "wapor": WaPOR's own range for the variable (its default style's). */
+export type RampChoice = WaporStretch | "wapor";
+
 /** "Colours span 1–99% of the values in view". */
-export const stretchLabel = (cut: WaporStretch, of: string) =>
-  cut === 0 ? `Colours span all ${of}` : `Colours span ${cut}–${100 - cut}% of ${of}`;
+export const stretchLabel = (cut: RampChoice, of: string) =>
+  cut === "wapor"
+    ? "Colours span WaPOR's default range"
+    : cut === 0
+      ? `Colours span all ${of}`
+      : `Colours span ${cut}–${100 - cut}% of ${of}`;
 
 /** A legend stop, with as many decimals as the range needs; large ones as "3.6M". */
 const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 3 });
@@ -34,20 +42,35 @@ export function fmtStop(v: number, span: number) {
 export interface RampMenu {
   /** Whether there's a choice (not for a map with a fixed range): else a plain ramp. */
   setEnabled(enabled: boolean): void;
+  /** Show this as picked (without onPick). */
+  set(choice: RampChoice): void;
 }
 
-/** `of`: what the colours span, "the values in view". `onPick` runs when another is picked. */
-export function initRampMenu(button: HTMLButtonElement, of: string, initial: WaporStretch, onPick: (cut: WaporStretch) => void): RampMenu {
-  let stretch = initial;
+/**
+ * `of`: what the colours span, "the values in view". `onPick` runs when another is
+ * picked. `wapor`: whether WaPOR's own range is offered too (asked each time the menu
+ * opens; none if not given).
+ */
+export function initRampMenu<T extends RampChoice>(
+  button: HTMLButtonElement,
+  of: string,
+  initial: T,
+  onPick: (cut: T) => void,
+  wapor: () => boolean = () => false,
+): RampMenu {
+  let stretch: RampChoice = initial;
   let enabled = true;
   initTitleMenu(
     button,
-    () => ({ options: enabled ? STRETCHES.map((cut) => ({ id: String(cut), label: stretchLabel(cut, of) })) : [], current: String(stretch) }),
+    () => {
+      const choices: RampChoice[] = [...STRETCHES, ...(wapor() ? (["wapor"] as const) : [])];
+      return { options: enabled ? choices.map((cut) => ({ id: String(cut), label: stretchLabel(cut, of) })) : [], current: String(stretch) };
+    },
     (id) => {
-      if (Number(id) === stretch) return;
-      stretch = Number(id) as WaporStretch;
+      if (id === String(stretch)) return;
+      stretch = id === "wapor" ? "wapor" : (Number(id) as WaporStretch);
       show();
-      onPick(stretch);
+      onPick(stretch as T);
     },
   );
   function show() {
@@ -58,6 +81,10 @@ export function initRampMenu(button: HTMLButtonElement, of: string, initial: Wap
   return {
     setEnabled(on) {
       enabled = on;
+      show();
+    },
+    set(choice) {
+      stretch = choice;
       show();
     },
   };

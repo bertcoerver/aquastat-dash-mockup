@@ -242,7 +242,12 @@ water-portal/
   the pixels inside the visible lon/lat box (and not hidden by the quality filter), and
   takes the percentiles from a 4096-bin histogram. It runs when the view stops moving,
   a tile loads, or the period, filter or button changes; during playback the range is
-  kept, so frames can be compared.
+  kept, so frames can be compared. For a variable WaPOR publishes (not PCP − AETI or
+  WP), the menu also has WaPOR's default colour map: the catalogue's default style
+  (`styles`, e.g. AETI-D-INT16, PCP-M, NPP), stops and colours, for the rasters in the
+  unit shown (a dekad's per day, a month's per month, a year's per year; in total, those
+  nearest the period in length; else the nearest WaPOR has, scaled). `waporStyleRamp`
+  works it out; the shader takes up to 12 stops (PCP-M has 11).
 - **The NDVI quality filter** (single dekads) loads `L1-QUAL-NDVI-D` as a second
   source of the same layer, on the same grid: dekads since the last valid observation (0–255,
   255 nodata). The shader drops pixels above the slider's value, so moving it fetches
