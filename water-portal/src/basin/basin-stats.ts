@@ -90,6 +90,8 @@ export interface BasinStats {
   hover(place: Place | null): void;
   /** Lock the legend's ranges (when a range starts playing, so the dekads compare). */
   lockLegend(): void;
+  /** Let the legend's ranges fit the values again (when it stops). */
+  unlockLegend(): void;
 }
 
 /**
@@ -841,6 +843,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
 
   return {
     lockLegend: () => legend.lock(),
+    unlockLegend: () => legend.unlock(),
     setView(view) {
       state.view = view;
       forgetFailedFluxes();

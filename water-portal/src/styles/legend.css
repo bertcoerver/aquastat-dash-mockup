@@ -22,38 +22,6 @@
   position: relative;
   font-weight: 600;
 }
-/* The padlock (legend.ts): at the title's end, faint until it's locked. */
-.legend-title:has(> .legend-lock) {
-  padding-right: 22px;
-}
-.legend-lock {
-  position: absolute;
-  top: -1px;
-  right: -4px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  color: var(--muted);
-  background: none;
-  border: 0;
-  border-radius: 5px;
-  opacity: 0.6;
-  cursor: pointer;
-}
-.legend-lock:hover {
-  color: var(--ink);
-  opacity: 1;
-  background: color-mix(in srgb, var(--ink) 7%, transparent);
-}
-.legend-lock[aria-pressed="true"] {
-  color: var(--accent);
-  opacity: 1;
-}
-.legend-lock:focus-visible {
-  outline: 2px solid var(--accent);
-}
 /* A title that is a menu (title-menu.ts): text with a small ▾, like the panel titles. */
 .title-menu {
   position: relative;
@@ -460,7 +428,7 @@
   background: var(--accent);
 }
 
-/* A section's key, the padlock to its left (it locks all the sections' ranges). */
+/* A section's key. */
 .legend-key {
   display: flex;
   align-items: flex-start;
@@ -473,17 +441,6 @@
   flex: 1;
   min-width: 0;
 }
-.legend-key > .legend-lock {
-  position: static;
-  flex: none;
-  width: 18px;
-  height: 18px;
-  margin-top: 2px; /* centred on the ramp */
-}
-.legend-key:has(> .legend-key-body > .cp-classes:not([hidden])) > .legend-lock {
-  margin-top: 6px; /* on the first class */
-}
-
 /* The tuning pane (panels/tuning-pane.ts): a triple click on a legend opens it. */
 .tuning-pane {
   position: fixed;

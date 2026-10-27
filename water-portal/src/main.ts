@@ -274,7 +274,7 @@ let waporVariable = WAPOR_VARIABLES[0];
 let waporMaxGap: number | null = null;
 let waporStretch: RampChoice = 1;
 let waporUnits: WaporUnits = WAPOR_UNITS[0]; // (WaPOR's own colour map is the one for them)
-let waporLocked = false; // the legend's lock: the colour map stays as it is
+let waporLocked = false; // the legend's lock (while playing): the colour map stays as it is
 let stretchTimer = 0; // (before initWaporLegend, which calls onStretch)
 const waporLegend = initWaporLegend({
   variable: waporVariable,
@@ -448,8 +448,9 @@ const player = initWaporPlayer({
     showCheckedWapor(checked, true);
   },
   onState(state) {
-    // (Locked as play is pressed: the colours of the range shown are the ones held.)
+    // (Locked as play is pressed: the colours of the range shown are the ones held, until it stops.)
     if (playback === "stopped" && state.status !== "stopped") waporLegend.lock();
+    if (state.status === "stopped") waporLegend.unlock();
     playback = state.status;
     if (playback === "stopped") stretchWapor();
     toolbarApi?.setPlayback(state);
@@ -471,8 +472,10 @@ const rangePlayer = initRangePlayer({
   },
   onState(status, stepMs) {
     toolbarApi?.setPlayback({ status, bufferedTo: null, loading: null });
-    // (Locked before the first step: its ranges are the ones held.)
+    // (Locked before the first step: its ranges are the ones held, until it stops.)
+    // (Both unlocked, as a stop can come once the view has changed.)
     if (status === "playing") (view === "basin" ? basinStats : countryPanel).lockLegend();
+    else for (const panel of [basinStats, countryPanel]) panel.unlockLegend();
     waterMap.setPlayback(stepMs);
   },
 });

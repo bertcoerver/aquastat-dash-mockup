@@ -64,6 +64,8 @@ export interface CountryPanel {
   hover(m49: number | null): void;
   /** Lock the legend's ranges (when a range starts playing, so the years compare). */
   lockLegend(): void;
+  /** Let the legend's ranges fit the values again (when it stops). */
+  unlockLegend(): void;
 }
 
 /** How the maps are drawn, in the legend's order: fills, circles, bars (each a Shape). */
@@ -655,6 +657,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
 
   return {
     lockLegend: () => legend.lock(),
+    unlockLegend: () => legend.unlock(),
     setView(view) {
       state.view = view;
       if (view === "country") load();

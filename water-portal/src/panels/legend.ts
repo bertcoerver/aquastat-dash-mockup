@@ -21,17 +21,16 @@
  * bottom, as they are the land itself.
  *
  * A view can put its own controls in a section (extra: under the note; after: under
- * the key). A padlock left of each key locks the ranges (all of them at
- * once): each map keeps the colour range or sizes it has (hold), so other periods and
- * places compare; the view draws it again. Expects this markup (see index.html), the
+ * the key). While a range plays the ranges are locked (all of them at once): each map
+ * keeps the colour range or sizes it has (hold), so the frames compare; the view draws
+ * it again. Expects this markup (see index.html), the
  * sections are added after the title:
  *
  *   <aside class="legend">
  *     <div class="legend-title"><button class="title-menu" …>…</button></div>
  *   </aside>
  *
- * Also the ticks of a colour ramp, for the WaPOR legend and the water balance's (ticksHtml),
- * and the padlock, for the WaPOR legend's (initLock).
+ * Also the ticks of a colour ramp, for the WaPOR legend and the water balance's (ticksHtml).
  */
 import type { WaporStretch } from "../map/layers/wapor";
 import { fmtStop, initRampMenu, type RampMenu } from "./ramp-menu";
@@ -96,8 +95,10 @@ export interface LayerLegend {
   hold<T>(key: string, range: T): T;
   /** Changes as the lock is switched (for the map's cache keys). */
   lockKey(): number;
-  /** Lock the ranges as they are, as the padlock does (if not locked yet). */
+  /** Lock the ranges as they are (if not locked yet). */
   lock(): void;
+  /** Let the ranges fit the values again (if locked). */
+  unlock(): void;
 }
 
 interface Options {
@@ -142,50 +143,6 @@ export function nice(x: number) {
   return [5, 2, 1].map((m) => m * p).find((v) => v <= x) ?? p;
 }
 
-const LOCK_SVG =
-  `<svg viewBox="0 0 12 14" width="12" height="14" aria-hidden="true"><path class="lock-shackle" fill="none" stroke="currentColor" ` +
-  `stroke-width="1.5"/><rect x="1" y="6.5" width="10" height="7" rx="1.5" fill="currentColor"/></svg>`;
-
-/** A padlock (not yet shown as locked or not: showLock). */
-function lockButton() {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "legend-lock";
-  button.innerHTML = LOCK_SVG;
-  return button;
-}
-
-function showLock(button: HTMLButtonElement, on: boolean) {
-  button.setAttribute("aria-pressed", String(on));
-  // Open: the shackle raised, its right leg out of the body.
-  button.querySelector(".lock-shackle")!.setAttribute("d", on ? "M3.5 6.5V4a2.5 2.5 0 0 1 5 0v2.5" : "M3.5 6.5V2.5a2.5 2.5 0 0 1 5 0V3.5");
-  const what = "the colour ranges and sizes";
-  button.title = on ? `Unlock ${what}: fit them to the values again` : `Lock ${what} as they are, so other periods and places compare`;
-  button.setAttribute("aria-label", on ? "Unlock the ranges" : "Lock the ranges");
-}
-
-/** A padlock at the end of a legend's title; `onToggle` runs when it's clicked, with whether it's now locked. */
-export function initLock(aside: HTMLElement, onToggle: (locked: boolean) => void) {
-  const button = lockButton();
-  aside.querySelector(".legend-title")!.append(button);
-  let locked = false;
-  function set(on: boolean) {
-    locked = on;
-    showLock(button, on);
-  }
-  set(false);
-  button.addEventListener("click", () => {
-    set(!locked);
-    onToggle(locked);
-  });
-  return {
-    get locked() {
-      return locked;
-    },
-    set,
-  };
-}
-
 /** The ticks under a colour ramp, with as many decimals as their range needs. */
 export function ticksHtml(ticks: Tick[]) {
   const values = ticks.map((t) => t.value).filter(Number.isFinite);
@@ -200,12 +157,9 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
   // The ranges held while locked, by map and unit (null: unlocked).
   let held: Map<string, unknown> | null = null;
   let lockKey = 0;
-  // A padlock by each section's key, all one lock.
-  const padlocks: HTMLButtonElement[] = [];
   function setLock(on: boolean) {
     held = on ? new Map() : null;
     lockKey++;
-    for (const button of padlocks) showLock(button, on);
     onLock();
   }
 
@@ -261,11 +215,6 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     const unit = q<HTMLButtonElement>(".unit-menu");
     const rampButton = q<HTMLButtonElement>(".legend-ramp");
     const sizesButton = q<HTMLButtonElement>(".legend-sizes");
-    const padlock = lockButton();
-    showLock(padlock, false);
-    padlock.addEventListener("click", () => setLock(!held));
-    padlocks.push(padlock);
-    q(".legend-key").prepend(padlock);
     if (sizes) initTitleMenu(sizesButton, () => sizes.options(slot), (option) => sizes.onPick(slot, option));
     const parts: Parts = {
       el,
@@ -437,8 +386,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
 
   /** Three line widths, circles or bars side by side, each labelled with its value. */
   function drawSizes(svg: SVGSVGElement, key: Extract<LegendKey, { kind: "lines" | "circles" | "bars" }>) {
-    // (The legend's padding, and the padlock's column.)
-    const width = aside.clientWidth - 24 - 24 || 196;
+    // (The legend's padding.)
+    const width = aside.clientWidth - 24 || 220;
     const step = width / key.items.length;
     const top = Math.max(...key.items.map((k) => Math.abs(k.value)));
     const biggest = Math.max(...key.items.map((k) => k.size));
@@ -484,6 +433,9 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     lockKey: () => lockKey,
     lock() {
       if (!held) setLock(true);
+    },
+    unlock() {
+      if (held) setLock(false);
     },
   };
 }
