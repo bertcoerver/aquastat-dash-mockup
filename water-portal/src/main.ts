@@ -19,6 +19,7 @@ import {
   type WaporUnits,
 } from "./map/layers/wapor";
 import type { WaporRamp } from "./map/layers/wapor-shader";
+import type { Box } from "./map/fly-to";
 import { createMap } from "./map/map";
 import { placeAt, type LngLat } from "./map/places";
 import { upstreamFinder, type SubBasin } from "./map/sub-basin-network";
@@ -91,8 +92,20 @@ async function selectPoint(lngLat: LngLat | null, source: SelectionSource) {
   if (!lngLat) return selection.set({ ...NOTHING, lngLat: keptPoint() });
   const place = await placeAt(lngLat);
   if (pointWanted !== lngLat) return;
+  const before = selection.get();
   selection.set({ source, ...place, lngLat: view === "local" ? lngLat : keptPoint(), subBasin: subBasinOf(place.subBasin) });
+  // A click on another country (Country view) or basin (Basin view) flies to it, as
+  // picking it by name does.
+  if (source !== "map" || !boxes) return;
+  const { country, majorBasin, subBasin } = selection.get();
+  let box: Box | undefined;
+  if (view === "country" && country && country.m49 !== before.country?.m49) box = boxes.country.get(country.m49);
+  if (view === "basin" && majorBasin && (majorBasin.id !== before.majorBasin?.id || subBasin?.id !== before.subBasin?.id))
+    box = subBasin ? boxes.sub.get(subBasin.id) : boxes.major.get(majorBasin.id);
+  if (box) showBox(box);
 }
+// Outlines to fly to (once loaded).
+let boxes: { country: Map<number, Box>; major: Map<number, Box>; sub: Map<number, Box> } | null = null;
 
 const waterMap = createMap(
   document.getElementById("map")!,
@@ -114,6 +127,11 @@ const [countries, basins, subBasins, countryInfo, basinGroups] = await Promise.a
   loadData<CountryInfo>("country-info"),
   loadData<BasinGroups>("basin-groups"),
 ]);
+boxes = {
+  country: new Map(countries.map((c) => [c.m49, c.bbox])),
+  major: new Map(basins.map((b) => [b.id, b.bbox])),
+  sub: new Map(subBasins.map((b) => [b.id, b.bbox])),
+};
 const upstreamOf = upstreamFinder(subBasins);
 // Basin view: the water balance model for the selected sub-basin (map colours, panel).
 let toolbarApi: Toolbar | null = null;
