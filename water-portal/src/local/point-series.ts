@@ -95,7 +95,7 @@ export async function loadPointSeries(
         const [num, den] = [value(0), value(1)];
         series.ratio.num[i] = num;
         series.ratio.den[i] = den;
-        series.values[i] = den > 0 && den >= (variable.ratioMin ?? 0) ? num / den : Number.NaN;
+        series.values[i] = den > 0 && den >= (variable.ratioMin ?? 0) ? (variable.scale * num) / den : Number.NaN;
       } else {
         series.values[i] = raw.every((v) => v !== null) ? parts.reduce((sum, _, k) => sum + value(k), 0) : Number.NaN;
       }

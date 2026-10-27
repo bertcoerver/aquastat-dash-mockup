@@ -289,7 +289,7 @@ function yearBars(series: PointSeries, days: DayRange): YearBar[] {
         b += den[i] * n;
       }
       // (b is a total: its average per day must reach ratioMin.)
-      const value = Number.isFinite(a) && b > 0 && b >= least * (last - start + 1) ? a / b : null;
+      const value = Number.isFinite(a) && b > 0 && b >= least * (last - start + 1) ? (series.variable.scale * a) / b : null;
       return { days: { start, end }, value, totals: [a, b] as [number, number], partial: end > recordEnd, selected: k === 0 };
     });
 }

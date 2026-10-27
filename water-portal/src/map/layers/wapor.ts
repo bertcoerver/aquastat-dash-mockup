@@ -54,7 +54,7 @@ export type WaporResolution = "dekadal" | "monthly" | "annual" | "custom";
 
 const RESOLUTIONS: Record<BlockKind, WaporResolution> = { D: "dekadal", M: "monthly", A: "annual" };
 
-export type WaporVariableId = "AETI" | "RET" | "T" | "E" | "I" | "PCP" | "NPP" | "PCP-AETI" | "WP";
+export type WaporVariableId = "AETI" | "RET" | "T" | "E" | "I" | "PCP" | "NPP" | "PCP-AETI" | "WP" | "T-AETI";
 
 export interface WaporVariable {
   id: WaporVariableId;
@@ -66,7 +66,7 @@ export interface WaporVariable {
   /** Over a whole pixel, per day: a value per m² times the pixel's area, over 1000 (mm → m³, gC/m² → kgC). */
   perPixel: string;
   pixel: string;
-  /** Physical value = raw * scale. */
+  /** Physical value = raw * scale; of a ratio, the first part over the second times it (100: in %). */
   scale: number;
   /** The periods WaPOR publishes it for (mapset L1-<id>-<kind>); none if made from `parts`. */
   kinds: BlockKind[];
@@ -263,6 +263,28 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
     grid: "AETI",
     ratio: true,
     // AETI of 0.1 mm/day (37 mm a year): less, and NPP over it is mostly noise.
+    ratioMin: 0.1,
+  },
+  {
+    id: "T-AETI",
+    label: "Beneficial AETI",
+    short: "T / AETI",
+    // The share of AETI that's transpired, in %.
+    unit: "%",
+    perPixel: "%",
+    pixel: "300 m",
+    scale: 100,
+    kinds: [],
+    quality: true,
+    // Brown where little of it is transpired, green where most is.
+    ramp: { quantities: [0, 25, 50, 75, 100], colors: ["#a6611a", "#dfc27d", "#f5f5f5", "#a6dba0", "#1b7837"] },
+    parts: [
+      { id: "T", sign: 1 },
+      { id: "AETI", sign: 1 },
+    ],
+    grid: "AETI",
+    ratio: true,
+    // As WP's: over less AETI the share is mostly noise.
     ratioMin: 0.1,
   },
 ];
@@ -1160,7 +1182,7 @@ function combineTiles(period: WaporPeriod, rasters: RasterTile[]) {
   };
   const [num, den] = [sumOf(0), sumOf(1)];
   const least = variable.ratioMin ?? 0;
-  for (let p = 0; p < num.length; p++) num[p] = den[p] > 0 && den[p] >= least ? num[p] / den[p] : Number.NaN;
+  for (let p = 0; p < num.length; p++) num[p] = den[p] > 0 && den[p] >= least ? (variable.scale * num[p]) / den[p] : Number.NaN;
   return num;
 }
 
