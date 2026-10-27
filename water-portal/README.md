@@ -40,6 +40,7 @@ Other commands:
 |---|---|
 | `npm run build` | Type-check, then build a static site into `dist/` |
 | `npm run preview` | Serve the built `dist/` locally, to check a build |
+| `npm run deploy` | Build the site and publish it to GitHub Pages (the `gh-pages` branch), from this machine since the tiles and model output aren't committed. `scripts/pre-push` does this on each push to `main` that changes `water-portal/`; install it once with `ln -s ../../water-portal/scripts/pre-push .git/hooks/pre-push` from the repo root |
 | `npm run typecheck` | Only check the TypeScript for errors |
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |

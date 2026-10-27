@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Git pre-push hook: when main is pushed with changes to water-portal/, publish that
+# commit to GitHub Pages. A failed deploy doesn't stop the push.
+# Install: ln -s ../../water-portal/scripts/pre-push .git/hooks/pre-push
+ZERO=0000000000000000000000000000000000000000
+DEPLOY="$(git rev-parse --show-toplevel)/water-portal/scripts/deploy-pages.sh"
+
+while read -r _ local_sha remote_ref remote_sha; do
+  [ "$remote_ref" = refs/heads/main ] && [ "$local_sha" != "$ZERO" ] || continue
+  if [ "$remote_sha" != "$ZERO" ] && git diff --quiet "$remote_sha" "$local_sha" -- water-portal 2>/dev/null; then
+    continue
+  fi
+  echo "Deploying water-portal to GitHub Pages…"
+  "$DEPLOY" "$local_sha" </dev/null || echo "Deploy failed; pushing anyway. Run 'npm run deploy' to retry." >&2
+done
+exit 0
