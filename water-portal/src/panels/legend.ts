@@ -269,6 +269,34 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     sections.set(slot, parts);
   }
 
+  // The sections in the order the maps came on the map, not by slot: a map switched to
+  // another shape keeps its place, one that takes another's slot takes its place, and a
+  // new one goes last.
+  let order: string[] = [];
+  let lastIn = new Map<string, string>(); // (slot → the map last in it)
+  function arrange(layers: LegendLayer[]) {
+    const ids = layers.map((l) => l.id);
+    for (const l of layers) {
+      if (order.includes(l.id)) continue;
+      const was = lastIn.get(l.slot);
+      const at = was && !ids.includes(was) ? order.indexOf(was) : -1;
+      if (at >= 0) order[at] = l.id;
+      else order.push(l.id);
+    }
+    order = order.filter((id) => ids.includes(id));
+    lastIn = new Map(layers.map((l) => [l.slot, l.id]));
+    // Moved only when out of order: moving a section ends a drag or a slide in it.
+    const els = order.map((id) => sections.get(layers.find((l) => l.id === id)!.slot)!.el);
+    const now = [...sections.values()].map((p) => p.el).filter((el) => els.includes(el));
+    now.sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
+    if (now.every((el, i) => el === els[i])) return;
+    let after: Element = aside.querySelector(".legend-title")!;
+    for (const el of els) {
+      after.after(el);
+      after = el;
+    }
+  }
+
   function showSection(p: Parts, layer: LegendLayer | null, several: boolean) {
     p.layer = layer;
     p.el.hidden = !layer;
@@ -355,6 +383,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       const several = layers.length > 1;
       menu.setLabel(several ? `${layers.length} layers on the map` : layers[0].title);
       for (const [slot, p] of sections) showSection(p, layers.find((l) => l.slot === slot) ?? null, several);
+      arrange(layers);
     },
     hold(key, range) {
       if (!held) return range;
