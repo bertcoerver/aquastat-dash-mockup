@@ -14,13 +14,27 @@ AETI, dekadal.
 
 [src/local/cog-pixel.ts](../src/local/cog-pixel.ts) reads one pixel per dekadal COG
 straight from FAO's bucket (`storage.googleapis.com/fao-gismgr-wapor-3-data`). Each raster
-takes three requests in turn:
+needs:
 
-1. The first 16 KiB of the file, for the header and the first IFD (plus ~150 bytes of
-   georeferencing, read separately).
+1. The header and the first IFD. The first IFD ends at byte 616 in WaPOR's files, so
+   the reader takes the first KiB (and reads on if an IFD is ever longer). The
+   ~150 bytes of georeferencing are read separately.
 2. The tile's entries in TileOffsets and TileByteCounts (8 bytes each).
 3. The tile itself, which is decoded in the browser. A tile is LZW-compressed as a whole,
    so the full tile is needed for one pixel.
+
+All the dekads of a mapset share one layout: the same grid, and the same IFD at the
+same place. So only the first raster of a mapset is read in that order (four round
+trips, with the georeferencing). After it, a raster's tile entries (2) are read straight
+away with the first raster's layout, while its own first KiB (1) is read alongside to
+check that its layout is the same. The tile (3) follows once both are in: two round
+trips per dekad. If a layout differs, that raster is read on its own.
+
+The tile waits for the check because, with a wrong layout, the entries would be any
+two numbers. In a test with a differently tiled file, they asked for a 4.3 GB range.
+
+Until 27 October 2026 the reader took the first 16 KiB of every raster, and read
+every raster in the four steps.
 
 Twelve loaders run at once. Dekads in the selected period are read first, then
 outwards from it. The chart fills in as values arrive.
@@ -57,16 +71,23 @@ the preflight for `content-type` succeeds.
 
 | | Data to the browser | Requests | First values | Selected year (36 dekads) | Whole record (317) |
 |---|---|---|---|---|---|
-| **COG reads, L1** (now) | 15.1–18.5 MB | 1,583 | 0.9–1.1 s | 1.7–2.1 s | 10.6–12.2 s |
+| **COG reads, L1, before** (16 KiB header per raster) | 15.1–18.5 MB | 1,585 | 0.6–1.0 s | 1.5–2.1 s | 9.4–12.4 s |
+| **COG reads, L1, now** (1 KiB, layout reused) | 10.2–13.6 MB | 1,269 | 0.7 s | 1.5–2.0 s | 7.8–9.4 s |
 | **COG reads, L2** (tried, dropped) | 70.6 MB | 1,585 | – | – | 11–12 s |
 | **API, L1** | 112 KB | 1 | 20.6 s | 20.6 s | 20.6 s |
 | **API, L2** | 113 KB | 1 | 13.6–14.7 s | 13.6–14.7 s | 13.6–14.7 s |
 | **API, L2, one year only** | 13 KB | 1 | 3.3 s | 3.3 s | – |
 | **API, L2, 9 yearly requests at once** | 107 KB | 9 | 3.6 s | 4–22 s | 22.0 s |
 
-For the COG reads, "first values" and "selected year" are when the first tile and the
-36th tile of the selected year (2023) arrived. For the API, no value is shown before the
-response is complete.
+The two L1 COG rows were measured on 27 October with the reader on its own: a bare
+page that runs `loadPointSeries` with no map, for the old and the new reader in turn,
+twice at each of the three points. Both returned identical values at all three
+points. "First values" is the first dekad read; "selected year" is when all 36 dekads
+of 2023 were in.
+
+In the full app the times were less steady: its animated layers compete for the main
+thread in a headless browser. The bytes and requests were the same. For the API, no
+value is shown before the response is complete.
 
 What the numbers show:
 
@@ -81,15 +102,15 @@ What the numbers show:
 - **Nothing is cached.** Asking for the same record again took the same 13.6 s.
 - **L1 was slower than L2** (20.6 s vs 13.6–14.7 s), for reasons not known.
 
-Where the COG reads' bytes go (L1, per dekad): ~16.4 KB of header and georeferencing,
-16 bytes of tile entries, and a 35–45 KB tile. About 5 MB of the 15–18 MB is header.
-The first IFD actually ends at byte 616.
+Where the COG reads' bytes go (L1, per dekad): 1 KiB of header, 16 bytes of tile
+entries, and a 30–40 KB tile. Before, the header was 16 KiB, about 4.9 MB of a record.
+The tiles are now nearly all of it, and they can't be made smaller from the browser.
 
 ### Conclusion
 
-For the Local panel, the API trades a ~1 s first value and an ~11 s record for nothing
-until 14–20 s. Its 113 KB beats 15–18 MB, but showing the selected period quickly is
-most of what makes the panel feel fast. We kept the COG reads, at L1.
+For the Local panel, the API trades a ~0.7 s first value and an 8–9 s record for
+nothing until 14–20 s. Its 113 KB beats 10–14 MB, but showing the selected period
+quickly is most of what makes the panel feel fast. We kept the COG reads, at L1.
 
 The API is still useful for areas: it takes any polygon, any mapset (including PCP,
 monthly and annual), and L2. It could replace the precomputed L1 basin statistics with
@@ -98,28 +119,31 @@ live ones, at about 1.5 s + 40 ms per raster per polygon.
 ## Combining the two: options
 
 The goal is the API's transfer (≈100 KB for a record) with the current reader's first
-values in about 1 s and its progressive fill. Five directions follow, from no
+values in under a second and its progressive fill. Five directions follow, from no
 infrastructure to the most.
 
 Figures marked *estimate* are worked out from the measurements above and haven't been
 measured themselves.
 
-### 1. Leaner COG reads (no infrastructure)
+### 1. Leaner COG reads (done, 27 October 2026)
 
-This keeps the current approach and trims what each dekad costs.
+This keeps the current approach and trims what each dekad costs (see *How the Local
+panel reads a series now*):
 
-- **Read 1 KB of header, not 16 KiB.** The first IFD ends at byte 616 in L1 and L2
-  files alike. This saves ~15 KB per raster, about 5 MB per L1 record (~30%).
-- **Reuse the IFD's layout.** Every dekad of a mapset has its IFD at byte 200, its
-  TileByteCounts at byte 616 and its TileOffsets at the same place. The georeferencing is
-  also the same. After the first raster, the header and georeferencing reads could be
-  skipped: a dekad would take two round trips (tile entries, then the tile), not three.
-  If a tile fails to decode, the reader would go back to reading the header. That
-  removes ~630 requests and one round trip per dekad.
+- **1 KiB of header, not 16 KiB.**
+- **The first raster's layout reused for the rest of the mapset**, each raster's own
+  IFD checked alongside its tile entries.
 
-*Estimate:* 10–13 MB, ~950 requests, and the record in perhaps 7–9 s. First values come
-somewhat sooner. Transfer stays two orders of magnitude above the API's, because the
-tiles themselves are the bulk.
+The plan was to skip the header altogether after the first raster, and fall back when
+a tile failed to decode. That would have saved another 317 requests, but a wrong
+layout isn't reliably caught by decoding, and it can ask for gigabytes. So each raster's
+first KiB is still read, in parallel, as a check.
+
+*Measured:* 4.9 MB less per record (−26 to −32%: 10.2–13.6 MB), 316 fewer requests
+(1,269), and the whole record 8.5 s on average instead of 10.7 s (−20%). First values
+and the selected year come as before (~0.7 s and 1.5–2 s): the first raster of a
+mapset still takes four round trips. Transfer stays two orders of magnitude above the
+API's, because the tiles are the bulk.
 
 ### 2. Hybrid: COG reads for the period, the API for the rest (no infrastructure)
 
@@ -140,8 +164,8 @@ Each point costs FAO's server one request per part, even when it's dropped.
 - Ask the API for the whole record in one background request (~113 KB), and fill in
   the rest of the chart when it arrives.
 
-*Estimate:* about 2 MB for a year's period plus 113 KB. The first values come as now;
-the rest of the record arrives at 14–20 s instead of ~11 s, all at once. The yearly
+*Estimate:* about 1.5 MB for a year's period plus 113 KB. The first values come as now;
+the rest of the record arrives at 14–20 s instead of 8–9 s, all at once. The yearly
 bars and the multi-year average band need the whole record, so they would come later.
 
 Risks: this depends on FAO's API (availability, unannounced limits, the 1.5–20 s
@@ -215,9 +239,9 @@ outside the period. This is mentioned for completeness; it doesn't reach the goa
 
 | | To the browser | First values | Whole record | Infrastructure |
 |---|---|---|---|---|
-| Now (L1) | 15–18 MB | ~1 s | ~11 s | none |
-| 1. Leaner COG reads | ~10–13 MB* | <1 s* | ~7–9 s* | none |
-| 2. Hybrid with FAO's API | ~2 MB* | ~1 s | 14–20 s, at once | none (depends on FAO) |
+| Before (L1) | 15–18.5 MB | 0.6–1.0 s | 9.4–12.4 s | none |
+| 1. Leaner COG reads (now) | 10–13.6 MB | ~0.7 s | 7.8–9.4 s | none |
+| 2. Hybrid with FAO's API | ~1.5 MB* | ~0.7 s | 14–20 s, at once | none (depends on FAO) |
 | 3. Pixel service | ~10–20 KB* | <1 s* | ~1–3 s* | a small service |
 | 4. Time-major copy | ~50–150 KB* | <1 s* | <1 s* | storage + pipeline |
 
@@ -225,8 +249,8 @@ outside the period. This is mentioned for completeness; it doesn't reach the goa
 
 ### Recommendation
 
-- **Do option 1 now.** It's small, self-contained and cuts about a third of the bytes
-  and a round trip per dekad.
+- **Option 1 is done.** It cut about 30% of the bytes and 20% of the time, with no
+  change in behaviour.
 - **If transfer matters (e.g. users on mobile data), option 3 is the one that meets
   the goal.** It reuses the code we have, keeps the streaming, and brings back the L2
   series at L1's cost to the browser.

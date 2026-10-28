@@ -33,6 +33,7 @@ import { makeFoldable } from "./panels/foldable";
 import type { RampChoice } from "./panels/ramp-menu";
 import { initLayersMenu } from "./panels/layers-menu";
 import { initLoadBar, setProgress } from "./panels/load-bar";
+import { initSlowServerCheck } from "./panels/slow-server";
 import { initThemeSwitch } from "./panels/theme-switch";
 import { mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
@@ -50,6 +51,7 @@ import "./styles/country.css";
 
 // First, so it counts every request from here on.
 initLoadBar();
+initSlowServerCheck();
 
 const dark = initThemeSwitch();
 

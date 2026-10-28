@@ -42,6 +42,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   const section = $("lp-series");
   const caption = $("lp-ts-caption");
   const empty = $("lp-ts-empty");
+  const key = $("lp-ts-key");
   const updateChart = initTimeseries($("lp-overview"), $("lp-zoom"), (range) => setRange(range));
   // A ratio (WP): its value over the selected days matters most, so first by year.
   const barsSection = $("lp-bars");
@@ -140,15 +141,16 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
     );
   }
 
-  // While it fills in, at most once a frame.
-  let frame = 0;
+  // While it fills in, at most every 200 ms: each render lays the panel out again,
+  // which every frame takes much of the time the map has to move.
+  let timer = 0;
   function scheduleRender() {
-    if (!frame) frame = requestAnimationFrame(render);
+    if (!timer) timer = window.setTimeout(render, 200);
   }
 
   function render() {
-    cancelAnimationFrame(frame);
-    frame = 0;
+    clearTimeout(timer);
+    timer = 0;
     const { variable } = state;
     message.classList.toggle("error", status.kind === "error");
     message.textContent = status.kind === "error" ? status.message : "";
@@ -158,7 +160,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
 
     // The series card is always there; until there's a point, just a word to pick one.
     empty.hidden = status.kind !== "idle";
-    for (const el of [caption, $("lp-overview"), $("lp-zoom")]) el.hidden = !series;
+    for (const el of [caption, $("lp-overview"), $("lp-zoom"), key]) el.hidden = !series;
     const ratio = series?.ratio && state.days ? yearBars(series, state.days) : null;
     barsSection.hidden = !ratio;
     markPinned(); // (only a card on show)
@@ -208,6 +210,12 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
       daysIn,
       windows: total && days ? yearlyWindows(days) : undefined,
     });
+    // A key to the lower chart: the series, the dashed average and its band.
+    const swatch = (svg: string, label: string) => `<span class="ts-key-item"><svg width="18" height="10" aria-hidden="true">${svg}</svg>${label}</span>`;
+    key.innerHTML =
+      swatch(`<line x1="1" x2="17" y1="5" y2="5" stroke="${lineColor(variable)}" stroke-width="2"/>`, total ? `${variable.short}, added up` : variable.short) +
+      swatch(`<line class="ts-mean" x1="1" x2="17" y1="5" y2="5"/>`, total ? "Average, same days of every year" : "Average of that dekad, all years") +
+      swatch(`<rect class="ts-spread" x="1" y="0" width="16" height="10"/>`, "± 1 standard deviation");
     const record = `(${fmtStart(dekads[0])} – ${fmtEnd(dekads[dekads.length - 1])})`;
     const where = `in the ${variable.pixel} pixel at this point` + (units.pixel ? ` (${pixelArea ? fmtArea(pixelArea) : "area not known yet"})` : "");
     // A ratio's parts: "NPP over AETI".

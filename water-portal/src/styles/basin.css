@@ -527,6 +527,23 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+/* The lower chart's key (Local panel): the series, the dashed average, its band. */
+.ts-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.ts-key[hidden] {
+  display: none;
+}
+.ts-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 .wb-overview svg,
 .wb-zoom svg,
 .wb-sankey svg {

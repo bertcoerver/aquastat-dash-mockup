@@ -139,6 +139,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     status: { kind: "idle" } as Status,
     /** Pins and the legend's picks, per scope ("world", "major"). */
     pinned: new Map<string, Driver>(),
+    /** The pinned chart's maps unchecked in the legend since it was pinned (by title), per scope. */
+    dropped: new Map<string, Set<string>>(),
     /** The maps checked in the legend, oldest first (none: the first tile's). */
     chosen: new Map<string, string[]>(),
     hover: null as Place | null,
@@ -173,7 +175,8 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   // The legend's title: a checklist of all the maps, each once, in the order of the tiles
   // and cards, with the icons of how each can be drawn; each one on the map has a section
   // (panels/legend.ts). A map not on the map is offered in a free slot, if there is one.
-  // Checking one unpins the chart that was pinned (its map stays checked).
+  // A pinned chart stays pinned: its maps can be unchecked, and a map checked in a slot
+  // it uses takes that slot.
   const legend = initLayerLegend($("bs-legend"), {
     slots: SLOTS,
     onOrder: (slots) => map.setLayerOrder("basin", slots),
@@ -247,6 +250,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
             const option = topicDef().tiles.find((t) => t.measure === m)?.id ?? optionId(current!.ctx, layer.spec);
             state.chosen.set(scope(), [...(state.chosen.get(scope()) ?? []).filter((i) => i !== option), option]);
             state.pinned.delete(scope());
+            state.dropped.delete(scope());
           }
         }
         render();
@@ -278,11 +282,36 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   /** Check or uncheck a map. */
   function toggle(id: string) {
     if (!current) return;
-    const ids = toggled(current.layers.map((l) => optionId(current!.ctx, l.spec)), id);
-    state.chosen.set(scope(), ids);
-    // With a sub-basin selected the map defaults to the model's, so a pick is a pin.
-    if (followsModel() && ids.includes(id)) state.pinned.set(scope(), { id, sub: null });
-    else state.pinned.delete(scope());
+    const ctx = current.ctx;
+    const pin = state.pinned.get(scope());
+    const lead = pin && isDriver(pin) ? leadLayers(ctx, pin) : [];
+    const dropped = state.dropped.get(scope()) ?? new Set<string>();
+    const own = lead.find((l) => optionId(ctx, l.spec) === id);
+    if (own && followsModel() && pin?.id === id) {
+      // A map picked over the model's, unchecked: the model's again.
+      state.chosen.set(scope(), toggled(current.layers.map((l) => optionId(ctx, l.spec)), id));
+      state.pinned.delete(scope());
+      state.dropped.delete(scope());
+    } else if (own) {
+      // One of the pinned chart's maps.
+      if (!dropped.delete(own.spec.title)) dropped.add(own.spec.title);
+    } else {
+      const titles = new Set(lead.map((l) => l.spec.title));
+      const ids = toggled(current.layers.filter((l) => !titles.has(l.spec.title)).map((l) => optionId(ctx, l.spec)), id);
+      state.chosen.set(scope(), ids);
+      if (!pin) {
+        // With a sub-basin selected the map defaults to the model's, so a pick is a pin.
+        if (followsModel() && ids.includes(id)) {
+          state.pinned.set(scope(), { id, sub: null });
+          state.dropped.delete(scope());
+        }
+      } else if (ids.includes(id)) {
+        // Checked in a slot the pinned chart's maps use, it takes that slot.
+        const slot = layerOf(ctx, { id, sub: null }).slot;
+        for (const l of lead) if (l.slot === slot) dropped.add(l.spec.title);
+      }
+    }
+    if (state.pinned.get(scope()) === pin && pin) state.dropped.set(scope(), dropped);
     drivers.clearPreview();
     drawMap();
     markAll();
@@ -378,6 +407,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     setPinned(d) {
       if (d) state.pinned.set(scope(), d);
       else state.pinned.delete(scope());
+      state.dropped.delete(scope());
       if (d) flyToRow(d.sub);
     },
     onChange() {
@@ -723,7 +753,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     if (!lead) return onePerSlot(layers, SLOTS);
     const set = leadLayers(ctx, lead);
     const titles = new Set(set.map((l) => l.spec.title));
-    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...set], SLOTS);
+    // (Less those unchecked since it was pinned, also as its rows are previewed.)
+    const pin = state.pinned.get(scope());
+    const dropped = pin && parseId(pin.id).base === parseId(lead.id).base ? state.dropped.get(scope()) : undefined;
+    const left = set.filter((l) => !dropped?.has(l.spec.title));
+    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...left], SLOTS);
   }
 
   /**

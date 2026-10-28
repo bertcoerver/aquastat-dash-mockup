@@ -49,10 +49,21 @@ export function initYearBars(el: HTMLElement, onPick: (days: DayRange) => void):
 
   let data: YearBarsData | null = null;
   let hover: number | null = null;
+  let width = 0; // the chart's (see the ResizeObserver)
+
+  // While the series is read it's redrawn every frame, mostly the same: only what
+  // changed is put in (new markup lays the panel out again).
+  const markup = new Map<HTMLElement, string>();
+  const put = (target: HTMLElement, html: string) => {
+    if (markup.get(target) === html) return;
+    markup.set(target, html);
+    target.innerHTML = html;
+  };
 
   function draw() {
     if (!data || !data.bars.length) {
-      head.innerHTML = chart.innerHTML = "";
+      put(head, "");
+      put(chart, "");
       return;
     }
     const { bars, unit, parts, color } = data;
@@ -67,14 +78,14 @@ export function initYearBars(el: HTMLElement, onPick: (days: DayRange) => void):
     const vs = Number.isFinite(mean)
       ? `average ${fmt(mean)}${Number.isFinite(sd) ? ` ± ${fmt(sd)}` : ""} over ${done.length} year${done.length === 1 ? "" : "s"}`
       : "";
-    head.innerHTML = `
+    put(head, `
       <div class="yb-period">${data.label}, ${fmtRange(shown.days)}${shown.partial ? " (so far)" : ""}</div>
       <div class="yb-value"><span class="yb-number">${number}</span> <span class="yb-unit">${unit}</span>
         <span class="yb-vs">${vs}</span></div>
-      <div class="yb-parts">${parts[0][0]} ${fmt(shown.totals[0])} ${parts[0][1]} · ${parts[1][0]} ${fmt(shown.totals[1])} ${parts[1][1]}</div>`;
+      <div class="yb-parts">${parts[0][0]} ${fmt(shown.totals[0])} ${parts[0][1]} · ${parts[1][0]} ${fmt(shown.totals[1])} ${parts[1][1]}</div>`);
 
     // Bars.
-    const w = chart.clientWidth;
+    const w = width;
     const plotW = w - M.left - M.right;
     const plotH = H - M.top - M.bottom;
     const top = Math.max(...bars.map((b) => b.value ?? 0), Number.isFinite(sd) ? mean + sd : mean, 0);
@@ -111,11 +122,11 @@ export function initYearBars(el: HTMLElement, onPick: (days: DayRange) => void):
         return bar + label + target;
       })
       .join("");
-    chart.innerHTML = `<svg width="${w}" height="${H}" class="yb-svg" role="img"
+    put(chart, `<svg width="${w}" height="${H}" class="yb-svg" role="img"
         aria-label="${data.label} for the same days in every year">
       ${grid.join("")}${spread}${marks}${average}
       <line class="yb-base" x1="${M.left}" x2="${w - M.right}" y1="${y(0)}" y2="${y(0)}"/>
-    </svg>`;
+    </svg>`);
   }
 
   // By the pointer's position, not the element under it: a hover redraws them.
@@ -141,7 +152,11 @@ export function initYearBars(el: HTMLElement, onPick: (days: DayRange) => void):
     if (i !== null) onPick(data!.bars[i].days);
   });
 
-  new ResizeObserver(draw).observe(chart);
+  // Its width from here, not read in draw: that would lay the panel out again each time.
+  new ResizeObserver(([entry]) => {
+    width = Math.round(entry.contentRect.width);
+    draw();
+  }).observe(chart);
 
   return (next) => {
     data = next;

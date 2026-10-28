@@ -16,6 +16,7 @@ import {
   FIRST_YEAR,
   VARS,
   WORLD,
+  latestYear,
   meanAt,
   meanOver,
   regionValue,
@@ -272,6 +273,9 @@ function areaRows(ctx: Ctx, values: (area: number) => number[]): BarRow[] {
 const focus = (ctx: Ctx) => ctx.country?.m49 ?? WORLD;
 const focusName = (ctx: Ctx) => ctx.country?.name ?? "the World";
 
+/** The last year of the charts over time: AQUASTAT's latest, whatever the top bar's range. */
+const lastYear = (ctx: Ctx) => Math.max(latestYear(), ctx.period.to);
+
 /** The country, its region and the World over the years, for one variable. */
 function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
   const over = (area: number) => {
@@ -280,7 +284,7 @@ function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
       if (own.size || isCountry(ctx, area)) return own;
     }
     const out = new Map<number, number>();
-    for (let y = FIRST_YEAR; y <= ctx.period.to; y++) out.set(y, val(ctx, area, key, yearPeriod(y), weight));
+    for (let y = FIRST_YEAR; y <= lastYear(ctx); y++) out.set(y, val(ctx, area, key, yearPeriod(y), weight));
     return out;
   };
   const s: LineSeries[] = [{ label: "World", color: C.world, values: over(WORLD) }];
@@ -290,7 +294,7 @@ function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
 }
 
 function lineChart(ctx: Ctx, series: LineSeries[], unit: string, axis: string, height?: number) {
-  return lines({ series, from: FIRST_YEAR, to: ctx.period.to, selected: ctx.period.from, selectedTo: ctx.period.to, unit, axis, width: ctx.width, height, clickable: ctx.canSelect });
+  return lines({ series, from: FIRST_YEAR, to: lastYear(ctx), selected: ctx.period.from, selectedTo: ctx.period.to, unit, axis, width: ctx.width, height, clickable: ctx.canSelect });
 }
 
 function seriesCsv(series: LineSeries[], unit: string) {
@@ -1114,7 +1118,7 @@ const IRRIGATION: TopicDef = {
         const a = focus(c);
         const mha = (key: VarKey) => {
           const out = new Map<number, number>();
-          for (let y = FIRST_YEAR; y <= c.period.to; y++) out.set(y, val(c, a, key, yearPeriod(y)) / 1000);
+          for (let y = FIRST_YEAR; y <= lastYear(c); y++) out.set(y, val(c, a, key, yearPeriod(y)) / 1000);
           return out;
         };
         const s: LineSeries[] = [

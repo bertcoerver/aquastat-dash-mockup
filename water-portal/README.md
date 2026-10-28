@@ -130,7 +130,8 @@ water-portal/
     │   ├── shape-switch.ts A map's switch: the areas' colours, circles or 3D bars
     │   ├── shape-style.ts  How circles and bars look: a menu on their key (colours, full size)
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
-    │   └── load-bar.ts     Load bar under the graph pane's heading while anything loads
+    │   ├── load-bar.ts     Load bar under the graph pane's heading while anything loads
+    │   └── slow-server.ts  Warning in the bottom-left corner when the connection to Google Cloud is slow
     ├── toolbar/
     │   ├── dekads.ts       Dates as dekad numbers (3 per month, 36 per year), and as day numbers
     │   ├── place-picker.ts Country / basin search or coordinates, per view

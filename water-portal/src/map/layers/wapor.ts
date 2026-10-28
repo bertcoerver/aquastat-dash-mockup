@@ -44,7 +44,7 @@ import { boxInL2 } from "./wapor-l2";
 import { block, blockName, formatPlan, planRange, type Block, type BlockKind } from "./wapor-plan";
 import { AetiRamp, rampProps, type WaporRamp } from "./wapor-shader";
 
-const BUCKET = "https://storage.googleapis.com/fao-gismgr-wapor-3-data/DATA/WAPOR-3/MAPSET";
+export const BUCKET = "https://storage.googleapis.com/fao-gismgr-wapor-3-data/DATA/WAPOR-3/MAPSET";
 
 /** WaPOR's level 1 (global, 300 m) or 2 (some countries, 100 m). */
 export type WaporLevel = "L1" | "L2";
@@ -341,7 +341,12 @@ export const waporUnitsFor = (variable: WaporVariable): WaporUnits[] => (variabl
 /** The nearest units a variable can be shown in (after another variable is picked). */
 export function fitUnits(variable: WaporVariable, units: WaporUnits): WaporUnits {
   const all = waporUnitsFor(variable);
-  return all.find((u) => u.per === units.per && u.pixel === units.pixel) ?? all.find((u) => u.per === (units.per === "total" ? "total" : "day"))!;
+  // (A ratio has no total: its own units, then.)
+  return (
+    all.find((u) => u.per === units.per && u.pixel === units.pixel) ??
+    all.find((u) => u.per === (units.per === "total" ? "total" : "day")) ??
+    all[0]
+  );
 }
 /**
  * What a value per day (in `variable.unit`) is multiplied by in these units: `days`, the
@@ -1265,6 +1270,13 @@ export function waporStyleRamp({ variable, days, resolution }: WaporPeriod, per:
 const SAMPLE = 2 ** 18;
 
 /**
+ * The tiles in view as waporViewRange last made them (by "z/x/y"), for one period and
+ * quality filter: it runs whenever a tile comes in, and a period can be many rasters
+ * (WP: 12 months of NPP and a year of AETI), so it doesn't add them up again.
+ */
+let assembled = { key: "", tiles: new Map<string, PeriodTile>() };
+
+/**
  * The range of a period's values on screen, without `cut`% of the pixels at either
  * end: the pixels with data in the part of the globe in view, of the tiles in view
  * that have loaded, without those the quality filter hides (`maxGap`, as in
@@ -1285,10 +1297,20 @@ export function waporViewRange(period: WaporPeriod, maxGap: number | null, cut: 
   const chunks: Float32Array[] = [];
   let min = Infinity;
   let max = -Infinity;
+  const key = `${drawn.variable.id} ${drawn.key} ${drawn.qualityUrl} ${filter}`;
+  const made = assembled.key === key ? assembled.tiles : new Map<string, PeriodTile>();
+  assembled = { key, tiles: new Map() }; // (only those still in view)
   for (const index of viewTiles[drawn.level]) {
-    const get = cachedAt(index);
-    if (!loadedTile(drawn, filter, get)) continue;
-    const { values: sum, quality, width, height, transform: [a, , c, , e, f] } = assemble(drawn, filter, get);
+    const at = `${index.z}/${index.x}/${index.y}`;
+    let tile = made.get(at);
+    if (!tile) {
+      const get = cachedAt(index);
+      if (!loadedTile(drawn, filter, get)) continue;
+      tile = assemble(drawn, filter, get);
+    }
+    assembled.tiles.set(at, tile);
+    const { quality, width, height, transform: [a, , c, , e, f] } = tile;
+    const sum = tile.values.slice(); // (the one kept stays as it is)
     // Columns and rows inside the box, by their pixel centres (the grid is lon/lat).
     const cols = Array.from({ length: width }, (_, i) => {
       const lon = unwrap(a * (i + 0.5) + c);

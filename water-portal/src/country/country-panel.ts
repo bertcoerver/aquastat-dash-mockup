@@ -112,6 +112,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     topic: "sdg" as Topic,
     status: new Map<Topic, Status>(),
     pinned: new Map<Topic, Driver>(),
+    /** The pinned chart's maps unchecked in the legend since it was pinned (by title), per topic. */
+    dropped: new Map<Topic, Set<string>>(),
     /** The maps checked in the legend, oldest first, per topic (none: the topic's first tile's). */
     chosen: new Map<Topic, string[]>(),
     mapHover: null as number | null,
@@ -165,6 +167,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     setPinned(d) {
       if (d) state.pinned.set(state.topic, d);
       else state.pinned.delete(state.topic);
+      state.dropped.delete(state.topic);
       const area = areaOf(d);
       if (area !== null && area !== WORLD) flyToArea(area);
     },
@@ -181,7 +184,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   // Its title is a checklist of all the topics' maps, each once (several charts can share one),
   // under their topics, in the order of the tiles and cards, with the icons of how each can be drawn; each one
   // on the map has a section (panels/legend.ts). A map not on the map is offered in a free
-  // slot, if there is one. Checking one unpins the chart that was pinned (its map stays).
+  // slot, if there is one. A pinned chart stays pinned: its maps can be unchecked, and
+  // a map checked in a slot it uses takes that slot.
   const legend = initLayerLegend($("cp-legend"), {
     slots: SLOTS,
     onOrder: (slots) => map.setLayerOrder("country", slots),
@@ -287,8 +291,25 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   /** Check or uncheck a map. */
   function toggle(id: string) {
     if (!current) return;
-    state.chosen.set(state.topic, toggled(current.layers.map((l) => optionId(current!.ctx, l.spec)), id));
-    state.pinned.delete(state.topic);
+    const ctx = current.ctx;
+    const pin = state.pinned.get(state.topic);
+    const lead = pin ? leadLayers(ctx, pin) : [];
+    const dropped = state.dropped.get(state.topic) ?? new Set<string>();
+    const own = lead.find((l) => optionId(ctx, l.spec) === id);
+    if (own) {
+      // One of the pinned chart's maps.
+      if (!dropped.delete(own.spec.title)) dropped.add(own.spec.title);
+    } else {
+      const titles = new Set(lead.map((l) => l.spec.title));
+      const ids = toggled(current.layers.filter((l) => !titles.has(l.spec.title)).map((l) => optionId(ctx, l.spec)), id);
+      state.chosen.set(state.topic, ids);
+      // Checked in a slot the pinned chart's maps use, it takes that slot.
+      if (ids.includes(id)) {
+        const slot = layerOf(ctx, { id, sub: null }).slot;
+        for (const l of lead) if (l.slot === slot) dropped.add(l.spec.title);
+      }
+    }
+    if (pin) state.dropped.set(state.topic, dropped);
     drivers.clearPreview();
     drawMap();
     markAll();
@@ -458,7 +479,11 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     if (!lead) return onePerSlot(layers, SLOTS);
     const set = leadLayers(ctx, lead);
     const titles = new Set(set.map((l) => l.spec.title));
-    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...set], SLOTS);
+    // (Less those unchecked since it was pinned, also as its rows are previewed.)
+    const pin = state.pinned.get(state.topic);
+    const dropped = pin && parseId(pin.id).base === parseId(lead.id).base ? state.dropped.get(state.topic) : undefined;
+    const left = set.filter((l) => !dropped?.has(l.spec.title));
+    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...left], SLOTS);
   }
 
   /**

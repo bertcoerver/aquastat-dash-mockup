@@ -43,7 +43,8 @@ export async function placeAt(lngLat: LngLat): Promise<Place> {
   };
 }
 
-// Decoded tiles by URL. A missing tile (404: nothing there) is an empty list.
+// Decoded tiles by URL. A missing tile (404: nothing there) is an empty list. So is a
+// page: the dev server answers a missing local tile with index.html.
 const tiles = new Map<string, Promise<Feature[]>>();
 
 async function featureAt({ url, zoom }: { url: string; zoom: number }, [lng, lat]: LngLat) {
@@ -56,7 +57,7 @@ async function featureAt({ url, zoom }: { url: string; zoom: number }, [lng, lat
 
 async function loadTile(url: string, tileIndex: { x: number; y: number; z: number }): Promise<Feature[]> {
   const response = await quietFetch(url);
-  if (!response.ok) return [];
+  if (!response.ok || response.headers.get("content-type")?.startsWith("text/html")) return [];
   return (await parse(await response.arrayBuffer(), MVTLoader, {
     mvt: { coordinates: "wgs84", tileIndex, shape: "geojson" },
   })) as Feature[];

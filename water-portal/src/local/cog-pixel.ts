@@ -16,10 +16,11 @@
  *
  * The rasters in one folder (a WaPOR mapset: every dekad of a variable at a level) are
  * laid out alike: the same grid, and the same IFD at the same place. So after the
- * first, a raster is read with that one's layout (see LAYOUTS): 2 and 3 straight away,
- * while 1 is read alongside, only its first KiB, to check that it is laid out the same
- * (else it's read again on its own). That's two round trips per raster instead of four,
- * and about 40 KB of a WaPOR L1 dekad, nearly all of it the tile.
+ * first, a raster is read with that one's layout (see LAYOUTS): 2 straight away, while
+ * 1 is read alongside, only its first KiB, to check that it is laid out the same; then
+ * 3 (or, if it isn't the same, the raster is read again on its own). That's two round
+ * trips per raster instead of four, and about 40 KB of a WaPOR L1 dekad, nearly all of
+ * it the tile.
  *
  * The parsed IFD is kept, so another point in the same raster needs only 2 and 3. The
  * compressed tiles are kept too (see TILE_CACHE_BYTES): a WaPOR tile spans 0.75° at
@@ -157,9 +158,8 @@ function alike(url: string, like: Image): Image {
 
 /**
  * Run `use` on a raster's image; null if there's no such raster (not published yet).
- * With another raster's layout, `use` runs while the layout is checked; if it's not
- * the same, the raster is read again on its own, and its tiles read with the other
- * layout are dropped.
+ * With another raster's layout, `use` runs while the layout is checked (a tile waits
+ * for the check, see readTile); if it's not the same, the raster is read again on its own.
  */
 async function read<T>(url: string, use: (image: Image) => Promise<T>, own = false): Promise<T | null> {
   let image: Image | null = null;
@@ -179,7 +179,6 @@ async function read<T>(url: string, use: (image: Image) => Promise<T>, own = fal
     }
     if (image?.checked) images.delete(url); // (checked again next time)
     if (!(err instanceof LayoutChanged)) throw err;
-    for (const key of tiles.keys()) if (key.endsWith(` ${url}`)) tiles.delete(key);
     return read(url, use, true);
   }
 }
@@ -397,7 +396,10 @@ async function readTile(image: Image, index: number, signal?: AbortSignal): Prom
     const view = new DataView(await readRange(image.url, offset + index * size, size, signal));
     return readValue(view, type, 0, image.metadata.littleEndian);
   };
-  const [offset, length] = await Promise.all([entry(image.tileOffsets), entry(image.tileByteCounts)]);
+  // With another raster's layout, the entries are only right once that's checked: read
+  // alongside, so it costs no round trip. (Else they'd be any two numbers, a range of
+  // gigabytes perhaps.)
+  const [offset, length] = await Promise.all([entry(image.tileOffsets), entry(image.tileByteCounts), image.checked]);
   if (!offset || !length) return null;
   return readRange(image.url, offset, length, signal);
 }
