@@ -4,15 +4,15 @@
  * main.ts puts it among the map's controls.
  *
  * Each view keeps its own switches: rivers and lakes start off in the Local view (they'd
- * cover the WaPOR raster), on in the others.
+ * cover the WaPOR raster), on in the others. The graticule starts off everywhere.
  */
 import type { ToggleableLayer } from "../map/map";
 import type { View } from "../toolbar/range-rules";
 
 const DEFAULTS: Record<View, Record<ToggleableLayer, boolean>> = {
-  country: { rivers: true, lakes: true },
-  basin: { rivers: true, lakes: true },
-  local: { rivers: false, lakes: false },
+  country: { rivers: true, lakes: true, graticule: false },
+  basin: { rivers: true, lakes: true, graticule: false },
+  local: { rivers: false, lakes: false, graticule: false },
 };
 
 export interface LayersMenu {

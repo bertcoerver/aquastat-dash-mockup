@@ -15,6 +15,7 @@ export interface MapTheme {
   border: Color;
   basinBorder: Color;
   river: Color; // rivers and lakes
+  graticule: Color; // the equator and prime meridian (other lines fainter)
   /** The water balance scheme (Basin view): discharge lines, their edge, storage rising and falling. */
   scheme: Color;
   schemeCasing: Color;
@@ -45,6 +46,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     border: [120, 136, 143, 255],
     basinBorder: [150, 112, 70, 255],
     river: [0, 0, 138, 255],
+    graticule: [70, 90, 100, 170],
     scheme: [33, 113, 181, 255],
     schemeCasing: [255, 255, 255, 220],
     storageRise: [38, 166, 91, 255],
@@ -70,6 +72,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
     border: [102, 124, 134, 255],
     basinBorder: [190, 150, 100, 255],
     river: [0, 0, 138, 255],
+    graticule: [170, 190, 200, 150],
     scheme: [214, 236, 250, 255],
     schemeCasing: [10, 18, 22, 220],
     storageRise: [52, 199, 104, 255],

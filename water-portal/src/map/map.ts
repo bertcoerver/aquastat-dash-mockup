@@ -10,6 +10,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { View } from "../toolbar/range-rules";
 import { majorBasinsLayers, subBasinOutlinesLayer, subBasinsLayers, type BasinFills } from "./layers/basins";
 import { bordersLayer } from "./layers/borders";
+import { graticuleLabels, graticuleLayer } from "./layers/graticule";
 import { HorizonExtension } from "./layers/horizon";
 import { countriesLayer, countryOutlineLayer, countrySymbolsLayer, type CountryFills, type CountrySymbol } from "./layers/countries";
 import { markerLayer } from "./layers/marker";
@@ -20,11 +21,12 @@ import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporSh
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat } from "./places";
+import { spinControl } from "./spin";
 import { THEMES, type Color, type MapTheme } from "./theme";
 import { animate as ease, createFade, createTween, easeOut, linear, type Fade, type Timing } from "./tween";
 
 /** Layers the user can switch on and off (see the layers menu). */
-export type ToggleableLayer = "rivers" | "lakes";
+export type ToggleableLayer = "rivers" | "lakes" | "graticule";
 
 export interface WaterMap {
   map: maplibregl.Map;
@@ -151,7 +153,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   const state = {
     view: "country" as View,
     selection: { lngLat: null, country: null, majorBasin: null, subBasin: null } as MapSelection,
-    visible: { rivers: true, lakes: true } as Record<ToggleableLayer, boolean>,
+    visible: { rivers: true, lakes: true, graticule: false } as Record<ToggleableLayer, boolean>,
     wapor: null as WaporEntry | null,
     waporNext: null as WaporEntry | null, // seamless: loading, not drawn yet
     waporLast: null as WaporEntry | null, // seamless: the one before, under `wapor` while it fades in
@@ -220,9 +222,20 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   // The URL keeps the place and the zoom, not a tilt or turn (the bars' tilt, say):
   // always opened flat, north up.
   map.jumpTo({ pitch: 0, bearing: 0 });
+  // Let go mid-drag, the globe spins on for a while (MapLibre's own inertia stops short).
+  map.dragPan.enable({
+    linearity: 0.6,
+    easing: (t) => 1 - Math.pow(1 - t, 3),
+    maxSpeed: 20000,
+    deceleration: 60,
+  });
   // The compass shows the tilt too: dragged, it turns and tilts the map; clicked, it
   // puts it back flat, north up.
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
+  // Above them, a button to set the globe spinning.
+  map.addControl(spinControl(map), "bottom-right");
+  // The graticule's longitudes: markers, shown with its lines.
+  const graticuleNames = graticuleLabels(map);
   // MapLibre spells the credits out at first, until the map is moved; keep them to the
   // ⓘ from the start (they show on a click).
   const attrib = container.querySelector(".maplibregl-ctrl-attrib")!;
@@ -287,6 +300,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       ...major.areas,
       ...sub.areas,
       bordersLayer({ color: theme.border, visible: !basins }),
+      graticuleLayer({ color: theme.graticule, visible: state.visible.graticule }),
       major.outlines, // (sub.outlines: not drawn for now)
       ...effectGroundLayers(effects),
       riversLayer({
@@ -547,6 +561,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     setLayerVisible(layer, visible) {
       state.visible[layer] = visible;
       render();
+      if (layer === "graticule") graticuleNames.show(visible);
     },
     setSelection(selection) {
       state.selection = selection;
