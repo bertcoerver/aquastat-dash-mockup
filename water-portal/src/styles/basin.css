@@ -61,10 +61,10 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) var(--glass), transparent);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+  border: 1px solid color-mix(in srgb, var(--line) var(--glass), transparent);
   border-radius: 8px;
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
 }
@@ -85,15 +85,15 @@
 /* With a pinned chart, the pane around it goes, leaving the heading and the chart as
    boxes of their own. */
 .wb-panel.folding.has-kept {
-  background: color-mix(in srgb, var(--surface) calc(94% * (1 - var(--rest, 0))), transparent);
-  border-color: color-mix(in srgb, var(--line) calc(100% * (1 - var(--rest, 0))), transparent);
+  background: color-mix(in srgb, var(--surface) calc(var(--glass) * (1 - var(--rest, 0))), transparent);
+  border-color: color-mix(in srgb, var(--line) calc(var(--glass) * (1 - var(--rest, 0))), transparent);
   box-shadow: 0 4px 16px rgb(0 0 0 / calc(0.12 * (1 - var(--rest, 0))));
-  -webkit-backdrop-filter: blur(calc(12px * (1 - var(--rest, 0))));
-  backdrop-filter: blur(calc(12px * (1 - var(--rest, 0))));
+  -webkit-backdrop-filter: blur(calc(12px * (1 - var(--rest, 0)))) saturate(calc(1 + 0.2 * (1 - var(--rest, 0))));
+  backdrop-filter: blur(calc(12px * (1 - var(--rest, 0)))) saturate(calc(1 + 0.2 * (1 - var(--rest, 0))));
 }
 .wb-panel.folding.has-kept > .wb-head {
-  --edge: color-mix(in srgb, var(--line) calc(100% * var(--rest, 0)), transparent);
-  background: color-mix(in srgb, var(--surface) calc(94% * var(--rest, 0)), transparent);
+  --edge: color-mix(in srgb, var(--line) calc(var(--glass) * var(--rest, 0)), transparent);
+  background: color-mix(in srgb, var(--surface) calc(var(--glass) * var(--rest, 0)), transparent);
   border-radius: 7px 7px calc(7px * var(--rest, 0)) calc(7px * var(--rest, 0));
   box-shadow: inset 0 1px 0 var(--edge), inset 1px 0 0 var(--edge), inset -1px 0 0 var(--edge);
 }

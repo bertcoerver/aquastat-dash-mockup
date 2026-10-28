@@ -30,6 +30,11 @@
   border-radius: 1px;
   background: var(--muted);
 }
+/* A graph pane grows downwards as it unfolds: its bar stays beside the view tabs and title. */
+.wb-panel > .pane-resize::after {
+  top: 30px;
+  margin-top: 0;
+}
 .pane:hover > .pane-resize,
 .pane.resizing > .pane-resize {
   opacity: 0.7;
