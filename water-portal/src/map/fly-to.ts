@@ -47,7 +47,7 @@ const boxCenter = (box: Box): [number, number] => {
 const boxArea = (box: Box) => Math.max(lonSpan(box), 0.1) * Math.max(box[3] - box[1], 0.1) * Math.cos(((box[1] + box[3]) / 2) * (Math.PI / 180));
 
 /** The smallest box around `list`: around the globe, it leaves out the widest gap in longitude. */
-function unionBox(list: Box[]): Box {
+export function unionBox(list: Box[]): Box {
   const arcs = list.map((b) => [b[0], lonSpan(b)]).sort((a, b) => a[0] - b[0]);
   // Walk east from the westernmost start, keeping how far east the arcs so far reach.
   let reach = arcs[0][0] + arcs[0][1];

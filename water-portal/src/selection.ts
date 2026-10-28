@@ -1,11 +1,17 @@
 /*
  * The current selection (the "click state"): what the user picked, by clicking the
- * map, choosing a country or basin in a panel title, or typing coordinates.
+ * map, choosing a place in a panel title, or typing coordinates.
  *
- * Picking a country or basin by name selects only that: none of the other areas.
- * Picking a point (map click or coordinates) selects everything it lies in. The point
- * itself (`lngLat`) is the Local view's: only picking there changes it, so in the
- * Country and Basin views it can lie outside what's selected.
+ * Both views pick from a tree of two levels: a region and its countries, a major basin
+ * and its sub-basins. Either level can be selected; a country comes with its region
+ * (looked up from it), a sub-basin with its major basin. `region` is only set when a
+ * region itself is selected.
+ *
+ * Picking by name selects only that: none of the other areas. Picking a point by
+ * coordinates (or in the Local view) selects everything it lies in; a map click in the
+ * Country or Basin view picks what the map shows (see main.ts). The point itself
+ * (`lngLat`) is the Local view's: only picking there changes it, so in the Country and
+ * Basin views it can lie outside what's selected.
  */
 import type { LngLat, Place } from "./map/places";
 
@@ -14,9 +20,11 @@ export type SelectionSource = "map" | "country" | "basin" | "coordinates";
 export interface Selection extends Place {
   source: SelectionSource | null;
   lngLat: LngLat | null;
+  /** A region selected on its own (null with a country: its region is the country's). */
+  region: { code: number; name: string } | null;
 }
 
-export const NOTHING: Selection = { source: null, lngLat: null, country: null, majorBasin: null, subBasin: null };
+export const NOTHING: Selection = { source: null, lngLat: null, region: null, country: null, majorBasin: null, subBasin: null };
 
 type Listener = (selection: Selection) => void;
 

@@ -61,11 +61,27 @@ export interface CountryFills {
   colors: Map<number, Color>;
 }
 
-/** A thick outline around one country (by M49 code), drawn like the basin outlines. */
-/** The selected country's outline: a thick line on a contrasting halo, to stand out on any fill. */
-export function countryOutlineLayer({ m49, color, halo, visible }: { m49: number | null; color: Color; halo: Color; visible: boolean }) {
+/**
+ * An outline around one country (by M49 code), drawn like the basin outlines: a line on
+ * a contrasting halo twice as wide, to stand out on any fill (the selected country's, thick; the hovered one's).
+ */
+export function countryOutlineLayer({
+  id = "m49-outlined",
+  m49,
+  color,
+  halo,
+  width = 3,
+  visible,
+}: {
+  id?: string;
+  m49: number | null;
+  color: Color;
+  halo: Color;
+  width?: number;
+  visible: boolean;
+}) {
   return new MVTLayer<CountryProperties>({
-    id: "m49-outlined",
+    id,
     data: localTiles("m49"),
     visible: visible && m49 !== null,
     minZoom: 0,
@@ -78,8 +94,8 @@ export function countryOutlineLayer({ m49, color, halo, visible }: { m49: number
       const local = props.coordinateSystem === COORDINATE_SYSTEM.CARTESIAN;
       const data = tileOutlines(features, local ? LOCAL_BOUNDS : geoBounds(props.tile.bbox as GeoBoundingBox));
       return [
-        { id: "halo", color: halo, width: 6 },
-        { id: "path", color, width: 3 },
+        { id: "halo", color: halo, width: width * 2 },
+        { id: "path", color, width },
       ].map(
         (line) =>
           new PathLayer<Position[]>({

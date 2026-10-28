@@ -12,11 +12,11 @@
  *   Totals over the range are the mean rate × days, so a sub-basin missing a dekad
  *   isn't counted short.
  * - monthlyStats: PCP and AETI per calendar month of the range, area-weighted over all
- *   sub-basins or those of one major basin.
+ *   sub-basins, those of one major basin, or one sub-basin.
  * - windowRates: every sub-basin's mean daily PCP and AETI over each of several ranges
  *   (the same days in other years: see sameDays), for comparing the period with them.
- * - dekadRates: PCP and AETI dekad by dekad, area-weighted over all sub-basins or those
- *   of one major basin (rain against discharge).
+ * - dekadRates: PCP and AETI dekad by dekad, area-weighted over all sub-basins, those
+ *   of one major basin, or one sub-basin (rain against discharge).
  *
  * A failed load is forgotten, so it can be retried.
  */
@@ -124,8 +124,15 @@ export function periodStats(s: WaporSeries, range: DekadRange): PeriodStats {
   return { covered, days, sub };
 }
 
-/** Monthly PCP and AETI over `range` for all sub-basins, or those of `majorBasin`. */
-export function monthlyStats(s: WaporSeries, range: DekadRange, majorBasin: number | null): Monthly {
+/** What to average over: a major basin's sub-basins, or one sub-basin (null: all of them). */
+export type Within = { kind: "major" | "sub"; id: number } | null;
+
+/** Whether sub-basin `row` is in `within`. */
+const inside = (s: WaporSeries, row: number, within: Within) =>
+  !within || (within.kind === "major" ? s.majorBasins[row] : s.ids[row]) === within.id;
+
+/** Monthly PCP and AETI over `range` for all sub-basins, or those `within`. */
+export function monthlyStats(s: WaporSeries, range: DekadRange, within: Within): Monthly {
   const { from, to } = span(s, range);
   const out: Monthly = { months: [], pcp: [], aeti: [] };
   for (let i = from; i < to; ) {
@@ -135,7 +142,7 @@ export function monthlyStats(s: WaporSeries, range: DekadRange, majorBasin: numb
     let p = 0;
     let e = 0;
     for (let row = 0; row < s.ids.length; row++) {
-      if (majorBasin !== null && s.majorBasins[row] !== majorBasin) continue;
+      if (!inside(s, row, within)) continue;
       const pr = rate(s, s.pcp, row, i, end);
       const er = rate(s, s.aeti, row, i, end);
       if (pr !== pr || er !== er) continue;
@@ -170,8 +177,8 @@ export function windowRates(s: WaporSeries, ranges: DekadRange[]): WindowRates {
   return { sub };
 }
 
-/** Per dekad of `range` (by dekad number), mean mm/day of PCP and AETI, area-weighted over all sub-basins or those of `majorBasin`. */
-export function dekadRates(s: WaporSeries, range: DekadRange, majorBasin: number | null): { pcp: Map<number, number>; aeti: Map<number, number> } {
+/** Per dekad of `range` (by dekad number), mean mm/day of PCP and AETI, area-weighted over all sub-basins or those `within`. */
+export function dekadRates(s: WaporSeries, range: DekadRange, within: Within): { pcp: Map<number, number>; aeti: Map<number, number> } {
   const { from, to } = span(s, range);
   const pcp = new Map<number, number>();
   const aeti = new Map<number, number>();
@@ -180,7 +187,7 @@ export function dekadRates(s: WaporSeries, range: DekadRange, majorBasin: number
     let p = 0;
     let e = 0;
     for (let row = 0, j = i; row < s.ids.length; row++, j += s.dekads) {
-      if (majorBasin !== null && s.majorBasins[row] !== majorBasin) continue;
+      if (!inside(s, row, within)) continue;
       const [pv, ev] = [s.pcp[j], s.aeti[j]];
       if (pv !== pv || ev !== ev) continue;
       area += s.areas[row];

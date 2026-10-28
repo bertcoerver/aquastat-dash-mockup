@@ -9,6 +9,9 @@
  * pixel). The basin's outline comes from the major basins' vector tiles, drawn onto the
  * grid at a zoom level a few tiles across it.
  *
+ * A grid can be cut down to some of the basin's sub-basins (withinSubBasins: a selected
+ * sub-basin and those upstream of it), drawn onto the grid from the sub-basins' tiles.
+ *
  * Also transpiration and evapotranspiration per sub-basin (loadTranspiration): there are
  * no zonal statistics of T, so its grid and AETI's are averaged over the cells of each
  * sub-basin, drawn onto the grid from the sub-basins' vector tiles the same way.
@@ -75,6 +78,42 @@ async function readGrid(id: GridVariable, range: DayRange, major: number, box: B
     values[i] = v;
   }
   return { ...frame, values };
+}
+
+const masked = new Map<string, Promise<BasinGrid>>();
+
+/** A variable's grid (as loadBasinGrid) with the cells outside some sub-basins (`key` names them) NaN (kept). */
+export function withinSubBasins(variable: GridVariable, range: DayRange, major: number, box: Box, subs: { key: string; ids: Set<number> }): Promise<BasinGrid> {
+  const key = `${variable}:${range.start}-${range.end}:${major}:${subs.key}`;
+  let grid = masked.get(key);
+  if (!grid) {
+    grid = Promise.all([loadBasinGrid(variable, range, major, box), subBasinMask(major, box, subs)]).then(([g, mask]) => ({
+      ...g,
+      values: g.values.map((v, i) => (mask[i] ? v : NaN)),
+    }));
+    grid.catch(() => masked.delete(key));
+    masked.set(key, grid);
+  }
+  return grid;
+}
+
+const masks = new Map<string, Promise<Uint8Array>>();
+
+/** 1 where a cell's centre lies in one of the sub-basins, else 0 (kept). */
+function subBasinMask(major: number, box: Box, subs: { key: string; ids: Set<number> }): Promise<Uint8Array> {
+  const key = `${major}:${subs.key}`;
+  let mask = masks.get(key);
+  if (!mask) {
+    const frame = frameOf(box);
+    mask = tilesOver(frame, FAO_TILES.subBasins).then((all) => {
+      const features = all.filter((f) => subs.ids.has((f.properties as SubBasinProperties).SDG6_SB_ID));
+      const { data } = drawn(frame, features, () => "#fff").getImageData(0, 0, frame.width, frame.height);
+      return Uint8Array.from({ length: frame.width * frame.height }, (_, i) => (data[i * 4 + 3] >= 128 ? 1 : 0));
+    });
+    mask.catch(() => masks.delete(key));
+    masks.set(key, mask);
+  }
+  return mask;
 }
 
 // --- Rasters -------------------------------------------------------------------------

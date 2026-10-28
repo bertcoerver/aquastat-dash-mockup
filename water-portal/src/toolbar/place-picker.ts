@@ -1,35 +1,35 @@
 /*
  * The place pickers, one per view (markup in index.html):
- *   Country — a country combobox, as the title of the country panel
+ *   Country — a tree of regions and their countries (country-tree.ts), as the title of
+ *             the country panel
  *   Basin   — a tree of major basins and their sub-basins (basin-tree.ts), as the title
  *             of the water balance panel
  *   Local   — the point as the Local panel's title, which opens longitude / latitude
  *             fields; the picker also shows the panel (its charts: local-panel.ts)
  * They show the current selection, whichever way it was made. A title reads as a
  * heading ("World", "Kenya") with a small ▾, and becomes a search field when clicked.
+ * With a country or sub-basin selected, its parent comes first, "Eastern Africa · Kenya",
+ * and clicking it, or the × after the title, selects the parent alone (the × again: nothing).
  */
 import type { LngLat } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
 import type { Selection } from "../selection";
 import { basinTree, majorKey, subKey, type BasinNode, type MajorBasin } from "./basin-tree";
-import { initCombobox } from "./combobox";
+import { countryKey, countryTree, regionKey, type Country, type CountryNode, type Region } from "./country-tree";
 import { initTreeCombobox } from "./tree-combobox";
 import type { View } from "./range-rules";
 
-export type { BasinNode, MajorBasin };
-
-/** An entry of public/data/countries.json (scripts/build-lists.mjs). */
-export interface Country {
-  m49: number;
-  name: string;
-  bbox: [number, number, number, number];
-}
+export type { BasinNode, Country, CountryNode, MajorBasin, Region };
 
 interface PlacePickerOptions {
   countries: Country[];
+  regions: Region[];
+  /** Each country's region (M49 → region code; none: in no region). */
+  regionOf: Map<number, number>;
   basins: MajorBasin[];
   subBasins: SubBasin[];
-  onCountry(country: Country | null): void;
+  /** A region or a country (see CountryNode's data), or none. */
+  onCountry(picked: CountryNode["data"] | null): void;
   /** A major basin or a sub-basin (see BasinNode's data), or none. */
   onBasin(basin: BasinNode["data"] | null): void;
   onPoint(lngLat: LngLat | null): void;
@@ -40,14 +40,15 @@ export interface PlacePicker {
   show(selection: Selection): void;
 }
 
-export function initPlacePicker({ countries, basins, subBasins, onCountry, onBasin, onPoint }: PlacePickerOptions): PlacePicker {
-  const countryById = new Map(countries.map((c) => [c.m49, c]));
+export function initPlacePicker({ countries, regions, regionOf, basins, subBasins, onCountry, onBasin, onPoint }: PlacePickerOptions): PlacePicker {
+  const regionByCode = new Map(regions.map((r) => [r.code, r]));
+  const basinById = new Map(basins.map((b) => [b.id, b]));
 
-  const country = initCombobox(
+  const country = initTreeCombobox(
     document.getElementById("country-combobox")!,
-    countries.map((c) => ({ id: c.m49, label: c.name, hint: String(c.m49) })),
+    countryTree(regions, countries, regionOf),
     (option) => {
-      onCountry(option ? countryById.get(option.id)! : null);
+      onCountry(option?.data ?? null);
       done("country-input");
     },
   );
@@ -59,6 +60,25 @@ export function initPlacePicker({ countries, basins, subBasins, onCountry, onBas
       done("basin-input");
     },
   );
+
+  // The parents in the titles: what they select is set as the selection is shown.
+  const countryParent = document.getElementById("country-parent") as HTMLButtonElement;
+  const basinParent = document.getElementById("basin-parent") as HTMLButtonElement;
+  let parentRegion: Region | null = null;
+  let parentBasin: MajorBasin | null = null;
+  countryParent.addEventListener("click", () => parentRegion && onCountry({ kind: "region", region: parentRegion }));
+  basinParent.addEventListener("click", () => parentBasin && onBasin({ kind: "major", basin: parentBasin }));
+  const countryClear = document.querySelector<HTMLButtonElement>("#country-combobox .combobox-clear")!;
+  const basinClear = document.querySelector<HTMLButtonElement>("#basin-combobox .combobox-clear")!;
+  /** The parent's button, and the ×: up to the parent, or (`all`) to none. */
+  const showParent = (button: HTMLButtonElement, clear: HTMLButtonElement, name: string | null, what: string, all: string) => {
+    button.hidden = !name;
+    button.textContent = name ?? "";
+    button.title = name ? `Show all of ${name}` : "";
+    button.setAttribute("aria-label", name ? `${what}: ${name}. Show all of it` : "");
+    clear.title = name ? `Show all of ${name}` : all;
+    clear.setAttribute("aria-label", clear.title);
+  };
 
   // Coordinates: the title opens the fields below it; the form only submits when both
   // are valid numbers in range. Escape, or a press elsewhere, closes them.
@@ -99,10 +119,14 @@ export function initPlacePicker({ countries, basins, subBasins, onCountry, onBas
       localPanel.hidden = view !== "local";
     },
     show(selection) {
-      country.setValue(selection.country?.m49 ?? null);
-      // The most precise basin: a map click selects both.
-      const { majorBasin, subBasin } = selection;
+      // The most precise: a country comes with its region, a sub-basin with its major basin.
+      const { region, country: c, majorBasin, subBasin } = selection;
+      country.setValue(c ? countryKey(c.m49) : region ? regionKey(region.code) : null);
+      parentRegion = c ? regionByCode.get(regionOf.get(c.m49) ?? NaN) ?? null : null;
+      showParent(countryParent, countryClear, parentRegion?.name ?? null, "Region", "Show the world");
       basin.setValue(subBasin ? subKey(subBasin.id) : majorBasin ? majorKey(majorBasin.id) : null);
+      parentBasin = subBasin && majorBasin ? basinById.get(majorBasin.id) ?? null : null;
+      showParent(basinParent, basinClear, parentBasin?.name ?? null, "Major basin", "Show all basins");
       const p = selection.lngLat;
       lon.value = p ? String(round(p[0])) : "";
       lat.value = p ? String(round(p[1])) : "";

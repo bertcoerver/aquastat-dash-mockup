@@ -111,10 +111,42 @@ function basinsLayers<P>(
 
 /** Thick outlines around a few sub-basins (by ID), drawn the same way as the others. */
 export function subBasinOutlinesLayer({ ids, color, visible }: { ids: number[]; color: Color; visible: boolean }) {
+  return basinOutlinesLayer({ id: "sub-basins-outlined", level: "sub", ids, color, width: 2.5, visible });
+}
+
+const LEVELS = {
+  major: { data: FAO_TILES.majorBasins, idProperty: "SDG6_MB_ID" },
+  sub: { data: FAO_TILES.subBasins, idProperty: "SDG6_SB_ID" },
+};
+
+/**
+ * Outlines around a few major basins or sub-basins (by ID), over a wider `halo` line if
+ * given; `merged`: around them together, leaving out the borders between them.
+ */
+export function basinOutlinesLayer({
+  id,
+  level,
+  ids,
+  color,
+  width,
+  halo,
+  merged = false,
+  visible,
+}: {
+  id: string;
+  level: "major" | "sub";
+  ids: number[];
+  color: Color;
+  width: number;
+  halo?: Color;
+  merged?: boolean;
+  visible: boolean;
+}) {
   const wanted = new Set(ids);
-  return new MVTLayer<SubBasinProperties>({
-    id: "sub-basins-outlined",
-    data: FAO_TILES.subBasins,
+  const { data, idProperty } = LEVELS[level];
+  return new MVTLayer<MajorBasinProperties>({
+    id,
+    data,
     visible: visible && ids.length > 0,
     minZoom: 0,
     maxZoom: 8,
@@ -122,21 +154,77 @@ export function subBasinOutlinesLayer({ ids, color, visible }: { ids: number[]; 
     parameters: { depthCompare: "always" as const },
     updateTriggers: { renderSubLayers: ids.join() },
     renderSubLayers: (props) => {
-      const features = ((props.data as Feature[] | null) ?? []).filter((f) => wanted.has(f.properties?.SDG6_SB_ID));
+      const features = ((props.data as Feature[] | null) ?? []).filter((f) => wanted.has(f.properties?.[idProperty]));
       const local = props.coordinateSystem === COORDINATE_SYSTEM.CARTESIAN;
-      return new PathLayer<Position[]>({
-        ...props,
-        id: `${props.id}-path`,
-        data: tileOutlines(features, local ? LOCAL_BOUNDS : geoBounds(props.tile.bbox as GeoBoundingBox)),
-        pickable: false,
-        getPath: (path) => path as [number, number][],
-        getColor: color,
-        getWidth: 2.5,
-        widthUnits: "pixels",
-        jointRounded: true,
-      });
+      const bounds = local ? LOCAL_BOUNDS : geoBounds(props.tile.bbox as GeoBoundingBox);
+      const paths = merged ? mergedOutlines(features, bounds) : tileOutlines(features, bounds);
+      const lines = halo ? [{ id: "halo", color: halo, width: width + 3 }, { id: "path", color, width }] : [{ id: "path", color, width }];
+      return lines.map(
+        (line) =>
+          new PathLayer<Position[]>({
+            ...props,
+            id: `${props.id}-${line.id}`,
+            data: paths,
+            pickable: false,
+            getPath: (path) => path as [number, number][],
+            getColor: line.color,
+            getWidth: line.width,
+            widthUnits: "pixels",
+            jointRounded: true,
+          }),
+      );
     },
   });
+}
+
+/**
+ * Some sub-basins in colours of their own (by ID; `key` names the set), over whatever
+ * fills them; the others left clear. (Opaque colours: tiles overlap a little, and
+ * see-through ones would show the overlaps.)
+ */
+export function subBasinVeilLayer({ id, colors, key, visible }: { id: string; colors: Map<number, Color>; key: string; visible: boolean }) {
+  return new MVTLayer<SubBasinProperties>({
+    id,
+    data: FAO_TILES.subBasins,
+    visible: visible && colors.size > 0,
+    minZoom: 0,
+    maxZoom: 8,
+    onTileError: ignoreMissingTile,
+    parameters: { depthCompare: "always" as const },
+    stroked: false,
+    getFillColor: (f: { properties: SubBasinProperties }) => colors.get(f.properties.SDG6_SB_ID) ?? [0, 0, 0, 0],
+    updateTriggers: { getFillColor: key },
+  });
+}
+
+/**
+ * The outline of some areas together: the rings' edges (as in tileOutlines) less those
+ * two of them share. Neighbours in a tile share their border's vertices exactly (the
+ * tile's integer grid), so an edge drawn twice is a border between two of them.
+ */
+export function mergedOutlines(features: Feature[], b: Bounds): Position[][] {
+  const edgeKey = (p: Position, q: Position) => (p[0] < q[0] || (p[0] === q[0] && p[1] < q[1]) ? `${p[0]},${p[1]},${q[0]},${q[1]}` : `${q[0]},${q[1]},${p[0]},${p[1]}`);
+  const rings = tileOutlines(features, b);
+  const count = new Map<string, number>();
+  for (const path of rings) for (let i = 1; i < path.length; i++) {
+    const k = edgeKey(path[i - 1], path[i]);
+    count.set(k, (count.get(k) ?? 0) + 1);
+  }
+  const paths: Position[][] = [];
+  for (const path of rings) {
+    let run: Position[] = [];
+    for (let i = 1; i < path.length; i++) {
+      if (count.get(edgeKey(path[i - 1], path[i]))! > 1) {
+        if (run.length > 1) paths.push(run);
+        run = [];
+      } else {
+        if (run.length === 0) run.push(path[i - 1]);
+        run.push(path[i]);
+      }
+    }
+    if (run.length > 1) paths.push(run);
+  }
+  return paths;
 }
 
 export interface Bounds {

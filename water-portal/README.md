@@ -9,10 +9,9 @@ button moves the range forward as an animation; for a single dekad, a slider in 
 legend hides pixels whose
 NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, a panel
 built like the Country view's has three topics (rain and evaporation, water left, discharge), each
-with number tiles and charts about the selected major basin or the World: per group of major
-basins (by climate for rain and evaporation, by where the water goes for discharge and storage)
-against the average of the same days in the other years, the highest and
-lowest major basins, the same days every year (click a year to select it), and the selected
+with number tiles and charts about the selected sub-basin, major basin or the World: the highest
+and lowest major basins (with the selected sub-basin on top and the World below) against the
+average of the same days in the other years, the same days every year (click a year to select it), and the selected
 basin's sub-basins. Precipitation and evapotranspiration come from WaPOR; discharge and storage
 change from FAO's water balance model (precomputed; per major basin, or per sub-basin of the
 selected one). Each tile and chart has its map, and the range ends at the model's latest dekad. The model's own panel (a sub-basin and
@@ -44,7 +43,6 @@ Other commands:
 | `npm run typecheck` | Only check the TypeScript for errors |
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
-| `npm run groups` | Rebuild the major basins' groups for the Basin view: where their water goes and their climate (`public/data/basin-groups.json`; needs GDAL, downloads ~400 MB the first time, takes ~6 min) |
 | `npm run rivers` | Rebuild the river network per major basin and the sub-basins' middles for the Basin view's water balance scheme (`public/data/rivers/`, `public/data/sub-basin-middles.json`; from `../river-flow-poc`'s `rivers.bin` and `nodes.json`) |
 | `npm run tiles` | Rebuild the country and border tiles (needs `tippecanoe`; downloads ~220 MB the first time) |
 
@@ -69,7 +67,6 @@ water-portal/
 │   ├── build-tiles.sh      Download M49 polygons and UN boundary lines → tippecanoe → public/tiles/
 │   ├── build-lists.mjs     Country / basin / sub-basin lists for the top bar → public/data/
 │   ├── build-country-info.mjs  Each country's region (UNSD M49) and centre → public/data/
-│   └── build-basin-groups.mjs  Each major basin's ocean (or inland) and aridity class → public/data/
 ├── data/                   Source data: downloaded boundaries (not committed) and
 │                           fao_sb_ids.json (sub-basin routes and areas, from fao-wapor-discharge)
 └── src/                    The application code
@@ -109,7 +106,6 @@ water-portal/
     │   ├── sankey.ts       Sankey diagram of the network's water balance
     │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, the same days in other years, and per month (summed from subbasins.bin)
     │   ├── stats-cards.ts  The statistics topics: tiles, charts and each one's map
-    │   ├── groups.ts       The major basins' groups: by where the water goes, by climate
     │   ├── rivers.ts       Loads a major basin's river network and the sub-basins' middles
     │   ├── scheme.ts       The water balance scheme: lines along the rivers, a point on each sub-basin's river, simplification
     │   ├── scheme-map.ts   The scheme on the map: the legend's switch, key and simplify slider
@@ -134,9 +130,9 @@ water-portal/
     │   └── slow-server.ts  Warning in the bottom-left corner when the connection to Google Cloud is slow
     ├── toolbar/
     │   ├── dekads.ts       Dates as dekad numbers (3 per month, 36 per year), and as day numbers
-    │   ├── place-picker.ts Country / basin search or coordinates, per view
-    │   ├── combobox.ts     Text field with a dropdown that narrows as you type
-    │   ├── tree-combobox.ts  The same with a tree (search keeps whole branches)
+    │   ├── place-picker.ts Region / country, basin / sub-basin search or coordinates, per view
+    │   ├── tree-combobox.ts  Text field with a dropdown tree that narrows as you type (search keeps whole branches)
+    │   ├── country-tree.ts Regions → countries
     │   ├── basin-tree.ts   Major basins → sub-basins, nested the way the rivers run
     │   ├── range-rules.ts  Which ranges each view allows, and how they're adjusted
     │   ├── range-slider.ts The two-handle date range slider
@@ -170,17 +166,11 @@ water-portal/
   sub-basin's dekadal series at once from the model's files (`subbasins.bin`, ~9 MB: see below),
   loaded when the Basin view first opens. The period, the same days in
   every other year of the record and the monthly cycle are summed from it in the browser (a few ms),
-  so changing the range shows at once. Totals are each sub-basin's mean daily rate × the days covered; major basins, groups and
+  so changing the range shows at once. Totals are each sub-basin's mean daily rate × the days covered; major basins and
   the World are area-weighted (or, over the basin, summed) over their sub-basins, and their
   discharge and storage change summed over their major basins. A range of more than a year is
   compared with the other spans of its length that fit in the record, so with fewer than 3 of
-  them (a range of 3 years or more) there is no comparison. The groups (`npm run groups`):
-  **where the water goes** is the ocean most of a basin's area drains into (each sub-basin
-  followed downstream to its outlet; the outlet's coast votes for the nearest of Marine Regions'
-  Global Oceans and Seas, Baltic counted with the Atlantic, Black Sea with the Mediterranean), or
-  inland (an inland sink, or an outlet "to the sea" more than 0.5° from any ocean: the Caspian);
-  **climate** is the UNEP aridity class of WaPOR L1 PCP-A over RET-A, 2018–2025, area-weighted.
-  WaPOR's precipitation stops at 60°N, so 17 northern basins have no climate group. Without a pin, the map shows the topic's first tile (or what the legend picked),
+  them (a range of 3 years or more) there is no comparison. Without a pin, the map shows the topic's first tile (or what the legend picked),
   except with a sub-basin selected while the model's panel is shown.
 - **Map layers** (Basin and Country views, [src/panels/legend.ts](src/panels/legend.ts)): the
   legend's title is a checklist of the maps, and several can be on the map at once, one per way

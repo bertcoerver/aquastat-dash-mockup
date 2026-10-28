@@ -1,7 +1,6 @@
 import { initBasinStats } from "./basin/basin-stats";
-import type { BasinGroups } from "./basin/groups";
 import { loadModelFiles } from "./basin/model";
-import { MODEL_SHOWN, initWaterBalance } from "./basin/water-balance";
+import { initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
 import {
   WAPOR_UNITS,
@@ -19,10 +18,10 @@ import {
   type WaporUnits,
 } from "./map/layers/wapor";
 import type { WaporRamp } from "./map/layers/wapor-shader";
-import type { Box } from "./map/fly-to";
+import { unionBox, type Box } from "./map/fly-to";
 import { createMap } from "./map/map";
-import { placeAt, type LngLat } from "./map/places";
-import { upstreamFinder, type SubBasin } from "./map/sub-basin-network";
+import { placeAt, type LngLat, type Place } from "./map/places";
+import { downstreamFinder, upstreamFinder, type SubBasin } from "./map/sub-basin-network";
 import { NOTHING, selection, type SelectionSource } from "./selection";
 import { initLocalPanel } from "./local/local-panel";
 import { setPointSeriesYield, waporPixelArea } from "./local/point-series";
@@ -55,39 +54,67 @@ initSlowServerCheck();
 
 const dark = initThemeSwitch();
 
-// Hover: what's under the pointer is passed to the panels; in the Basin view, with
-// the water balance model shown, the map also shades the sub-basin there and
-// everything upstream of it. Only the latest
-// lookup is shown, as tiles can arrive out of order while the pointer moves.
+// Hover: what's under the pointer (picked from the map as drawn: at once) is passed to
+// the panels, and the map outlines what a click there would select (see selectPoint):
+// the country; the major basin, or within the selected one the sub-basin, with
+// everything upstream (green) and downstream (red) of it veiled.
 let view: View = "country";
-let hovered: LngLat | null = null;
-async function showHover(lngLat: LngLat | null) {
-  hovered = lngLat;
-  if (!lngLat) {
-    setHoveredSubBasin(null);
+let hovered: { lngLat: LngLat; place: Place } | null = null;
+function showHover(lngLat: LngLat | null, place: Place | null) {
+  hovered = lngLat && place && { lngLat, place };
+  if (!hovered) {
+    setHovered(null);
     waterBalance.hover(null);
     countryPanel.hover(null);
     basinStats.hover(null);
     return;
   }
-  const place = await placeAt(lngLat);
-  if (hovered !== lngLat) return;
-  const upstream = place.subBasin && upstreamOf(place.subBasin.id);
-  waterBalance.hover(view === "basin" ? (place.subBasin?.id ?? null) : null);
-  countryPanel.hover(view === "country" ? (place.country?.m49 ?? null) : null);
-  basinStats.hover(view === "basin" ? place : null);
-  setHoveredSubBasin(MODEL_SHOWN && view === "basin" && place.subBasin ? { id: place.subBasin.id, upstream: upstream! } : null);
+  const { country, majorBasin, subBasin } = hovered.place;
+  waterBalance.hover(view === "basin" ? (subBasin?.id ?? null) : null);
+  countryPanel.hover(view === "country" ? (country?.m49 ?? null) : null);
+  basinStats.hover(view === "basin" ? hovered.place : null);
+  const inSelected = !!majorBasin && majorBasin.id === selection.get().majorBasin?.id;
+  // The selected sub-basin's catchment is never picked out up- or downstream: not when
+  // hovering in it, nor as part of another's.
+  const own = selectedCatchment();
+  const outside = (ids: Set<number>) => (own.size ? new Set([...ids].filter((id) => !own.has(id))) : ids);
+  const inOwn = !!subBasin && own.has(subBasin.id);
+  setHovered(
+    view === "country" && country ? { country: country.m49 }
+    : view !== "basin" || !majorBasin ? null
+    : inSelected && subBasin
+      ? { sub: subBasin.id, upstream: inOwn ? NONE : outside(upstreamOf(subBasin.id)), downstream: inOwn ? NONE : outside(downstreamOf(subBasin.id)) }
+    : { major: majorBasin.id },
+  );
 }
 
-// Sub-basins can only be selected for the water balance model; without it, picking a
-// sub-basin (by name or on the map) selects its major basin.
-const subBasinOf = <T>(subBasin: T | null): T | null => (MODEL_SHOWN ? subBasin : null);
+/** The selected sub-basin and everything upstream of it (empty: none selected). */
+const NONE = new Set<number>();
+let catchment = { id: null as number | null, ids: NONE };
+function selectedCatchment() {
+  const id = selection.get().subBasin?.id ?? null;
+  if (id !== catchment.id) catchment = { id, ids: id === null ? NONE : new Set([id, ...upstreamOf(id)]) };
+  return catchment.ids;
+}
+
+/** After a selection: what a click under the pointer would select may have changed (a major basin's sub-basins are drawn now). */
+async function refreshHover() {
+  const before = hovered;
+  if (!before) return;
+  if (view !== "basin" || before.place.subBasin || !selection.get().majorBasin) return showHover(before.lngLat, before.place);
+  // (Not drawn when picked: looked up instead, until the pointer moves.)
+  const place = await placeAt(before.lngLat);
+  if (hovered === before) showHover(before.lngLat, place);
+}
 
 // The point is the Local view's: selecting in the Country or Basin view (a click, a
 // name) leaves it as it was.
 const keptPoint = () => (view === "local" ? null : selection.get().lngLat);
 
-// Selecting a point (map click or typed coordinates) selects everything it lies in.
+// Selecting a point by coordinates, or in the Local view, selects everything it lies
+// in. A map click in the Country or Basin view picks what the map shows: the country;
+// the major basin, and only within the major basin already selected its sub-basin (its
+// sub-basins are on the map then), so a sub-basin takes two clicks from the World.
 let pointWanted: LngLat | null = null;
 async function selectPoint(lngLat: LngLat | null, source: SelectionSource) {
   pointWanted = lngLat;
@@ -95,15 +122,23 @@ async function selectPoint(lngLat: LngLat | null, source: SelectionSource) {
   const place = await placeAt(lngLat);
   if (pointWanted !== lngLat) return;
   const before = selection.get();
-  selection.set({ source, ...place, lngLat: view === "local" ? lngLat : keptPoint(), subBasin: subBasinOf(place.subBasin) });
-  // A click on another country (Country view) or basin (Basin view) flies to it, as
-  // picking it by name does.
+  const precise = source !== "map" || view === "local";
+  const sameMajor = !!place.majorBasin && place.majorBasin.id === before.majorBasin?.id;
+  selection.set({
+    ...NOTHING,
+    ...place,
+    source,
+    lngLat: view === "local" ? lngLat : keptPoint(),
+    subBasin: precise || sameMajor ? place.subBasin : null,
+  });
+  // A click on another country (Country view), major basin or sub-basin (Basin view; a
+  // sub-basin's with all upstream of it) flies to it, as picking it by name does.
   if (source !== "map" || !boxes) return;
   const { country, majorBasin, subBasin } = selection.get();
   let box: Box | undefined;
   if (view === "country" && country && country.m49 !== before.country?.m49) box = boxes.country.get(country.m49);
-  if (view === "basin" && majorBasin && (majorBasin.id !== before.majorBasin?.id || subBasin?.id !== before.subBasin?.id))
-    box = subBasin ? boxes.sub.get(subBasin.id) : boxes.major.get(majorBasin.id);
+  if (view === "basin" && majorBasin && majorBasin.id !== before.majorBasin?.id) box = boxes.major.get(majorBasin.id);
+  if (view === "basin" && subBasin && subBasin.id !== before.subBasin?.id) box = catchmentBox(subBasin.id);
   if (box) showBox(box);
 }
 // Outlines to fly to (once loaded).
@@ -119,15 +154,14 @@ const waterMap = createMap(
     onHover: showHover,
   },
 );
-const { map, setView, setLayerVisible, setWapor, setWaporMaxGap, setWaporRamp, setSelection, showBox, showPoint, setHoveredSubBasin } =
+const { map, setView, setLayerVisible, setWapor, setWaporMaxGap, setWaporRamp, setSelection, showBox, showPoint, setHovered } =
   waterMap;
 
-const [countries, basins, subBasins, countryInfo, basinGroups] = await Promise.all([
+const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<Country>("countries"),
   loadList<MajorBasin>("major-basins"),
   loadList<SubBasin>("sub-basins"),
   loadData<CountryInfo>("country-info"),
-  loadData<BasinGroups>("basin-groups"),
 ]);
 boxes = {
   country: new Map(countries.map((c) => [c.m49, c.bbox])),
@@ -135,6 +169,9 @@ boxes = {
   sub: new Map(subBasins.map((b) => [b.id, b.bbox])),
 };
 const upstreamOf = upstreamFinder(subBasins);
+const downstreamOf = downstreamFinder(subBasins);
+/** The box around a sub-basin and everything upstream of it. */
+const catchmentBox = (id: number) => unionBox([id, ...upstreamOf(id)].map((sub) => boxes!.sub.get(sub)).filter((b): b is Box => !!b));
 // Basin view: the water balance model for the selected sub-basin (map colours, panel).
 let toolbarApi: Toolbar | null = null;
 const waterBalance = initWaterBalance({
@@ -148,7 +185,6 @@ const basinStats = initBasinStats({
   map: waterMap,
   majorBasins: basins,
   subBasins,
-  groups: basinGroups,
   setMapOverride: (override) => waterBalance.setMapOverride(override),
   setRange: (range) => toolbarApi?.setRange(range),
 });
@@ -164,15 +200,24 @@ const countryPanel = initCountryPanel({
 });
 const picker = initPlacePicker({
   countries,
+  regions: countryInfo.regions,
+  regionOf: new Map(Object.entries(countryInfo.countries).map(([m49, c]) => [Number(m49), c.region])),
   basins,
   subBasins,
-  // Picking a country or basin by name selects only that: no other areas (but a
-  // sub-basin comes with the major basin it is part of), and the Local view's point.
-  onCountry(country) {
+  // Picking a place by name selects only that: no other areas (but a sub-basin comes
+  // with the major basin it is part of), and the Local view's point.
+  onCountry(picked) {
     pointWanted = null;
     const lngLat = keptPoint();
-    selection.set(country ? { ...NOTHING, lngLat, source: "country", country: { m49: country.m49, name: country.name } } : { ...NOTHING, lngLat });
-    if (country) showBox(country.bbox);
+    if (!picked) return selection.set({ ...NOTHING, lngLat });
+    if (picked.kind === "region") {
+      const { code, name } = picked.region;
+      selection.set({ ...NOTHING, lngLat, source: "country", region: { code, name } });
+      return countryPanel.showArea(code);
+    }
+    const { m49, name, bbox } = picked.country;
+    selection.set({ ...NOTHING, lngLat, source: "country", country: { m49, name } });
+    showBox(bbox);
   },
   onBasin(picked) {
     pointWanted = null;
@@ -184,9 +229,9 @@ const picker = initPlacePicker({
       lngLat,
       source: "basin",
       majorBasin: { id: major.id, name: major.name },
-      subBasin: picked.kind === "sub" ? subBasinOf({ id: picked.basin.id, name: picked.basin.name }) : null,
+      subBasin: picked.kind === "sub" ? { id: picked.basin.id, name: picked.basin.name } : null,
     });
-    showBox((picked.kind === "sub" && !MODEL_SHOWN ? picked.majorBasin : picked.basin).bbox);
+    showBox(picked.kind === "sub" ? catchmentBox(picked.basin.id) : picked.basin.bbox);
   },
   onPoint(lngLat) {
     selectPoint(lngLat, "coordinates");
@@ -206,6 +251,7 @@ selection.subscribe((s) => {
   countryPanel.setSelection(s);
   basinStats.setSelection(s);
   localPanel.setSelection(s);
+  refreshHover();
 });
 
 function loadList<T>(name: string): Promise<T[]> {
@@ -490,7 +536,7 @@ function hideWapor() {
 
 // The map follows the view tab, and in the Local view the date range.
 function onToolbarChange({ view: newView, range, days }: ToolbarState) {
-  if (newView !== view) setHoveredSubBasin(null);
+  if (newView !== view) setHovered(null);
   view = newView;
   setView(view);
   layersMenu.setView(view);

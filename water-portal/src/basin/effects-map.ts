@@ -27,9 +27,11 @@ import { tuningSection } from "../panels/tuning-pane";
 import { SHAPES, SHAPE_LABELS, type Shape, type ShapeOption } from "../panels/shape-switch";
 import type { MajorBasin } from "../toolbar/place-picker";
 import type { DayRange } from "../toolbar/range-rules";
-import { loadBasinGrid, type BasinGrid } from "./basin-grids";
+import { loadBasinGrid, withinSubBasins, type BasinGrid } from "./basin-grids";
 
 export type EffectKind = "rain" | "vapour";
+/** Some of the major basin's sub-basins to draw over only (`key` names them; a selected one and those upstream of it). */
+export type Within = { key: string; ids: Set<number> };
 
 interface Options {
   map: WaterMap;
@@ -52,7 +54,7 @@ export interface EffectsMap {
    * Draw `kinds` of major basin `major` over `range` (none: clear them). Returns each
    * one's key for the legend, or why it isn't drawn (yet).
    */
-  draw(major: number | null, range: DayRange | null, kinds: EffectKind[]): Map<EffectKind, { status: string; key: LegendKey | null }>;
+  draw(major: number | null, range: DayRange | null, kinds: EffectKind[], within?: Within | null): Map<EffectKind, { status: string; key: LegendKey | null }>;
 }
 
 type Mode = Shape | "effect";
@@ -205,14 +207,15 @@ export function initEffectsMap({ map, majorBasins, onChange }: Options): Effects
   panels.rain.append(tuningPanel("rain", rain, RAIN_TUNING, RAIN_COLORS, () => onChange()));
   panels.vapour.append(tuningPanel("vapour", vapour, VAPOUR_TUNING, VAPOUR_COLORS, () => onChange()));
 
-  /** The rasters a kind needs over a range (loading them the first time). */
-  function status(kind: EffectKind, range: DayRange, major: number): Status {
-    const id = `${kind}:${range.start}-${range.end}:${major}`;
+  /** The rasters a kind needs over a range (loading them the first time), over `within` only if given. */
+  function status(kind: EffectKind, range: DayRange, major: number, within: Within | null): Status {
+    const id = `${kind}:${range.start}-${range.end}:${major}:${within?.key ?? ""}`;
     let s = statuses.get(id);
     if (!s) {
       statuses.set(id, (s = { kind: "loading" }));
       const box = boxes.get(major)!;
-      Promise.all((kind === "rain" ? (["PCP"] as const) : (["AETI", "T"] as const)).map((v) => loadBasinGrid(v, range, major, box)))
+      const load = (v: "PCP" | "AETI" | "T") => (within ? withinSubBasins(v, range, major, box, within) : loadBasinGrid(v, range, major, box));
+      Promise.all((kind === "rain" ? (["PCP"] as const) : (["AETI", "T"] as const)).map(load))
         .then((grids) => statuses.set(id, { kind: "ready", grids }))
         .catch((err: Error) => statuses.set(id, { kind: "error", message: err.message }))
         .then(() => onChange());
@@ -253,7 +256,7 @@ export function initEffectsMap({ map, majorBasins, onChange }: Options): Effects
       mode[kind] = id as Mode;
     },
 
-    draw(major, range, kinds) {
+    draw(major, range, kinds, within = null) {
       const out = new Map<EffectKind, { status: string; key: LegendKey | null }>();
       if (major === null || !range || !kinds.length || !boxes.has(major)) {
         clear();
@@ -267,7 +270,7 @@ export function initEffectsMap({ map, majorBasins, onChange }: Options): Effects
       for (const kind of ["rain", "vapour"] as EffectKind[]) {
         panels[kind].hidden = !kinds.includes(kind);
         if (!kinds.includes(kind)) continue;
-        const s = status(kind, range, major);
+        const s = status(kind, range, major, within);
         if (s.kind !== "ready") {
           out.set(kind, { status: s.kind === "loading" ? LOADING : s.message, key: null });
           continue;
@@ -318,7 +321,7 @@ export function initEffectsMap({ map, majorBasins, onChange }: Options): Effects
         }
       }
       const key =
-        `${major}:${range.start}-${range.end}:${kinds.join()}:${[...out.values()].map((o) => o.status).join()}:` +
+        `${major}:${within?.key ?? ""}:${range.start}-${range.end}:${kinds.join()}:${[...out.values()].map((o) => o.status).join()}:` +
         `${JSON.stringify(rain)}:${JSON.stringify(vapour)}:${rgb(theme.rain)}`;
       if (key === drawn) return drawnKeys;
       drawn = key;

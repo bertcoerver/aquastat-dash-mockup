@@ -56,6 +56,8 @@ export const MODEL_SHOWN = false;
 
 export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Options): WaterBalance {
   const byId = new Map(subBasins.map((b) => [b.id, b]));
+  const subCount = new Map<number, number>();
+  for (const b of subBasins) subCount.set(b.majorBasin, (subCount.get(b.majorBasin) ?? 0) + 1);
   const state = {
     view: "country" as View,
     range: { start: 0, end: 0 } as DekadRange,
@@ -270,12 +272,14 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     }
   }
 
+  // (The title names the major basin.)
   function subtitle(result: NetworkResult | null) {
     const sb = state.selection?.subBasin;
-    if (!sb) return state.selection?.majorBasin ? "Major basin" : "";
+    const plural = (n: number) => `${n} sub-basin${n === 1 ? "" : "s"}`;
+    const major = state.selection?.majorBasin;
+    if (!sb) return major ? plural(subCount.get(major.id) ?? 0) : "";
     const upstream = result ? result.series.size - 1 : upstreamOf(sb.id).size;
-    const major = state.selection?.majorBasin?.name;
-    return `${major ? `${major} · ` : ""}${upstream ? `${upstream} sub-basin${upstream === 1 ? "" : "s"} upstream` : "No sub-basins upstream"}`;
+    return upstream ? `${plural(upstream)} upstream` : "No sub-basins upstream";
   }
 
   function renderMessage() {

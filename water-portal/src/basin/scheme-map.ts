@@ -44,6 +44,8 @@ export interface SchemeLayer {
   key: string;
   range: string;
   mode?: string;
+  /** Only these sub-basins' rivers (a selected one and those upstream of it; null: all the major basin's). */
+  only?: Set<number> | null;
 }
 
 interface Options {
@@ -318,23 +320,27 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       showSimplify();
 
       const theme = map.theme;
-      const ids = [...scheme.nodes.keys()];
+      const only = q?.only ?? null;
+      const ids = [...scheme.nodes.keys()].filter((id) => !only || only.has(id));
+      // (Elsewhere no discharge: no lines, no particles.)
+      const value = (id: number) => (!only || only.has(id) ? q!.value(id) : NaN);
       const lines: SchemeLineStyle[] = [];
       const arrows: SchemeArrow[] = [];
       let layer: SchemeParticles | undefined;
 
       if (q && particles) {
-        const p = riverParticles(major, net, scheme, q.value, theme, tune, (ref) => legend.hold(`${q.range}:particles`, ref));
+        const p = riverParticles(major, net, scheme, value, theme, tune, (ref) => legend.hold(`${q.range}:particles`, ref));
         layer = p.layer ?? undefined;
         const top = nice(p.ref);
         const color = rgb(theme.particleRiver);
         const fractions = tune.decades >= 2 ? [100, 10, 1] : [10, 3, 1];
         out.set("Q", { status: "", key: { kind: "lines", items: fractions.map((f) => ({ value: top / f, size: p.width(top / f), color })) } });
       } else if (q) {
-        const ref = legend.hold(q.range, Math.max(0, ...ids.map(q.value).filter(Number.isFinite)) || 1);
+        const ref = legend.hold(q.range, Math.max(0, ...ids.map(value).filter(Number.isFinite)) || 1);
         const width = (v: number) => (v > 0 ? Math.max(Q_MIN_PX, (v / ref) * Q_PX) : 0);
         for (const line of scheme.lines) {
-          const v = lineQ(line, q.value, scheme);
+          if (only && !only.has(line.in)) continue;
+          const v = lineQ(line, value, scheme);
           lines.push({ id: line, path: line.path, width: width(v), subBasin: line.in, value: v });
           if (line.kind !== "mouth") continue;
           const [[x0, y0], [x1, y1]] = line.path;
@@ -356,7 +362,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
         arrows,
         particles: layer,
         subBasins: new Set(q ? ids : []),
-        subBasinsKey: q ? String(major) : "",
+        subBasinsKey: q ? (only ? `${major}:${ids.join()}` : String(major)) : "",
         onHover(item) {
           const next = item && { ...item, kind: "Q" as SchemeKind };
           if (next?.subBasin === hover?.subBasin && next?.value === hover?.value) return;

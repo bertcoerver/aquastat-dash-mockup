@@ -8,8 +8,9 @@
  * water withdrawn, say (see waterportal-inventory/waterportal-multivariable-maps.md).
  *
  * The Water Portal shows some charts only for the World and others only for a
- * country. Here every chart works in both: regional charts get the selected country as
- * an extra row on top, and the trends compare it with its region and the World.
+ * country. Here every chart works for the World, a region and a country: regional
+ * charts get the selected country as an extra row on top (a selected region is picked
+ * out among the others), and the trends compare it with its region and the World.
  */
 import {
   BASE_YEAR,
@@ -43,8 +44,10 @@ export interface Ctx {
   /** The period as shown, e.g. "2019–2023". */
   label: string;
   country: { m49: number; name: string } | null;
-  /** The selected country's region. */
+  /** The selected country's region, or the region selected on its own. */
   region: Region | null;
+  /** What the panel is about: the country, or the region selected on its own (null: the World). */
+  selected: { code: number; name: string } | null;
   regions: Region[];
   /** Every country (M49) in a region. */
   countries: number[];
@@ -264,14 +267,20 @@ function val(ctx: Ctx, area: number, key: VarKey, p: Period, weight?: VarKey) {
 function areaRows(ctx: Ctx, values: (area: number) => number[]): BarRow[] {
   const rows: BarRow[] = [];
   if (ctx.country) rows.push({ sub: `area:${ctx.country.m49}`, label: ctx.country.name, values: values(ctx.country.m49), emphasis: true });
-  for (const r of ctx.regions) rows.push({ sub: `area:${r.code}`, label: r.short, values: values(r.code) });
+  for (const r of ctx.regions) rows.push({ sub: `area:${r.code}`, label: r.short, values: values(r.code), emphasis: !ctx.country && r.code === ctx.selected?.code });
   rows.push({ sub: `area:${WORLD}`, label: "World", values: values(WORLD) });
   return rows;
 }
 
-/** The area the single-area charts are about: the country, or the World. */
-const focus = (ctx: Ctx) => ctx.country?.m49 ?? WORLD;
-const focusName = (ctx: Ctx) => ctx.country?.name ?? "the World";
+/** The area the single-area charts are about: the country, the region, or the World. */
+const focus = (ctx: Ctx) => ctx.selected?.code ?? WORLD;
+const focusName = (ctx: Ctx) => ctx.selected?.name ?? "the World";
+
+/** For the trends' captions: what they compare. */
+const compared = (c: Ctx) =>
+  c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.`
+  : c.region ? `${c.region.name} compared with the World.`
+  : "Pick a country to compare it with its region.";
 
 /** The last year of the charts over time: AQUASTAT's latest, whatever the top bar's range. */
 const lastYear = (ctx: Ctx) => Math.max(latestYear(), ctx.period.to);
@@ -288,7 +297,7 @@ function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
     return out;
   };
   const s: LineSeries[] = [{ label: "World", color: C.world, values: over(WORLD) }];
-  if (ctx.region) s.push({ label: ctx.region.name, color: C.s2, values: over(ctx.region.code) });
+  if (ctx.region) s.push({ label: ctx.region.name, color: C.s2, values: over(ctx.region.code), emphasis: !ctx.country });
   if (ctx.country) s.push({ label: ctx.country.name, color: C.s1, values: over(ctx.country.m49), emphasis: true });
   return s;
 }
@@ -412,7 +421,7 @@ const SDG: TopicDef = {
     {
       id: "sdg-stress-trend",
       title: () => "Water stress over time",
-      caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + ` Click a year to map it; bars: the change since ${BASE_YEAR}.`,
+      caption: (c) => compared(c) + ` Click a year to map it; bars: the change since ${BASE_YEAR}.`,
       render(c) {
         const s = areaSeries(c, "ws");
         return { html: lineChart(c, s, "%", "Water stress"), csv: seriesCsv(s, "%") };
@@ -454,7 +463,7 @@ const SDG: TopicDef = {
     {
       id: "sdg-wue-sectors",
       title: (c) => `Water use efficiency by sector, ${c.label}`,
-      caption: (c) => `${c.country ? c.country.name : "Per region"}: value added per m³ in each sector, ${BASE_YEAR} and ${c.label}. Hover a row to map that sector, with circles of the water it withdraws.`,
+      caption: (c) => `${c.selected?.name ?? "The World"}: value added per m³ in each sector, ${BASE_YEAR} and ${c.label}. Hover a row to map that sector, with circles of the water it withdraws.`,
       render(c) {
         const a = focus(c);
         const rows: BarRow[] = [
@@ -477,7 +486,7 @@ const SDG: TopicDef = {
     {
       id: "sdg-wue-change",
       title: () => `Water use efficiency since ${BASE_YEAR}`,
-      caption: (c) => `${c.country ? `${c.country.name} compared with its region and the World. ` : ""}The map shows the change from ${BASE_YEAR} to ${c.label} as circles (green: more efficient), over water stress: whether the stressed countries are getting more out of their water.`,
+      caption: (c) => `${c.selected ? `${compared(c)} ` : ""}The map shows the change from ${BASE_YEAR} to ${c.label} as circles (green: more efficient), over water stress: whether the stressed countries are getting more out of their water.`,
       render(c) {
         const s = areaSeries(c, "wue");
         return { html: lineChart(c, s, "US$/m³", "Water use efficiency"), csv: seriesCsv(s, "US$/m³") };
@@ -517,9 +526,9 @@ const SDG: TopicDef = {
       id: "sdg-quadrant",
       title: (c) => `Water use efficiency and water stress, ${BASE_YEAR} to ${c.label}`,
       caption: (c) =>
-        `SDG 6.4 in one picture: each dot a country, as big as the water it withdraws, with a line from where it was in ${BASE_YEAR}${c.country ? " (for " + (c.region?.name ?? "its region") + ")" : " (for the largest)"}. The target: down (less stress) and right (more value per m³). The vertical line is the World's efficiency.`,
+        `SDG 6.4 in one picture: each dot a country, as big as the water it withdraws, with a line from where it was in ${BASE_YEAR}${c.region ? ` (for ${c.region.name})` : c.country ? "" : " (for the largest)"}. The target: down (less stress) and right (more value per m³). The vertical line is the World's efficiency.`,
       render(c) {
-        const arrows = new Set(c.country ? c.region?.members ?? [c.country.m49] : largest(c, "tww", 15));
+        const arrows = new Set(c.region?.members ?? (c.country ? [c.country.m49] : largest(c, "tww", 15)));
         const points = c.countries.map((m): Bubble => ({
           ...bubbleOf(c, m),
           x: meanAt(m, "wue", c.period),
@@ -594,14 +603,16 @@ function quadrantMap(c: Ctx): MapSpec {
 
 const fmtN = (v: number) => v.toLocaleString("en-US");
 
-/** A country's dot: the selected one in the first colour, its region's in the second, the rest grey. */
+/** A country's dot: the selected one in the first colour, its region's (or the selected region's) in the second, the rest grey. */
 function bubbleOf(c: Ctx, m49: number): Omit<Bubble, "x" | "y" | "size"> {
   const own = m49 === c.country?.m49;
   const near = !own && !!c.region?.members.includes(m49);
   return { sub: `area:${m49}`, label: c.nameOf(m49), color: own ? C.s1 : near ? C.s2 : undefined, emphasis: own };
 }
 const bubbleSeries = (c: Ctx) =>
-  c.country ? [{ label: c.country.name, color: C.s1 }, { label: c.region?.name ?? "Its region", color: C.s2 }, { label: "Other countries", color: C.world }] : [];
+  c.country ? [{ label: c.country.name, color: C.s1 }, { label: c.region?.name ?? "Its region", color: C.s2 }, { label: "Other countries", color: C.world }]
+  : c.region ? [{ label: c.region.name, color: C.s2 }, { label: "Other countries", color: C.world }]
+  : [];
 
 /** The `n` countries with the most of a variable. */
 function largest(c: Ctx, key: VarKey, n: number) {
@@ -628,7 +639,7 @@ const RESOURCES: TopicDef = {
       unit: "10⁹ m³/yr",
       color: MAP_C.s1,
       // The World's is the sum of what countries produce internally (external water comes from another country).
-      value: (c) => (c.country ? meanAt(c.country.m49, "trwr", c.period) : meanOver(c.period, (y) => regionValue(WORLD, "irwr", y, c.countries))),
+      value: (c) => (c.selected ? val(c, focus(c), "trwr", c.period) : meanOver(c.period, (y) => regionValue(WORLD, "irwr", y, c.countries))),
       map: (c) => circlesMap("trwr", "Total renewable water resources", unitOf("trwr"), (m) => meanAt(m, "trwr", c.period)),
     },
     { id: "t-dep", label: "From other countries", unit: "%", color: "#a63603", value: (c) => (c.country ? meanAt(c.country.m49, "dep", c.period) : NaN), map: (c) => ({ ...rampMap(c, "dep", "Dependency ratio", RAMPS.oranges, "linear", [0, 100]), note: "Renewable water that comes from other countries" }) },
@@ -709,7 +720,7 @@ const RESOURCES: TopicDef = {
     {
       id: "wr-trend",
       title: () => "Renewable water per person over time",
-      caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + " Click a year to map it.",
+      caption: (c) => compared(c) + " Click a year to map it.",
       render(c) {
         const s = areaSeries(c, "trwrpc");
         return { html: lineChart(c, s, "m³/inhab/yr", "Renewable water per person"), csv: seriesCsv(s, "m3/inhab/yr") };
@@ -1068,7 +1079,7 @@ const IRRIGATION: TopicDef = {
     {
       id: "ir-cultivated",
       title: () => "Cultivated area equipped for irrigation",
-      caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + " Click a year to map it.",
+      caption: (c) => compared(c) + " Click a year to map it.",
       render(c) {
         const s = areaSeries(c, "pctci");
         return { html: lineChart(c, s, "%", "Cultivated area equipped for irrigation"), csv: seriesCsv(s, "%") };
@@ -1093,7 +1104,7 @@ const IRRIGATION: TopicDef = {
     {
       id: "ir-actual",
       title: () => "Equipped area actually irrigated",
-      caption: (c) => (c.country ? `${c.country.name} compared with ${c.region?.name ?? "its region"} and the World.` : "Pick a country to compare it with its region.") + " Click a year to map it; circles: the equipped hectares not irrigated.",
+      caption: (c) => compared(c) + " Click a year to map it; circles: the equipped hectares not irrigated.",
       render(c) {
         const s = areaSeries(c, "pctaai");
         return { html: lineChart(c, s, "%", "Equipped area actually irrigated"), csv: seriesCsv(s, "%") };

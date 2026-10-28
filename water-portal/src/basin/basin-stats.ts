@@ -1,8 +1,8 @@
 /*
  * Basin view: the statistics in the water balance panel, after the Country panel
  * (country/country-panel.ts): the topics' number tiles and chart cards
- * (stats-cards.ts), all in one column, about the selected major basin or, with none
- * selected, the World. All over the top bar's date range, compared with the same days in the other
+ * (stats-cards.ts), all in one column, about the selected sub-basin or major basin or,
+ * with none selected, the World. All over the top bar's date range, compared with the same days in the other
  * years of the record.
  *
  * Every tile and card has a map: hovering previews it, clicking pins it
@@ -13,7 +13,7 @@
  * or dekad on a chart of them maps that month or dekad; clicking it selects it. Unless a sub-basin is selected and the water balance model is
  * shown (water-balance.ts, MODEL_SHOWN): then it shows the model's, which this hands
  * the map back to. Within a card, hovering a row picks out its basins on the map (a
- * group's, a basin, a sub-basin outlined), hovering a series in a legend maps that
+ * major basin, a sub-basin outlined), hovering a series in a legend maps that
  * series, and clicking a year on a chart of the same days every year selects that year.
  * Hovering a basin on the map shows its value. A switch in a map's legend section draws
  * it as the basins' colours, circles or 3D bars (panels/shape-switch.ts), except where
@@ -41,7 +41,6 @@ import type { Selection } from "../selection";
 import type { MajorBasin } from "../toolbar/place-picker";
 import { WAPOR_MIN_YEAR, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
 import { basinLastDekad, daysOfDekads, type DekadRange, type View } from "../toolbar/range-rules";
-import { inGroup, setBasinGroups, type BasinGroups } from "./groups";
 import { loadTranspiration } from "./basin-grids";
 import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { MODEL_SHOWN } from "./water-balance";
@@ -63,6 +62,7 @@ import {
   tileValue,
   unitMenu,
   windowLabel,
+  withinOf,
   type BasinCtx,
   type BasinMapSpec,
   type BasinTile,
@@ -79,8 +79,6 @@ interface Options {
   map: WaterMap;
   majorBasins: MajorBasin[];
   subBasins: SubBasin[];
-  /** The major basins' groups (by climate, by where the water goes). */
-  groups: BasinGroups;
   /** The water balance panel: it shows the model's map unless a chart takes over. */
   setMapOverride(override: boolean): void;
   /** Select a range in the top bar (from clicking a year on a chart). */
@@ -123,8 +121,7 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 /** The first dekad of the WaPOR record. */
 const FIRST_DK = mk(WAPOR_MIN_YEAR, 0, 0);
 
-export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOverride, setRange }: Options): BasinStats {
-  setBasinGroups(groups);
+export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, setRange }: Options): BasinStats {
   const majorNames = new Map(majorBasins.map((b) => [b.id, b.name]));
   const subNames = new Map(subBasins.map((b) => [b.id, b.name]));
   const majorIds = majorBasins.map((b) => b.id);
@@ -185,7 +182,13 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       const ctx = current.ctx;
       const on = current.layers.map((l) => optionId(ctx, l.spec));
       const taken = new Set(current.layers.map((l) => l.slot));
-      const options = menuMaps(ctx).map(({ id, spec }) => {
+      // A map against the other years, or in its own units (not the legend's), is its measure's
+      // in another option of the unit menu: listed only while on the map (a chart's), or (against
+      // the other years) as the measure's map (picked in its unit menu).
+      const listed = menuMaps(ctx).filter(
+        ({ id, spec }) => on.includes(id) || (spec.units && (!spec.against || ctx.against.has(spec.measure))),
+      );
+      const options = listed.map(({ id, spec }) => {
         const m = shapesOf(spec, ctx);
         const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
         // (On the map, as drawn: a card can have it drawn its own way.)
@@ -555,7 +558,12 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
 
     const status = state.status;
     const major = state.selection?.majorBasin ?? null;
-    $("bs-heading").textContent = major ? `${majorNames.get(major.id) ?? major.name}: basin statistics` : "Basins of the world";
+    const sub = major && state.selection?.subBasin ? state.selection.subBasin : null;
+    const within = withinOf({ major, sub });
+    const withinKey = within ? `${within.kind}${within.id}` : "all";
+    $("bs-heading").textContent = sub
+      ? `${subNames.get(sub.id) ?? sub.name}: basin statistics`
+      : major ? `${majorNames.get(major.id) ?? major.name}: basin statistics` : "Basins of the world";
     const range = state.range;
     const stats = status.kind === "ready" && range ? periodFor(`${range.start}-${range.end}`, () => periodStats(status.series, range)) : null;
     if (!stats?.covered) {
@@ -581,11 +589,11 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       windows.ranges.length < 2 ? null : windowRates(series, windows.ranges),
     );
     const monthly = topic.cards.some((c) => c.id === "monthly")
-      ? monthlyFor(`${covered.start}-${covered.end}:${major?.id ?? "all"}`, () => monthlyStats(series, covered, major?.id ?? null))
+      ? monthlyFor(`${covered.start}-${covered.end}:${withinKey}`, () => monthlyStats(series, covered, within))
       : null;
     // Every month of the record, for the chart of them.
     const record = { start: series.first, end: series.first + series.dekads - 1 };
-    const regime = regimeFor(`${major?.id ?? "all"}`, () => monthlyStats(series, record, major?.id ?? null));
+    const regime = regimeFor(withinKey, () => monthlyStats(series, record, within));
     // The model's output.
     const majorFlux: FluxStatus = fluxes("majors", loadMajorFluxes);
     const subFlux: FluxStatus | null = major ? fluxes(String(major.id), () => loadSubBasinFluxes(major.id)) : null;
@@ -601,6 +609,7 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       flux: { majors: majorFlux, sub: subFlux },
       monthly,
       major: major && { id: major.id, name: majorNames.get(major.id) ?? major.name },
+      sub: sub && { id: sub.id, name: subNames.get(sub.id) ?? sub.name },
       majors: majorIds,
       majorName: (id) => majorNames.get(id) ?? String(id),
       subName: (id) => subNames.get(id) ?? String(id),
@@ -681,20 +690,17 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
   }
 
   /**
-   * Pinning a row of a group, a major basin or a sub-basin flies there, keeping the
-   * selected basin in view where both fit (see flyTo). Not for the World.
+   * Pinning a row of a major basin or a sub-basin flies there, keeping the selected
+   * basin in view where both fit (see flyTo). Not for the World.
    */
   function flyToRow(sub: string | null) {
     const area = parseArea(sub);
     if (!area || area.kind === "world") return;
     const box = (boxes: Map<number, Extent["box"]>, id: number): Extent[] => (boxes.has(id) ? [{ box: boxes.get(id)! }] : []);
-    const own =
-      area.kind === "sub" ? box(subBoxes, area.id)
-      : area.kind === "major" ? box(majorBoxes, area.id)
-      : majorIds.filter((id) => inGroup(id, area.id)).flatMap((id) => box(majorBoxes, id));
+    const own = area.kind === "sub" ? box(subBoxes, area.id) : box(majorBoxes, area.id);
     const sel = state.selection?.majorBasin?.id;
     // A sub-basin is one of the selected basin's: fly to it alone.
-    const inOwn = area.kind === "sub" || (sel !== undefined && (area.kind === "group" ? inGroup(sel, area.id) : sel === area.id));
+    const inOwn = area.kind === "sub" || sel === area.id;
     flyTo(map, own, sel === undefined || inOwn ? null : box(majorBoxes, sel)[0] ?? null);
   }
 
@@ -829,14 +835,18 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
     const sized = layers.filter(isScheme);
     const keys = schemeMap.draw(
       major,
-      sized.filter((l) => !l.spec.status).map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${l.spec.period}`, range: `${l.spec.title}:${l.spec.unit}`, mode: l.mode })),
+      sized
+        .filter((l) => !l.spec.status)
+        .map((l) => ({ kind: l.spec.scheme!, value: l.spec.value, key: `${l.spec.id}:${l.spec.period}`, range: `${l.spec.title}:${l.spec.unit}`, mode: l.mode, only: ctx.sub ? l.spec.only : null })),
     );
-    // Or as rain and vapour (over their own range: a month's, say).
+    // Or as rain and vapour (over their own range: a month's, say); with a sub-basin
+    // selected, over it and those upstream of it only, as the other maps.
     const effects = layers.filter((l) => isEffect(l) && !l.spec.status);
-    const effectKeys = effectsMap.draw(major, daysOfDekads(effects[0]?.spec.range ?? ctx.covered), effects.map((l) => l.spec.effect!));
+    const within = ctx.sub && effects[0]?.spec.only ? { key: String(ctx.sub.id), ids: effects[0].spec.only } : null;
+    const effectKeys = effectsMap.draw(major, daysOfDekads(effects[0]?.spec.range ?? ctx.covered), effects.map((l) => l.spec.effect!), within);
 
-    // The area under the pointer in a chart (or the one the card is pinned on): a group
-    // or a major basin keeps its colours and fades the rest; a sub-basin is outlined.
+    // The area under the pointer in a chart (or the one the card is pinned on): a major
+    // basin keeps its colours and fades the rest; a sub-basin is outlined.
     const sub = leadDriver()?.sub ?? null;
     const picked = parseArea(sub);
     /** A map's basins, values and colours (locked: the colours' range when the lock was put on); `shown`: not faded. */
@@ -849,7 +859,6 @@ export function initBasinStats({ map, majorBasins, subBasins, groups, setMapOver
       const majorOf = (id: number) => (spec.level === "major" ? id : ctx.stats.sub.get(id)?.majorBasin ?? NaN);
       const shown = (id: number) => {
         if (picked?.kind === "major") return majorOf(id) === picked.id;
-        if (picked?.kind === "group") return inGroup(majorOf(id), picked.id);
         return !spec.listed || spec.listed.has(id);
       };
       return { ids, values, scale, shown };

@@ -6,13 +6,13 @@
  * variables together: the water left under the discharge network, rain and vapour over
  * the water left, the water balance's terms as fill, circles and bars.
  *
- * Every chart works with and without a major basin selected, as the Country view's do
- * with and without a country: groups of major basins (groups.ts) stand in for the
- * Country view's regions, by climate for precipitation and evapotranspiration, by
- * where the water goes for discharge and storage (each measure's GROUPING; PCP − AETI
- * has both); the selected basin gets a row of its own on top, and the trends compare
- * it with its group and the World. With a basin selected, its sub-basins have a card of
- * their own, and the maps of the tiles show them.
+ * Every chart works with nothing, a major basin or a sub-basin selected, as the Country
+ * view's do with nothing, a region or a country: major basins stand in for the Country
+ * view's regions and sub-basins for its countries. The charts of major basins rank them
+ * (all 230 don't fit), with the selected one in its place, the selected sub-basin on
+ * top and the World below; the trends compare the sub-basin with its major basin and
+ * the World. With a basin selected, its sub-basins have cards of their own (the selected
+ * one picked out), and the maps of the tiles show them.
  *
  * Everything is over the date range in the top bar, and compared with the same days in
  * the other years of the record (sameDays): for ranges of a year or more, moved by
@@ -31,9 +31,8 @@ import { perDays, waporVariable, type WaporPer } from "../map/layers/wapor";
 import { LOADING, unlessLoading } from "../panels/load-bar";
 import { MONTHS, MIN_YEAR, dkM, dkY, mk, startDay, endDay } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
-import { GROUPINGS, climateYears, groupById, groupOf, groupsOf, inGroup, type Grouping } from "./groups";
 import type { Flux, FluxSeries } from "./model";
-import { dekadRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
+import { dekadRates, type Monthly, type PeriodStats, type WaporSeries, type Within, type WindowRates } from "./stats-data";
 import { STYLES, rampScale } from "./variables";
 
 // --- Context ------------------------------------------------------------------------------
@@ -96,6 +95,8 @@ export interface BasinCtx {
   flux: { majors: FluxStatus; sub: FluxStatus | null };
   monthly: Monthly | null;
   major: { id: number; name: string } | null;
+  /** The selected sub-basin (one of the major basin's). */
+  sub: { id: number; name: string } | null;
   /** Every major basin. */
   majors: number[];
   majorName(id: number): string;
@@ -172,7 +173,6 @@ const C = {
   base: "var(--c-base)",
   now: "var(--c-now)",
   world: "var(--c-world)",
-  group: "var(--c-2)",
   focus: "var(--c-1)",
   s1: "var(--c-1)",
   s2: "var(--c-2)",
@@ -194,20 +194,10 @@ const MEASURES: Record<MeasureKey, Measure> = {
 /** The measures that can be drawn as rain or vapour (BasinMapSpec.effect). */
 const EFFECTS: Partial<Record<MeasureKey, "rain" | "vapour">> = { pcp: "rain", aeti: "vapour" };
 
-/** Which groups a measure's basins are compared in: the rain's by climate, the rivers' by where they go. */
-const GROUPING: Record<MeasureKey, Grouping> = {
-  pcp: "climate",
-  aeti: "climate",
-  ratio: "climate",
-  balance: "climate",
-  Q: "drain",
-  dS: "drain",
-};
-
 /** Whether the legend's units apply (else: % or m³/s). */
 const inUnits = (m: MeasureKey) => m === "pcp" || m === "aeti" || m === "balance";
 const unitOf = (c: BasinCtx, m: MeasureKey) => (inUnits(m) ? basinUnit(c.units) : m === "ratio" ? "%" : "m³/s");
-/** Whether values add up over basins (volumes), so a group's dwarfs a basin's. */
+/** Whether values add up over basins (volumes), so the World's dwarfs a basin's. */
 const extensive = (c: BasinCtx, m: MeasureKey) => !!MEASURES[m].flux || (inUnits(m) && c.units.basin);
 const anomalyUnit = (c: BasinCtx, m: MeasureKey) => (MEASURES[m].anomaly === "relative" ? "%" : m === "ratio" ? "% points" : unitOf(c, m));
 /** A map's unit against the other years: "%", or a difference, "± mm" (apart from the value's own unit in the menu). */
@@ -215,18 +205,20 @@ const againstUnit = (c: BasinCtx, m: MeasureKey) => (MEASURES[m].anomaly === "re
 
 // --- Values per area -----------------------------------------------------------------------
 
-/** What a value is of: a sub-basin, a major basin, a group of them (groups.ts), or the World. */
-export type Area = { kind: "sub" | "major" | "group"; id: number } | { kind: "world" };
+/** What a value is of: a sub-basin, a major basin, or the World. */
+export type Area = { kind: "sub" | "major"; id: number } | { kind: "world" };
 const areaKey = (a: Area) => (a.kind === "world" ? "world" : `${a.kind}:${a.id}`);
 export function parseArea(sub: string | null): Area | null {
   if (sub === "world") return { kind: "world" };
   const [kind, id] = sub?.split(":") ?? [];
-  return kind === "sub" || kind === "major" || kind === "group" ? { kind, id: Number(id) } : null;
+  return kind === "sub" || kind === "major" ? { kind, id: Number(id) } : null;
 }
-/** The area the tiles and single-area charts are about: the selected basin, or the World. */
-const focus = (c: BasinCtx): Area => (c.major ? { kind: "major", id: c.major.id } : { kind: "world" });
-const areaName = (c: BasinCtx, a: Area) =>
-  a.kind === "world" ? "World" : a.kind === "group" ? groupById(a.id)?.name ?? String(a.id) : a.kind === "major" ? c.majorName(a.id) : c.subName(a.id);
+/** The area the tiles and single-area charts are about: the selected sub-basin or basin, or the World. */
+const focus = (c: BasinCtx): Area => (c.sub ? { kind: "sub", id: c.sub.id } : c.major ? { kind: "major", id: c.major.id } : { kind: "world" });
+const areaName = (c: BasinCtx, a: Area) => (a.kind === "world" ? "World" : a.kind === "major" ? c.majorName(a.id) : c.subName(a.id));
+/** The focus's sub-basins, for the series per dekad or month. */
+export const withinOf = (c: Pick<BasinCtx, "major" | "sub">): Within =>
+  c.sub ? { kind: "sub", id: c.sub.id } : c.major ? { kind: "major", id: c.major.id } : null;
 
 /** PCP and AETI of some sub-basins: their area (km²) and volumes per day (km² × mm/day). */
 interface Sums {
@@ -275,7 +267,7 @@ function sumsOf(c: BasinCtx, a: Area, w: number): Sums {
   }
   const total = { area: 0, p: 0, e: 0 };
   for (const [major, s] of majorSums(c, w)) {
-    if (a.kind === "major" ? major !== a.id : a.kind === "group" ? !inGroup(major, a.id) : false) continue;
+    if (a.kind === "major" && major !== a.id) continue;
     total.area += s.area;
     total.p += s.p;
     total.e += s.e;
@@ -321,14 +313,13 @@ function fluxMean(s: Float64Array, first: number, r: DekadRange) {
   return n ? acc / n : NaN;
 }
 
-/** The World's (or a group's) flux per dekad: summed over its major basins. */
-function summedFlux(c: BasinCtx, a: Area, v: Flux): { s: Float64Array; first: number } | null {
+/** The World's flux per dekad: summed over the major basins. */
+function summedFlux(c: BasinCtx, v: Flux): { s: Float64Array; first: number } | null {
   const status = c.flux.majors;
   if (status.kind !== "ready") return null;
   const { dekads, series } = status.result;
   const s = new Float64Array(dekads.length).fill(NaN);
-  for (const [id, x] of series) {
-    if (a.kind === "group" && !inGroup(id, a.id)) continue;
+  for (const x of series.values()) {
     const values = x[v];
     for (let i = 0; i < s.length; i++) if (Number.isFinite(values[i])) s[i] = (Number.isFinite(s[i]) ? s[i] : 0) + values[i];
   }
@@ -337,7 +328,7 @@ function summedFlux(c: BasinCtx, a: Area, v: Flux): { s: Float64Array; first: nu
 
 /** An area's flux per dekad (null: not loaded). */
 function areaFlux(c: BasinCtx, a: Area, v: Flux) {
-  return a.kind === "sub" || a.kind === "major" ? fluxSeriesOf(c, { kind: a.kind, id: a.id }, v) : summedFlux(c, a, v);
+  return a.kind === "world" ? summedFlux(c, v) : fluxSeriesOf(c, a, v);
 }
 
 /** A measure's value for an area over range `w` of c.windows (the period itself by default), in units `u` (the legend's by default). */
@@ -347,7 +338,7 @@ export function valueOf(c: BasinCtx, m: MeasureKey, a: Area, w = c.windows.curre
   if (v === undefined) {
     const flux = MEASURES[m].flux;
     if (flux) {
-      // Groups and the World: of the sum of their basins' series.
+      // The World: of the sum of the basins' series.
       const series = areaFlux(c, a, flux.v);
       v = series ? fluxMean(series.s, series.first, c.windows.ranges[w]) : NaN;
     } else {
@@ -443,6 +434,17 @@ export interface BasinMapSpec {
 const levelOf = (c: BasinCtx): "major" | "sub" => (c.major ? "sub" : "major");
 const subBasinsOf = (c: BasinCtx, major: number) => [...c.stats.sub].filter(([, s]) => s.majorBasin === major).map(([id]) => id);
 
+/**
+ * The sub-basins the maps colour: with a sub-basin selected, it and those upstream of
+ * it (the ones downstream are left plain, as the other major basins are); else all of
+ * the selected basin's.
+ */
+function mappedSubs(c: BasinCtx): Set<number> | null {
+  if (!c.major) return null;
+  if (!c.sub) return new Set(subBasinsOf(c, c.major.id));
+  return new Set([c.sub.id, ...upstreamSets(c, c.major.id)(c.sub.id)]);
+}
+
 function valueNote(c: BasinCtx, m: MeasureKey, level: "major" | "sub") {
   const per = level === "major" ? "major basin" : "sub-basin";
   if (MEASURES[m].flux) return m === "Q" && level === "major" ? `Mean outflow per ${per}` : `Mean per ${per}`;
@@ -465,14 +467,14 @@ function measureMap(
   { units, prefer }: { units?: BasinUnits; prefer?: string } = {},
 ): BasinMapSpec {
   const def = MEASURES[m];
-  const only = level === "sub" && c.major ? new Set(subBasinsOf(c, c.major.id)) : null;
+  const only = level === "sub" ? mappedSubs(c) : null;
   const area = (id: number): Area => ({ kind: level, id });
   const anomaly = (mode ?? (c.against.has(m) ? "anomaly" : "value")) === "anomaly";
   const status = anomaly ? othersStatus(c, m) : fluxMessage(c, m, level) ?? "";
   const u = units && inUnits(m) ? units : c.units;
   const own = u !== c.units;
   return {
-    id: `${anomaly ? "anomaly" : "value"}:${m}:${level}:${c.major?.id ?? ""}:${inUnits(m) ? unitSlug(u) : ""}:${status ? "wait" : "ok"}:${listed?.size ?? ""}:${c.covered.start}-${c.covered.end}`,
+    id: `${anomaly ? "anomaly" : "value"}:${m}:${level}:${c.major?.id ?? ""}:${c.sub?.id ?? ""}:${inUnits(m) ? unitSlug(u) : ""}:${status ? "wait" : "ok"}:${listed?.size ?? ""}:${c.covered.start}-${c.covered.end}`,
     // (Against the other years it's a map of its own: it can show beside the values.)
     title: anomaly ? `${def.label} against other years` : own ? `${def.label} (${basinUnit(u)})` : def.label,
     unit: anomaly ? againstUnit(c, m) : inUnits(m) ? basinUnit(u) : unitOf(c, m),
@@ -575,58 +577,22 @@ const othersLabel = (c: BasinCtx) => {
   return o.length ? `${windowLabel(o[0])} to ${windowLabel(o[o.length - 1])}` : "none";
 };
 
-/** The rows of a group chart: the selected basin, the groups, the World. */
-function areaRows(c: BasinCtx, grouping: Grouping, values: (a: Area) => number[]): BarRow[] {
-  const rows: BarRow[] = [];
-  if (c.major) rows.push({ sub: `major:${c.major.id}`, label: c.major.name, values: values({ kind: "major", id: c.major.id }), emphasis: true });
-  for (const g of groupsOf(grouping)) rows.push({ sub: `group:${g.id}`, label: g.short, values: values({ kind: "group", id: g.id }) });
-  rows.push({ sub: "world", label: "World", values: values({ kind: "world" }) });
-  return rows;
-}
-
-/** How a grouping is made, for captions. */
-const groupingNote = (grouping: Grouping) =>
-  grouping === "climate" ? `${GROUPINGS.climate.about} (${climateYears()}). ` : `${GROUPINGS.drain.about} `;
-
-/** Per group (and the selected basin, and the World): the other years' average and this period. */
-function groupCard(m: MeasureKey, grouping = GROUPING[m]): BasinCard {
-  const def = MEASURES[m];
-  return {
-    id: `${m}-${grouping}`,
-    title: (c) => `${def.label} by ${GROUPINGS[grouping].label}, ${c.period}`,
-    caption: (c) => {
-      const status = othersStatus(c, m);
-      return (status === LOADING ? "" : status ? `${status} ` : `Against the average of the same days in ${others(c).length} other years (${othersLabel(c)}). `) +
-        groupingNote(grouping) +
-        (MEASURES[m].flux ? "Groups and the World: summed over their major basins. " : "") + "Hover a row to pick out its basins on the map.";
-    },
-    render(c) {
-      const message = fluxMessage(c, m);
-      if (message) return empty(message);
-      const compare = !othersStatus(c, m);
-      const rows = areaRows(c, grouping, (a) => (compare ? [averageOf(c, m, a).avg, valueOf(c, m, a)] : [valueOf(c, m, a)]));
-      const series = compare ? [{ label: "Other years, average", color: C.base }, { label: "This period", color: C.now }] : [{ label: "This period", color: C.now }];
-      return {
-        html: bars({ series, rows, unit: unitOf(c, m), axis: def.label, width: c.width }),
-        csv: csvOf(rows, compare ? [`${column(c, m)}_other_years`, column(c, m)] : [column(c, m)]),
-      };
-    },
-    map: (c) => measureMap(c, m, "major"),
-    // The values, and as circles how this period stands against the other years.
-    also: (c) => (def.flux ? [] : [measureMap(c, m, "major", "anomaly", undefined, { prefer: "circles" })]),
-  };
-}
-
 interface Ranked {
   id: number;
+  /** What it's ranked by. */
   v: number;
+  /** Its bars (default: v alone). */
+  values?: number[];
 }
 
-/** Rank items by value; `n` from the top, or the top and bottom halves with a gap row. The emphasised one is added if left out. */
-function rankRows(items: Ranked[], n: number, name: (id: number) => string, prefix: string, emphasis: number | null, ends = false): BarRow[] {
+/**
+ * Rank items by value; `n` from the top, or the top and bottom halves with a gap row.
+ * `kept` (by default the emphasised one) is added, with its rank, if left out.
+ */
+function rankRows(items: Ranked[], n: number, name: (id: number) => string, prefix: string, emphasis: number | null, ends = false, kept = emphasis): BarRow[] {
   const sorted = items.filter((d) => Number.isFinite(d.v)).sort((a, b) => b.v - a.v);
-  const row = (d: Ranked, i: number): BarRow => ({ sub: `${prefix}:${d.id}`, label: `${i + 1}. ${name(d.id)}`, values: [d.v], emphasis: d.id === emphasis });
-  const at = emphasis === null ? -1 : sorted.findIndex((d) => d.id === emphasis);
+  const row = (d: Ranked, i: number): BarRow => ({ sub: `${prefix}:${d.id}`, label: `${i + 1}. ${name(d.id)}`, values: d.values ?? [d.v], emphasis: d.id === emphasis });
+  const at = kept === null ? -1 : sorted.findIndex((d) => d.id === kept);
   if (!ends || sorted.length <= n) {
     const rows = sorted.slice(0, n).map(row);
     if (at >= n) rows.push(row(sorted[at], at));
@@ -644,40 +610,63 @@ function rankRows(items: Ranked[], n: number, name: (id: number) => string, pref
 
 const listedOf = (rows: BarRow[]) => new Set(rows.filter((r) => !r.gap).map((r) => Number(r.sub.split(":")[1])));
 
-/** The major basins ranked: the highest `n`, or the highest and lowest; the selected one with its rank. */
+/**
+ * The major basins ranked, as the Country view's regional charts: the highest `n`, or the
+ * highest and lowest; the selected one always, with its rank (emphasised, unless a
+ * sub-basin is selected: that gets a row of its own on top), and the World below for
+ * values that don't add up over basins. Against the other years' average where there is one.
+ */
 function rankCard(m: MeasureKey, order: "top" | "ends", title: string, note = "", n = 12, also?: (c: BasinCtx) => BasinMapSpec[]): BasinCard {
   const def = MEASURES[m];
-  const rows = (c: BasinCtx) =>
-    rankRows(c.majors.map((id) => ({ id, v: valueOf(c, m, { kind: "major", id }) })), n, c.majorName, "major", c.major?.id ?? null, order === "ends");
+  const compare = (c: BasinCtx) => !othersStatus(c, m);
+  const values = (c: BasinCtx, a: Area) => (compare(c) ? [averageOf(c, m, a).avg, valueOf(c, m, a)] : [valueOf(c, m, a)]);
+  const ranked = (c: BasinCtx) =>
+    rankRows(c.majors.map((id) => ({ id, v: valueOf(c, m, { kind: "major", id }), values: values(c, { kind: "major", id }) })), n, c.majorName, "major", c.sub ? null : c.major?.id ?? null, order === "ends", c.major?.id ?? null);
+  const rows = (c: BasinCtx): BarRow[] => {
+    const r = ranked(c);
+    if (c.sub) r.unshift({ sub: `sub:${c.sub.id}`, label: c.sub.name, values: values(c, { kind: "sub", id: c.sub.id }), emphasis: true });
+    if (!extensive(c, m)) r.push({ sub: "world", label: "World", values: values(c, { kind: "world" }) });
+    return r;
+  };
   return {
     id: `${m}-rank-${order}`,
     title: (c) => `${title}, ${c.period}`,
-    caption: () => `${note}Out of all major basins. The map shows only the basins named; hover one to pick it out.`,
+    caption: (c) => {
+      const status = othersStatus(c, m);
+      return `${note}Out of all major basins${c.sub ? `, with ${c.sub.name} on top` : ""}. ` +
+        (status === LOADING ? "" : status ? `${status} ` : `Against the average of the same days in ${others(c).length} other years (${othersLabel(c)}). `) +
+        "The map shows only the basins named; hover one to pick it out.";
+    },
     render(c) {
       const message = fluxMessage(c, m);
       if (message) return empty(message);
       const r = rows(c);
-      return { html: bars({ series: [{ label: def.short, color: def.color }], rows: r, unit: unitOf(c, m), axis: def.label, width: c.width }), csv: csvOf(r, [column(c, m)]) };
+      const series = compare(c) ? [{ label: "Other years, average", color: C.base }, { label: "This period", color: def.color }] : [{ label: def.short, color: def.color }];
+      return {
+        html: bars({ series, rows: r, unit: unitOf(c, m), axis: def.label, width: c.width }),
+        csv: csvOf(r, compare(c) ? [`${column(c, m)}_other_years`, column(c, m)] : [column(c, m)]),
+      };
     },
-    map: (c) => measureMap(c, m, "major", undefined, fluxMessage(c, m) ? undefined : listedOf(rows(c))),
-    also,
+    map: (c) => measureMap(c, m, "major", undefined, fluxMessage(c, m) ? undefined : listedOf(ranked(c))),
+    // The values, and (for WaPOR's) as circles how this period stands against the other years.
+    also: (c) => also?.(c) ?? (def.flux ? [] : [measureMap(c, m, "major", "anomaly", undefined, { prefer: "circles" })]),
   };
 }
 
 /**
- * The same days every year: the selected basin (or the World) and, for values that
- * don't add up over basins, its group (GROUPING) and the World. Clicking a year selects it.
+ * The same days every year: the selected sub-basin or basin (or the World) and, for
+ * values that don't add up over basins, the sub-basin's major basin and the World.
+ * Clicking a year selects it.
  */
 function yearsCard(m: MeasureKey): BasinCard {
   const def = MEASURES[m];
-  const group = (c: BasinCtx) => (c.major ? groupOf(c.major.id, GROUPING[m]) : null);
   return {
     id: `${m}-years`,
     title: (c) => (spanYears(c) > 1 ? `${def.label}, every ${spanYears(c)}-year span` : `${def.label}, ${daysLabel(c)} every year`),
     caption: (c) =>
       (extensive(c, m)
-        ? `${areaName(c, focus(c))} only: its values add up over basins, so a group's would dwarf it. `
-        : c.major ? `${c.major.name} compared with ${group(c) ? `${group(c)!.basins} and ` : ""}the World. ` : "") +
+        ? `${areaName(c, focus(c))} only: its values add up over basins, so a larger area's would dwarf it. `
+        : c.major ? `${areaName(c, focus(c))} compared with ${c.sub ? `${c.major.name} and ` : ""}the World. ` : "") +
       `Click ${spanYears(c) > 1 ? "a span" : "a year"} to select it; the map shows this period against the average of the others.`,
     render(c) {
       const message = fluxMessage(c, m);
@@ -687,8 +676,7 @@ function yearsCard(m: MeasureKey): BasinCard {
       const series: LineSeries[] = [];
       if (!extensive(c, m) && c.major) {
         series.push({ label: "World", color: C.world, values: at({ kind: "world" }), sub: "world" });
-        const g = group(c);
-        if (g) series.push({ label: g.short, color: C.group, values: at({ kind: "group", id: g.id }), sub: `group:${g.id}` });
+        if (c.sub) series.push({ label: c.major.name, color: C.s2, values: at({ kind: "major", id: c.major.id }), sub: `major:${c.major.id}` });
       }
       series.push({ label: areaName(c, focus(c)), color: def.color, values: at(focus(c)), emphasis: true });
       const label = (w: number) => windowLabel(ranges[w] ?? ranges[0]);
@@ -721,7 +709,7 @@ function subCard(m: MeasureKey, order: "top" | "ends", n = 14, { prefer, also }:
       const message = fluxMessage(c, m, "sub");
       if (message) return empty(message);
       const ids = subBasinsOf(c, c.major.id);
-      const r = rankRows(ids.map((id) => ({ id, v: valueOf(c, m, { kind: "sub", id }) })), n, c.subName, "sub", null, order === "ends");
+      const r = rankRows(ids.map((id) => ({ id, v: valueOf(c, m, { kind: "sub", id }) })), n, c.subName, "sub", c.sub?.id ?? null, order === "ends");
       return { html: bars({ series: [{ label: def.short, color: def.color }], rows: r, unit: unitOf(c, m), axis: def.label, width: c.width }), csv: csvOf(r, [column(c, m)]) };
     },
     map: (c) => measureMap(c, m, levelOf(c), undefined, undefined, { prefer }),
@@ -739,7 +727,7 @@ const hydrograph: BasinCard = {
   title: (c) => `${areaName(c, focus(c))}: rain and discharge through the period`,
   caption: (c) =>
     `Precipitation over the basin (mm/day, from the top) and discharge ` +
-    (c.major ? "at its outlets" : "summed over the outlets of all major basins") +
+    (c.sub ? "out of it" : c.major ? "at its outlets" : "summed over the outlets of all major basins") +
     `, per dekad. ${others(c).length >= MIN_OTHERS ? `Grey: the average of the same dekads in ${others(c).length} other years. ` : ""}Hover a dekad to map it; click it to select it.`,
   render(c) {
     const message = fluxMessage(c, "Q");
@@ -753,8 +741,8 @@ const hydrograph: BasinCard = {
     const avg = new Map<number, number>();
     const rainNow = new Map<number, number>();
     const rainAvg = new Map<number, number>();
-    const major = c.major?.id ?? null;
-    const rain = ranges.map((r, w) => (w === current || ranges.length - 1 >= MIN_OTHERS ? dekadRates(c.series, r, major).pcp : null));
+    const within = withinOf(c);
+    const rain = ranges.map((r, w) => (w === current || ranges.length - 1 >= MIN_OTHERS ? dekadRates(c.series, r, within).pcp : null));
     const mean = (vs: number[]) => (vs.length >= MIN_OTHERS ? vs.reduce((s, v) => s + v, 0) / vs.length : NaN);
     for (let i = 0; i < len; i++) {
       now.set(i, at(ranges[current], i));
@@ -817,7 +805,7 @@ function monthMaps(c: BasinCtx, sub: string | null, m: MeasureKey = "balance") {
   };
 }
 
-/** The area the monthly chart averages over (km²): the selected major basin, or all. */
+/** The area the monthly chart averages over (km²): the selected sub-basin or major basin, or all. */
 const monthlyArea = (c: BasinCtx) => sumsOf(c, focus(c), c.windows.current).area;
 
 /** PCP, AETI and PCP − AETI by month: per month whatever the units, per m² or over the basin. */
@@ -879,17 +867,29 @@ function closureOf(c: BasinCtx, a: Area) {
   return [left, q, ds, left - q - ds];
 }
 
+/** The rows of a chart of a few areas: the selected sub-basin and its major basin, the largest other major basins, the World. */
+function areaRows(c: BasinCtx, values: (a: Area) => number[], n = 8): BarRow[] {
+  const rows: BarRow[] = [];
+  if (c.sub) rows.push({ sub: `sub:${c.sub.id}`, label: c.sub.name, values: values({ kind: "sub", id: c.sub.id }), emphasis: true });
+  if (c.major) rows.push({ sub: `major:${c.major.id}`, label: c.major.name, values: values({ kind: "major", id: c.major.id }), emphasis: !c.sub });
+  const area = (id: number) => sumsOf(c, { kind: "major", id }, c.windows.current).area;
+  const largest = c.majors.filter((id) => id !== c.major?.id).sort((a, b) => area(b) - area(a)).slice(0, n);
+  for (const id of largest) rows.push({ sub: `major:${id}`, label: c.majorName(id), values: values({ kind: "major", id }) });
+  rows.push({ sub: "world", label: "World", values: values({ kind: "world" }) });
+  return rows;
+}
+
 /** B1: does the water balance add up? PCP − AETI against discharge plus storage change. */
 const closureCard: BasinCard = {
   id: "closure",
   title: (c) => `Where the water left goes, ${c.period}`,
-  caption: () =>
+  caption: (c) =>
     "What's left of the rain (PCP − AETI) should leave as discharge or be stored (the model's ΔS); the rest is what the data and the model don't account for (water from other basins, irrigation from aquifers, errors). " +
-    `${GROUPINGS.drain.about} Hover a row to pick out its basins.`,
+    `${c.sub ? `${c.sub.name}, its major basin, ` : c.major ? `${c.major.name}, ` : ""}the largest major basins and the World. Hover a row to pick out its basins.`,
   render(c) {
     const message = fluxMessage(c, "Q");
     if (message) return empty(message);
-    const rows = areaRows(c, "drain", (a) => closureOf(c, a));
+    const rows = areaRows(c, (a) => closureOf(c, a));
     const u = basinUnit(c.units);
     return {
       html: bars({
@@ -920,26 +920,24 @@ const droughtCard: BasinCard = {
   title: (c) => `Drier or wetter, more or less evaporation, ${c.period}`,
   caption: (c) =>
     `Each dot a major basin, as big as it is: its precipitation (across) and evapotranspiration (up) against the average of the same days in other years. ` +
-    (c.major ? `${c.major.name} and the others of its climate are in colour. ` : "") + "Hover a dot to find it on the map.",
+    (c.major ? `${c.major.name} is in colour. ` : "") + "Hover a dot to find it on the map.",
   render(c) {
     const status = othersStatus(c, "pcp");
     if (status) return empty(status);
-    const g = c.major ? groupOf(c.major.id, "climate") : null;
     const points = c.majors.map((id): Bubble => {
       const a: Area = { kind: "major", id };
       const own = id === c.major?.id;
-      const near = !own && !!g && inGroup(id, g.id);
       return {
         sub: `major:${id}`,
         label: c.majorName(id),
         x: anomalyOf(c, "pcp", a),
         y: anomalyOf(c, "aeti", a),
         size: sumsOf(c, a, c.windows.current).area,
-        color: own ? C.s1 : near ? C.s2 : undefined,
+        color: own ? C.s1 : undefined,
         emphasis: own,
       };
     });
-    const series = c.major ? [{ label: c.major.name, color: C.s1 }, { label: g?.name ?? "Its climate", color: C.s2 }, { label: "Other basins", color: C.world }] : [];
+    const series = c.major ? [{ label: c.major.name, color: C.s1 }, { label: "Other basins", color: C.world }] : [];
     return {
       html: bubbles({
         points,
@@ -1083,14 +1081,14 @@ const transpirationCard: BasinCard = {
     if (!t || t.kind === "loading") return empty(LOADING);
     if (t.kind === "error") return empty(t.message);
     const share = tShare(t.sub);
-    const r = rankRows(subBasinsOf(c, c.major.id).map((id) => ({ id, v: share(id) })), 14, c.subName, "sub", null, true);
+    const r = rankRows(subBasinsOf(c, c.major.id).map((id) => ({ id, v: share(id) })), 14, c.subName, "sub", c.sub?.id ?? null, true);
     return { html: bars({ series: [{ label: "T / AETI", color: C.s3 }], rows: r, unit: "%", axis: "Transpiration's share", width: c.width }), csv: csvOf(r, ["t_share_of_aeti_pct"]) };
   },
   map(c) {
     const t = c.transpiration;
     const share = t?.kind === "ready" ? tShare(t.sub) : () => NaN;
     return {
-      id: `tshare:${c.major?.id ?? ""}:${c.covered.start}-${c.covered.end}:${t?.kind ?? ""}`,
+      id: `tshare:${c.major?.id ?? ""}:${c.sub?.id ?? ""}:${c.covered.start}-${c.covered.end}:${t?.kind ?? ""}`,
       title: "Transpiration's share of evapotranspiration",
       unit: "%",
       units: false,
@@ -1101,7 +1099,7 @@ const transpirationCard: BasinCard = {
       value: share,
       ramp: TSHARE_RAMP,
       scale: "linear",
-      only: c.major ? new Set(subBasinsOf(c, c.major.id)) : null,
+      only: mappedSubs(c),
       status: !c.major ? "Pick a major basin." : t?.kind === "error" ? t.message : t?.kind === "ready" ? undefined : LOADING,
       range: c.covered,
       period: c.period,
@@ -1164,16 +1162,14 @@ export const TOPICS: TopicDef[] = [
       { id: "t-ratio", label: "Evaporative index", color: MEASURES.ratio.color, measure: "ratio" },
     ],
     cards: [
-      groupCard("pcp"),
-      yearsCard("pcp"),
       // The wettest by depth, with circles of the volume that falls.
-      rankCard("pcp", "top", "Wettest major basins", "", 12, (c) => [measureMap(c, "pcp", "major", "value", undefined, { units: { ...c.units, basin: true }, prefer: "circles" })]),
-      groupCard("aeti"),
+      rankCard("pcp", "ends", "Wettest and driest major basins", "", 12, (c) => [measureMap(c, "pcp", "major", "value", undefined, { units: { ...c.units, basin: true }, prefer: "circles" })]),
+      yearsCard("pcp"),
+      rankCard("aeti", "ends", "Where most and least evaporates"),
       yearsCard("aeti"),
       // Where it evaporates most: as vapour, over the evaporative index and under the rivers.
       subCard("aeti", "top", 14, { prefer: "effect", also: (c) => [measureMap(c, "ratio", "sub"), measureMap(c, "Q", "sub", "value", undefined, { prefer: "scheme" })] }),
       transpirationCard,
-      groupCard("ratio"),
       rankCard("ratio", "ends", "Where most and least of the rain evaporates", "Above 100%, more evaporates than falls: the rest comes from storage, irrigation or upstream. "),
       // Where the extra evaporation comes from: the river (lines) or storage (circles).
       subCard("ratio", "ends", 14, { also: (c) => [measureMap(c, "Q", "sub", "value", undefined, { prefer: "scheme" }), measureMap(c, "dS", "sub")] }),
@@ -1182,7 +1178,7 @@ export const TOPICS: TopicDef[] = [
       subCard("pcp", "ends", 14, { prefer: "effect", also: (c) => [measureMap(c, "pcp", "sub", "anomaly")] }),
       monthlyCard,
     ],
-    about: "Precipitation (PCP) and actual evapotranspiration (AETI): WaPOR v3 L1, dekadal means per sub-basin, area-weighted (or summed) over basins and groups of them.",
+    about: "Precipitation (PCP) and actual evapotranspiration (AETI): WaPOR v3 L1, dekadal means per sub-basin, area-weighted (or summed) over basins.",
   },
   {
     id: "water",
@@ -1192,19 +1188,17 @@ export const TOPICS: TopicDef[] = [
       { id: "t-dS", label: "Storage change", color: STYLES.dS.color, measure: "dS" },
     ],
     cards: [
-      groupCard("balance"),
-      groupCard("balance", "drain"),
-      yearsCard("balance"),
       // The water left, with where it goes: discharge as circles, storage change as bars.
-      rankCard("balance", "ends", "Wettest and driest major basins", "", 12, (c) => [
+      rankCard("balance", "ends", "Most and least water left", "", 12, (c) => [
         measureMap(c, "Q", "major", "value", undefined, { prefer: "circles" }),
         measureMap(c, "dS", "major", "value", undefined, { prefer: "bars" }),
       ]),
+      yearsCard("balance"),
       closureCard,
       // Where the water is left, and where the rivers take it.
       subCard("balance", "ends", 14, { also: (c) => [measureMap(c, "Q", "sub", "value", undefined, { prefer: "scheme" })] }),
       regimeCard,
-      groupCard("dS"),
+      rankCard("dS", "ends", "Most storage gained and lost"),
       yearsCard("dS"),
     ],
     about: "PCP − AETI: the water left for rivers, lakes and aquifers (WaPOR v3 L1). Storage change (ΔS): from the water balance model, summed over a basin's sub-basins.",
@@ -1218,12 +1212,11 @@ export const TOPICS: TopicDef[] = [
     cards: [
       hydrograph,
       profileCard,
-      groupCard("Q"),
       rankCard("Q", "top", "Largest outflows"),
       yearsCard("Q"),
       // Discharge along the rivers, over the rain against other years.
       subCard("Q", "top", 14, { also: (c) => [measureMap(c, "pcp", "sub", "anomaly")] }),
     ],
-    about: "Discharge (Q): from the water balance model, routed through the sub-basins as linear reservoirs; a major basin's is the sum at its outlets, a group's the sum over its major basins.",
+    about: "Discharge (Q): from the water balance model, routed through the sub-basins as linear reservoirs; a major basin's is the sum at its outlets, the World's the sum over the major basins.",
   },
 ];

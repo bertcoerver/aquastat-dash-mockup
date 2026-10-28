@@ -1,7 +1,12 @@
 /*
- * A text field with a dropdown tree that narrows as you type: like combobox.ts, but
- * the options are nested and can be opened and closed. Expects the same markup, with
- * role="tree" on the list (see index.html).
+ * A text field with a dropdown tree that narrows as you type (an ARIA combobox), with
+ * nested options that can be opened and closed. Expects this markup (see index.html):
+ *
+ *   <div class="combobox">
+ *     <input role="combobox" aria-controls="LIST_ID" …>
+ *     <button class="combobox-clear" …>×</button>
+ *     <ul class="combobox-list" id="LIST_ID" role="tree" hidden></ul>
+ *   </div>
  *
  * Search keeps whole branches: an option that matches stays visible with everything
  * under it (closed, but there to open), and with the options above it (opened, so the
@@ -10,14 +15,16 @@
  *
  * Keys: ↓/↑ move, → opens (or goes to the first child), ← closes (or goes to the
  * parent), Enter picks, Escape closes the dropdown.
+ *
+ * The clear button goes up a level: from an option inside a branch to the top-level
+ * option it's in (a country to its region, a sub-basin to its major basin), and from a
+ * top-level option to none.
  */
-import { normalize } from "./combobox";
-
 export interface TreeOption<D = unknown> {
   /** Unique across the tree. */
   key: string;
   label: string;
-  /** Shown faintly after the label, and matched too (e.g. a code). */
+  /** Shown faintly after the label, and matched too (e.g. a code) by numbers of HINT_DIGITS or more. */
   hint?: string;
   parent: TreeOption<D> | null;
   children: TreeOption<D>[];
@@ -32,6 +39,8 @@ export interface TreeCombobox {
 // With more matches than this, opening every branch they are in would list most of
 // the tree; the branches stay closed instead.
 const MAX_OPENED_MATCHES = 300;
+// A number typed matches the hints (codes) only from this many digits on.
+const HINT_DIGITS = 3;
 // Deeper options are indented no further (river trees go 38 levels deep).
 const MAX_INDENT = 12;
 
@@ -52,7 +61,11 @@ export function initTreeCombobox<D>(
     }
   })(roots);
   const byKey = new Map(all.map((o) => [o.key, o]));
-  const searchText = new Map(all.map((o) => [o, normalize(`${o.label} ${o.hint ?? ""}`)]));
+  const labelText = new Map(all.map((o) => [o, normalize(o.label)]));
+  const hintText = new Map(all.map((o) => [o, normalize(o.hint ?? "")]));
+  /** A term matches the name, or (a number of HINT_DIGITS or more: not the "2" of "Blue Nile 2") the hint. */
+  const matches = (o: TreeOption<D>, t: string) =>
+    labelText.get(o)!.includes(t) || (t.length >= HINT_DIGITS && /^\d+$/.test(t) && hintText.get(o)!.includes(t));
 
   let value: TreeOption<D> | null = null;
   let terms: string[] = [];
@@ -72,7 +85,7 @@ export function initTreeCombobox<D>(
       for (let p = value?.parent; p; p = p.parent) opened.add(p);
       active = value;
     } else {
-      matched = new Set(all.filter((o) => terms.every((t) => searchText.get(o)!.includes(t))));
+      matched = new Set(all.filter((o) => terms.every((t) => matches(o, t))));
       kept = new Set();
       for (const option of matched) {
         keepBranch(option, kept);
@@ -85,9 +98,21 @@ export function initTreeCombobox<D>(
     }
     render();
     if (!active && terms.length) active = rows.find((r) => matched.has(r.option))?.option ?? null;
-    setActive(active);
+    // (Shown first: a hidden list can't be scrolled.)
     list.hidden = false;
     input.setAttribute("aria-expanded", "true");
+    list.scrollTop = 0;
+    setActive(active);
+    // The current value in the middle of the list, as it opens.
+    if (!terms.length) centre(active);
+  }
+
+  /** Scroll the list (only: not the page around it) to have an option's row in its middle. */
+  function centre(option: TreeOption<D> | null) {
+    const li = document.getElementById(`${list.id}-${rows.findIndex((r) => r.option === option)}`);
+    if (!li) return;
+    const offset = li.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    list.scrollTop += offset - (list.clientHeight - li.offsetHeight) / 2;
   }
 
   function keepBranch(option: TreeOption<D>, into: Set<TreeOption<D>>) {
@@ -143,10 +168,20 @@ export function initTreeCombobox<D>(
     });
   }
 
-  /** Top-level options whose own name starts with the search first, then other matches. */
+  /**
+   * Top-level options whose own name starts with the search first, then those holding
+   * one that does ("India" in Southern Asia before Bassas da India), then other matches.
+   */
   function rankTop(nodes: TreeOption<D>[]) {
-    const rank = (o: TreeOption<D>) =>
-      normalize(o.label).startsWith(terms[0]) ? 0 : matched.has(o) ? 1 : 2;
+    const starts = (o: TreeOption<D>) => normalize(o.label).startsWith(terms[0]);
+    const holding = new Set<TreeOption<D>>();
+    for (const o of matched) {
+      if (!o.parent || !starts(o)) continue;
+      let top = o;
+      while (top.parent) top = top.parent;
+      holding.add(top);
+    }
+    const rank = (o: TreeOption<D>) => (starts(o) ? 0 : holding.has(o) ? 1 : matched.has(o) ? 2 : 3);
     return [...nodes].sort((a, b) => rank(a) - rank(b));
   }
 
@@ -243,10 +278,17 @@ export function initTreeCombobox<D>(
     const option = li && rows[Number(li.dataset.index)].option;
     if (option && option !== active) setActive(option);
   });
-  clear.addEventListener("click", () => pick(null));
+  clear.addEventListener("click", () => pick(value ? topOf(value) : null));
 
   show(null);
   return { setValue: (key) => show(key === null ? null : (byKey.get(key) ?? null)) };
+}
+
+/** The top-level option an option is in (null: it is one). */
+function topOf<D>(option: TreeOption<D>): TreeOption<D> | null {
+  let top = option;
+  while (top.parent) top = top.parent;
+  return top === option ? null : top;
 }
 
 /** "Nile › White Nile 1 › Bahr el Ghazal", for a tooltip. */
@@ -285,4 +327,12 @@ function marked(label: string, terms: string[]) {
     }
   }
   return fragment;
+}
+
+/** Lower case without accents, so "cote" finds "Côte d'Ivoire". */
+function normalize(text: string) {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }

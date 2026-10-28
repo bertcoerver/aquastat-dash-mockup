@@ -4,15 +4,17 @@
  * main.ts puts it among the map's controls.
  *
  * Each view keeps its own switches: rivers and lakes start off in the Local view (they'd
- * cover the WaPOR raster), on in the others. The graticule starts off everywhere.
+ * cover the WaPOR raster), on in the others. The graticule starts off everywhere. The
+ * Basin view also has what hovering a sub-basin picks out: those upstream and
+ * downstream of it (both on); switches inside a data-views element show in those views only.
  */
 import type { ToggleableLayer } from "../map/map";
 import type { View } from "../toolbar/range-rules";
 
 const DEFAULTS: Record<View, Record<ToggleableLayer, boolean>> = {
-  country: { rivers: true, lakes: true, graticule: false },
-  basin: { rivers: true, lakes: true, graticule: false },
-  local: { rivers: false, lakes: false, graticule: false },
+  country: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true },
+  basin: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true },
+  local: { rivers: false, lakes: false, graticule: false, upstream: true, downstream: true },
 };
 
 export interface LayersMenu {
@@ -61,6 +63,8 @@ export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boole
         const layer = input.dataset.layer as ToggleableLayer;
         input.checked = visible[next][layer];
         onToggle(layer, input.checked);
+        const only = input.closest<HTMLElement>("[data-views]");
+        if (only) only.hidden = !only.dataset.views!.split(" ").includes(next);
       }
     },
   };

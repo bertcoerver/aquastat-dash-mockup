@@ -56,6 +56,11 @@
         <label><input type="checkbox" data-layer="rivers" checked /> Rivers</label>
         <label><input type="checkbox" data-layer="lakes" checked /> Lakes</label>
         <label><input type="checkbox" data-layer="graticule" /> Graticule</label>
+        <!-- Basin view only: what hovering a sub-basin picks out besides it. -->
+        <div class="layers-group" data-views="basin">
+          <label><input type="checkbox" data-layer="upstream" checked /> Upstream Basin</label>
+          <label><input type="checkbox" data-layer="downstream" checked /> Downstream Basin</label>
+        </div>
         <div class="layers-group" role="radiogroup" aria-label="Theme">
           <span class="layers-group-label">Theme</span>
           <label><input type="radio" name="theme" value="auto" /> Auto</label>
@@ -155,15 +160,17 @@
               <button class="tab" role="tab" data-view="local">Local</button>
             </nav>
           </div>
+          <!-- The selection's parent (a country's region, a sub-basin's major basin) selects it when clicked. -->
           <div class="wb-title" role="heading" aria-level="2">
+            <button class="title-parent" id="country-parent" type="button" hidden></button>
             <div class="combobox title-combobox" id="country-combobox">
-              <span class="title-field" data-empty="World" data-search="Search countries…">
-                <input id="country-input" type="text" role="combobox" aria-label="Country" aria-autocomplete="list"
-                  aria-expanded="false" aria-controls="country-list" autocomplete="off" spellcheck="false" />
+              <span class="title-field" data-empty="World" data-search="Search regions and countries…">
+                <input id="country-input" type="text" role="combobox" aria-label="Country or region" aria-autocomplete="list"
+                  aria-haspopup="tree" aria-expanded="false" aria-controls="country-list" autocomplete="off" spellcheck="false" />
                 <span class="title-caret" aria-hidden="true"></span>
               </span>
               <button class="combobox-clear" type="button" aria-label="Show the world" title="Show the world" hidden>×</button>
-              <ul class="combobox-list" id="country-list" role="listbox" aria-label="Countries" hidden></ul>
+              <ul class="combobox-list combobox-tree" id="country-list" role="tree" aria-label="Regions and countries" hidden></ul>
             </div>
           </div>
           <p id="cp-subtitle"></p>
@@ -183,6 +190,7 @@
         <div class="wb-heading">
           <div class="tabs-slot" data-view="basin"></div>
           <div class="wb-title" role="heading" aria-level="2">
+            <button class="title-parent" id="basin-parent" type="button" hidden></button>
             <div class="combobox title-combobox" id="basin-combobox">
               <span class="title-field" data-empty="All basins" data-search="Search basins and sub-basins…">
                 <input id="basin-input" type="text" role="combobox" aria-label="Basin" aria-autocomplete="list"

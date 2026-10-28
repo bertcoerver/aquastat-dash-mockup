@@ -16,6 +16,17 @@ export interface SubBasin {
   bbox: [number, number, number, number];
 }
 
+/** Returns a function that gives the sub-basins downstream of one, to the sea or a sink (not itself). */
+export function downstreamFinder(subBasins: SubBasin[]): (id: number) => Set<number> {
+  const next = new Map(subBasins.map((b) => [b.id, b.downstream]));
+  return (id) => {
+    // (Each visited once: the loops, as below.)
+    const found = new Set<number>();
+    for (let at = next.get(id); at !== undefined && next.has(at) && at !== id && !found.has(at); at = next.get(at)) found.add(at);
+    return found;
+  };
+}
+
 /** Returns a function that gives all sub-basins upstream of one (not itself). */
 export function upstreamFinder(subBasins: SubBasin[]): (id: number) => Set<number> {
   // Reverse the links: for each sub-basin, those that drain straight into it.

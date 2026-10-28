@@ -276,6 +276,47 @@
   gap: 2px;
   max-width: 100%;
 }
+/* With a parent first ("Eastern Africa · Kenya"): the parent, muted, gives way first
+   (down to a few letters, then an ellipsis; its full name in a tooltip), the name only
+   once the parent can't. While searching, the field has the line to itself. */
+.wb-title:has(> .title-parent:not([hidden])) {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.title-parent {
+  flex: 0 1000 auto;
+  min-width: 3em;
+  padding: 2px 2px 2px 5px;
+  overflow: hidden;
+  font: inherit;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.title-parent:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  background: var(--ground);
+}
+.title-parent:not([hidden]) + .title-combobox {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.title-parent:not([hidden]) + .title-combobox::before {
+  content: "·";
+  padding-left: 2px;
+  color: var(--muted);
+}
+.wb-title:has(.title-field:focus-within) > .title-parent,
+.title-combobox:focus-within::before {
+  display: none;
+}
 /* As wide as its text: a hidden copy of the text sizes it, and the input lies over that. */
 .title-field {
   position: relative;

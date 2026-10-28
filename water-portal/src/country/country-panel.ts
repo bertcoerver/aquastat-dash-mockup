@@ -65,6 +65,8 @@ export interface CountryPanel {
   setSelection(selection: Selection): void;
   /** The country under the pointer on the map (null: none). */
   hover(m49: number | null): void;
+  /** Fly to a region's countries (or a country). */
+  showArea(area: number): void;
   /** Lock the legend's ranges (when a range starts playing, so the years compare). */
   lockLegend(): void;
   /** Let the legend's ranges fit the values again (when it stops). */
@@ -367,13 +369,16 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     if (!latest) return null;
     const c = state.selection?.country ?? null;
     const country = c && regionOf.has(c.m49) ? { m49: c.m49, name: names.get(c.m49) ?? c.name } : null;
+    const picked = state.selection?.region;
+    const region = country ? regions.find((r) => r.code === regionOf.get(country.m49)) ?? null : picked ? regions.find((r) => r.code === picked.code) ?? null : null;
     const to = Math.min(state.period.to, latest);
     const period = { from: Math.min(state.period.from, to), to };
     return {
       period,
       label: periodLabel(period),
       country,
-      region: country ? regions.find((r) => r.code === regionOf.get(country.m49)) ?? null : null,
+      region,
+      selected: country ? { code: country.m49, name: country.name } : region && { code: region.code, name: region.name },
       regions,
       countries,
       nameOf: (m49) => names.get(m49) ?? String(m49),
@@ -418,7 +423,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     }
 
     $("cp-subtitle").textContent = [
-      sel && !ctx.country ? "Not reported by AQUASTAT" : ctx.region?.name ?? (sel ? "" : "All countries"),
+      // (The title names the region too.)
+      sel && !ctx.country ? "Not reported by AQUASTAT" : ctx.country ? "" : ctx.region ? `${ctx.region.members.length} countries` : "All countries",
       ctx.period.to < state.period.to ? `${shownPeriod(ctx)}: AQUASTAT's latest` : shownPeriod(ctx),
     ].filter(Boolean).join(" · ");
     message.hidden = true;
@@ -537,14 +543,15 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     for (const { d } of layers) load(topicOf(d.id)?.id);
     // A series hovered in the pinned card keeps the pinned row's countries picked out.
     const area = areaOf(drivers.preview()) ?? areaOf(state.pinned.get(state.topic));
-    // A row of a regional chart picks out its countries.
-    const picked = area === null || area === WORLD ? null : new Set(regions.find((r) => r.code === area)?.members ?? [area]);
+    // A row of a regional chart picks out its countries; else a region selected on its own does.
+    const pickedArea = area ?? (ctx.country ? null : ctx.region?.code ?? null);
+    const picked = pickedArea === null || pickedArea === WORLD ? null : new Set(regions.find((r) => r.code === pickedArea)?.members ?? [pickedArea]);
     // Classes switched off in the legend stay off only while their map is shown.
     for (const id of state.hiddenClasses.keys()) if (!layers.some((l) => l.spec.id === id)) state.hiddenClasses.delete(id);
     for (const { spec } of layers) if (!state.hiddenClasses.has(spec.id)) state.hiddenClasses.set(spec.id, new Set(spec.hidden));
     const hiddenKey = layers.map((l) => [...state.hiddenClasses.get(l.spec.id)!].sort().join(",")).join("|");
     const key =
-      `${layers.map((l) => `${l.spec.id}:${l.slot}:${Object.values(styleOf(l.spec, l.slot)).join("/")}`).join()}:${state.stretch}:${ctx.label}:${area ?? ""}:` +
+      `${layers.map((l) => `${l.spec.id}:${l.slot}:${Object.values(styleOf(l.spec, l.slot)).join("/")}`).join()}:${state.stretch}:${ctx.label}:${pickedArea ?? ""}:` +
       `${ctx.country?.m49 ?? ""}:${hiddenKey}:${legend.lockKey()}`;
     const theme = map.theme;
     // Countries outside the rows' countries are hidden (plain land), like a class switched
@@ -747,7 +754,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `${id}_${current.ctx.country?.m49 ?? "world"}_${current.ctx.period.from}-${current.ctx.period.to}.csv`;
+    a.download = `${id}_${current.ctx.selected?.code ?? "world"}_${current.ctx.period.from}-${current.ctx.period.to}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -779,6 +786,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       if (m49 === null) tooltip.hidden = true;
       else showMapTooltip();
     },
+    showArea: (area) => flyToArea(area),
   };
 }
 
