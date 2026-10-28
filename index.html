@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Water Portal</title>
+    <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+    />
+    <script type="module" crossorigin src="/aquastat-dash-mockup/assets/index-CCBmNoyE.js"></script>
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/rolldown-runtime-XKyaHtl9.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/array-utils-flat-BL8Cekj1.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/get-attribute-from-layouts-Dd2gixpo.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/webgl-device-DchxaUZB.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/expression-C4x9yiMU.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/buffer-transform-DyjAKu06.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/webgpu-DhR-Xd8M.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/preload-helper-x_aofTzv.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/decode-kKOLXaTt.js">
+    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/index-D2qvzWxR.css">
+  </head>
+  <body>
+    <div id="map"></div>
+
+    <!-- The date range, at the bottom of the map. -->
+    <div class="range-pane range" id="pane-range" role="group" aria-label="Date range">
+      <!-- Play the range forward (Local: src/map/wapor-player.ts; else src/toolbar/range-player.ts). -->
+      <button class="play" id="play-button" type="button" aria-label="Play" data-status="stopped">
+        <svg class="play-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor" /></svg>
+        <svg class="pause-icon" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z" fill="currentColor" /></svg>
+      </button>
+      <!-- Click a date to pick it from a calendar (src/toolbar/date-picker.ts), the arrows to
+           move the range a year, the length to type it or snap to a dekad, month or year (src/toolbar/length-picker.ts). -->
+      <div class="range-readout">
+        <button class="range-shift" id="shift-back" type="button" aria-label="One year earlier" title="One year earlier">‹</button>
+        <button class="range-date" id="start-label" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <span class="arrow" aria-hidden="true">→</span>
+        <button class="range-date" id="end-label" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
+        <button class="range-shift" id="shift-ahead" type="button" aria-label="One year later" title="One year later">›</button>
+        <button class="range-date range-len" id="range-len" type="button" aria-haspopup="dialog" aria-expanded="false"></button>
+      </div>
+      <div class="slider" id="slider">
+        <div class="slider-track" id="slider-track">
+          <div class="slider-unavailable" id="slider-unavailable-before" hidden></div>
+          <div class="slider-unavailable slider-unavailable-after" id="slider-unavailable-after" hidden></div>
+          <div class="slider-buffered" id="slider-buffered" hidden></div>
+          <div class="slider-band" id="slider-band"></div>
+        </div>
+        <div class="slider-handle" id="start-handle" role="slider" tabindex="0" aria-label="Start date"></div>
+        <div class="slider-handle" id="end-handle" role="slider" tabindex="0" aria-label="End date"></div>
+        <div class="slider-years" id="slider-years" aria-hidden="true"></div>
+      </div>
+    </div>
+
+    <div class="layers-menu" id="layers-menu">
+      <button class="layers-button" id="layers-button" aria-expanded="false" aria-controls="layers-panel"
+        aria-label="Layers" title="Layers">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M12 3 2 8l10 5 10-5-10-5Z M2 13l10 5 10-5 M2 17.5l10 5 10-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <div class="layers-panel" id="layers-panel" hidden>
+        <label><input type="checkbox" data-layer="rivers" checked /> Rivers</label>
+        <label><input type="checkbox" data-layer="lakes" checked /> Lakes</label>
+        <label><input type="checkbox" data-layer="graticule" /> Graticule</label>
+        <div class="layers-group" role="radiogroup" aria-label="Theme">
+          <span class="layers-group-label">Theme</span>
+          <label><input type="radio" name="theme" value="auto" /> Auto</label>
+          <label><input type="radio" name="theme" value="light" /> Light</label>
+          <label><input type="radio" name="theme" value="dark" /> Dark</label>
+        </div>
+      </div>
+    </div>
+
+    <aside class="legend" id="wapor-legend" hidden>
+      <!-- The variable shown; a menu of the others (src/panels/title-menu.ts). -->
+      <div class="legend-title">
+        <button class="title-menu" id="wapor-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+        <small id="wapor-source"></small>
+      </div>
+      <!-- The unit: a menu of per day, month, year or total, per m² or over a pixel (src/map/wapor-legend.ts). -->
+      <div class="legend-period"><span id="wapor-period"></span><button class="title-menu unit-menu" id="wapor-unit"
+          type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span><span
+            class="title-caret" aria-hidden="true"></span></button></div>
+      <!-- The colour ramp; a menu of how much of the values in view it spans (src/map/wapor-legend.ts). -->
+      <button class="legend-ramp ramp-menu" id="wapor-ramp" type="button" aria-haspopup="listbox" aria-expanded="false"
+        aria-label="Colour range"><span class="title-menu-label" hidden></span></button>
+      <div class="legend-ticks" id="wapor-ticks" aria-hidden="true"></div>
+      <div class="legend-status" id="wapor-status" role="status"></div>
+      <div class="legend-note" id="wapor-note"></div>
+      <!-- Dekads only: hide pixels with a long NDVI gap (src/map/wapor-legend.ts). -->
+      <div class="legend-quality" id="wapor-quality" hidden>
+        <label class="legend-quality-head" for="wapor-quality-input"
+          title="WaPOR L1-QUAL-NDVI-D: dekads since the last valid satellite observation of a pixel. The variable is modelled from it, so a longer gap means a less reliable value.">
+          NDVI quality filter
+        </label>
+        <input class="legend-quality-input" id="wapor-quality-input" type="range" min="0" step="1" value="0" />
+        <div class="legend-quality-ends" aria-hidden="true"><span>All</span><span>Observed</span></div>
+        <div class="legend-quality-value" id="wapor-quality-value"></div>
+        <div class="legend-status" id="wapor-quality-status" role="status"></div>
+      </div>
+    </aside>
+
+    <!-- Basin view: the water balance of the selected sub-basin (src/basin/water-balance.ts). -->
+    <aside class="legend wb-legend" id="wb-legend" hidden>
+      <!-- The variable shown; a menu of the others (src/panels/title-menu.ts). -->
+      <div class="legend-title">
+        <button class="title-menu" id="wb-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+        <small id="wb-legend-note"></small>
+      </div>
+      <div class="legend-period"><span id="wb-legend-period"></span><span id="wb-legend-unit"></span></div>
+      <div class="legend-ramp" id="wb-legend-ramp"></div>
+      <div class="legend-ticks" id="wb-legend-ticks" aria-hidden="true"></div>
+      <div class="legend-status" id="wb-legend-status" role="status"></div>
+    </aside>
+
+    <div class="wb-tooltip" id="wb-tooltip" hidden></div>
+
+    <!-- The maps' layers: a checklist of the charts' maps (src/panels/title-menu.ts); a
+      section per layer on the map is added after the title (src/panels/legend.ts). -->
+    <aside class="legend" id="bs-legend" hidden>
+      <div class="legend-title">
+        <button class="title-menu" id="bs-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map layers"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+      </div>
+      <!-- The discharge network: how far its lines may stray from the rivers (src/basin/scheme-map.ts),
+        moved into the discharge's section. -->
+      <div class="legend-quality" id="bs-simplify" hidden>
+        <label class="legend-quality-head" for="bs-simplify-input"
+          title="The lines are simplified (Douglas–Peucker): each stays within this distance of the river network, as a share of the basin's size.">
+          Simplify
+        </label>
+        <input class="legend-quality-input" id="bs-simplify-input" type="range" min="0" max="6" step="0.25" value="1.5" />
+        <div class="legend-quality-ends" aria-hidden="true"><span>Rivers</span><span>Simple</span></div>
+        <div class="legend-quality-value" id="bs-simplify-value"></div>
+      </div>
+    </aside>
+
+    <div class="wb-tooltip" id="bs-tooltip" hidden></div>
+
+    <!-- Country view: AQUASTAT statistics and the map that goes with each chart (src/country/country-panel.ts). -->
+    <!-- The maps' layers, as the Basin view's (src/panels/legend.ts). -->
+    <aside class="legend" id="cp-legend" hidden>
+      <div class="legend-title">
+        <button class="title-menu" id="cp-indicator" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map layers"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
+      </div>
+    </aside>
+
+    <div class="wb-tooltip" id="cp-tooltip" hidden></div>
+
+    <aside class="wb-panel cp-panel" id="cp-panel" aria-label="Country statistics" hidden>
+      <header class="wb-head">
+        <div class="wb-heading">
+          <!-- The view tabs, in whichever view's pane is showing (src/toolbar/toolbar.ts). -->
+          <div class="tabs-slot" data-view="country">
+            <nav class="tabs" role="tablist" aria-label="View">
+              <button class="tab" role="tab" data-view="country">Country</button>
+              <button class="tab" role="tab" data-view="basin">Basin</button>
+              <button class="tab" role="tab" data-view="local">Local</button>
+            </nav>
+          </div>
+          <div class="wb-title" role="heading" aria-level="2">
+            <div class="combobox title-combobox" id="country-combobox">
+              <span class="title-field" data-empty="World" data-search="Search countries…">
+                <input id="country-input" type="text" role="combobox" aria-label="Country" aria-autocomplete="list"
+                  aria-expanded="false" aria-controls="country-list" autocomplete="off" spellcheck="false" />
+                <span class="title-caret" aria-hidden="true"></span>
+              </span>
+              <button class="combobox-clear" type="button" aria-label="Show the world" title="Show the world" hidden>×</button>
+              <ul class="combobox-list" id="country-list" role="listbox" aria-label="Countries" hidden></ul>
+            </div>
+          </div>
+          <p id="cp-subtitle"></p>
+        </div>
+      </header>
+      <div class="wb-body" id="cp-body">
+        <div class="wb-vars cp-topics" id="cp-topics" role="tablist" aria-label="Topic"></div>
+        <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
+        <p class="wb-message" id="cp-message"></p>
+        <div class="wb-stats cp-stats" id="cp-stats"></div>
+        <div id="cp-cards"></div>
+      </div>
+    </aside>
+
+    <aside class="wb-panel" id="wb-panel" aria-label="Water balance" hidden>
+      <header class="wb-head">
+        <div class="wb-heading">
+          <div class="tabs-slot" data-view="basin"></div>
+          <div class="wb-title" role="heading" aria-level="2">
+            <div class="combobox title-combobox" id="basin-combobox">
+              <span class="title-field" data-empty="All basins" data-search="Search basins and sub-basins…">
+                <input id="basin-input" type="text" role="combobox" aria-label="Basin" aria-autocomplete="list"
+                  aria-haspopup="tree" aria-expanded="false" aria-controls="basin-list" autocomplete="off" spellcheck="false" />
+                <span class="title-caret" aria-hidden="true"></span>
+              </span>
+              <button class="combobox-clear" type="button" aria-label="Show all basins" title="Show all basins" hidden>×</button>
+              <ul class="combobox-list combobox-tree" id="basin-list" role="tree" aria-label="Basins" hidden></ul>
+            </div>
+          </div>
+          <p id="wb-subtitle"></p>
+        </div>
+      </header>
+      <div class="wb-body" id="wb-body">
+        <p class="wb-message" id="wb-message"></p>
+        <div id="wb-results" hidden>
+          <div class="wb-stats" id="wb-stats" role="radiogroup" aria-label="Variable"></div>
+
+          <section class="wb-section">
+            <h3>Map <button class="wb-csv" data-csv="map">CSV</button></h3>
+            <p id="wb-map-caption"></p>
+          </section>
+
+          <section class="wb-section">
+            <h3>Time series <button class="wb-csv" data-csv="timeseries">CSV</button></h3>
+            <p id="wb-ts-caption"></p>
+            <div class="wb-overview" id="wb-overview"></div>
+            <div class="wb-zoom" id="wb-zoom"></div>
+          </section>
+
+          <section class="wb-section">
+            <h3>Water balance <button class="wb-csv" data-csv="flows">CSV</button></h3>
+            <p id="wb-sankey-caption"></p>
+            <div class="wb-sankey" id="wb-sankey"></div>
+          </section>
+
+          <p class="wb-about">
+            Precipitation (PCP) and actual evapotranspiration (AETI): WaPOR v3 L1, dekadal means per
+            sub-basin. Runoff is routed downstream through the sub-basins as linear reservoirs (retention
+            factor 0.1 per month) to estimate discharge (Q) and storage change (ΔS); see Hoogeveen et al.
+            (2015). The model runs in the browser when a sub-basin is selected.
+          </p>
+        </div>
+
+        <!-- Basin statistics: charts that each drive the map (src/basin/basin-stats.ts). -->
+        <section class="bs-section" id="bs-section" hidden>
+          <h3 class="bs-heading" id="bs-heading"></h3>
+          <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
+          <p class="wb-message" id="bs-message" hidden></p>
+          <div class="wb-stats cp-stats" id="bs-stats"></div>
+          <div id="bs-cards"></div>
+        </section>
+      </div>
+    </aside>
+
+    <!-- Local view: the point, typed or clicked on the map (src/toolbar/place-picker.ts),
+         and its charts (src/local/local-panel.ts). -->
+    <aside class="wb-panel lp-panel" id="lp-panel" aria-label="Local" hidden>
+      <header class="wb-head">
+        <div class="wb-heading">
+          <div class="tabs-slot" data-view="local"></div>
+          <div class="wb-title" role="heading" aria-level="2">
+            <!-- The point as the title; a click opens its fields (src/toolbar/place-picker.ts). -->
+            <div class="title-combobox point-picker">
+              <button class="title-menu" id="lp-title" type="button" aria-haspopup="dialog" aria-expanded="false"
+                aria-controls="coords"><span class="title-menu-label">Pick a point</span><span class="title-caret" aria-hidden="true"></span></button>
+              <button class="combobox-clear" id="coords-clear" type="button" aria-label="Clear point" title="Clear point" hidden>×</button>
+              <form class="coords point-popup" id="coords" aria-label="Point" hidden>
+                <label>X<input id="lon-input" type="number" step="any" min="-180" max="180" required
+                    placeholder="lon" aria-label="Longitude" /></label>
+                <label>Y<input id="lat-input" type="number" step="any" min="-90" max="90" required
+                    placeholder="lat" aria-label="Latitude" /></label>
+                <button class="coords-go" type="submit">Go</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </header>
+      <div class="wb-body" id="lp-body">
+        <!-- Charts for the point (src/local/local-panel.ts). -->
+        <p class="wb-message" id="lp-message"></p>
+        <!-- A ratio of totals (water productivity): the same days in every year (src/local/year-bars.ts). -->
+        <!-- Cards: a click pins one, so it stays when the panel folds (as in the other views). -->
+        <section class="wb-section lp-section cp-card" id="lp-bars" data-pin="bars" tabindex="0" aria-label="By year" hidden>
+          <h3><span>By year</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin type="button"
+                title="Remove pin" aria-label="Remove pin">×</button></span></h3>
+          <div id="lp-bars-chart"></div>
+          <p id="lp-bars-caption"></p>
+        </section>
+        <section class="wb-section lp-section cp-card" id="lp-series" data-pin="series" tabindex="0" aria-label="Time series">
+          <h3><span id="lp-ts-title">Time series</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin
+                type="button" title="Remove pin" aria-label="Remove pin">×</button></span></h3>
+          <!-- No point yet: this instead of the charts. -->
+          <p class="ch-empty" id="lp-ts-empty" hidden>Click the map, or the title to type coordinates, to see the time series there.</p>
+          <p id="lp-ts-caption"></p>
+          <div class="wb-overview" id="lp-overview"></div>
+          <div class="wb-zoom" id="lp-zoom"></div>
+          <div class="ts-key" id="lp-ts-key"></div>
+        </section>
+      </div>
+    </aside>
+
+  </body>
+</html>

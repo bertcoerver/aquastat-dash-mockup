@@ -1,0 +1,15 @@
+{
+"name": "public/tiles/borders",
+"description": "public/tiles/borders",
+"version": "2",
+"minzoom": "0",
+"maxzoom": "5",
+"center": "-73.125000,-52.349536,5",
+"bounds": "-180.000000,-85.051129,180.000000,83.627400",
+"antimeridian_adjusted_bounds": "-180.000000,-85.051129,179.999900,83.627400",
+"type": "overlay",
+"format": "pbf",
+"generator": "tippecanoe v2.79.0",
+"generator_options": "tippecanoe --quiet -s EPSG:4326 -e public/tiles/borders '--layer=bndl' '--minimum-zoom=0' '--maximum-zoom=5' '--include=bdytyp' '--feature-filter={\"*\": [\"!=\", \"bdytyp\", 99]}' --no-tile-compression --force data/bndl.geojson",
+"json": "{\"vector_layers\":[{\"id\":\"bndl\",\"description\":\"\",\"minzoom\":0,\"maxzoom\":5,\"fields\":{\"bdytyp\":\"Number\"}}],\"tilestats\":{\"layerCount\":1,\"layers\":[{\"layer\":\"bndl\",\"count\":33785,\"geometry\":\"LineString\",\"attributeCount\":1,\"attributes\":[{\"attribute\":\"bdytyp\",\"count\":8,\"type\":\"number\",\"values\":[0,1,2,3,4,8,9,99],\"min\":0,\"max\":99}]}]}}"
+}

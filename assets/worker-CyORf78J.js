@@ -1,0 +1,1 @@
+import{n as e}from"./decode-BsefkQrx.js";function t(e){return e.layout===`pixel-interleaved`?[e.data.buffer]:e.bands.map(e=>e.buffer)}self.addEventListener(`message`,async n=>{let{jobId:r,compression:i,metadata:a,buffer:o}=n.data;try{let n=await e(o,i,a),s=t(n),c={jobId:r,pixels:n};self.postMessage(c,{transfer:s})}catch(e){let t={jobId:r,error:String(e)};self.postMessage(t)}});
