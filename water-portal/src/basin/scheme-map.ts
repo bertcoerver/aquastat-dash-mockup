@@ -388,6 +388,21 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
   };
 }
 
+/** Per sub-basin in the scheme, the largest area drained by one of its arcs (kept per network: asked at every step of the tuning sliders). */
+const maxAreas = new WeakMap<RiverNetwork, Map<number, number>>();
+function maxAreaOf(net: RiverNetwork, scheme: Scheme) {
+  let maxArea = maxAreas.get(net);
+  if (!maxArea) {
+    maxArea = new Map<number, number>();
+    for (let a = 0; a < net.n; a++) {
+      const sb = net.subBasin[a];
+      if (scheme.nodes.has(sb)) maxArea.set(sb, Math.max(maxArea.get(sb) ?? 0, net.area[a]));
+    }
+    maxAreas.set(net, maxArea);
+  }
+  return maxArea;
+}
+
 /**
  * Discharge per arc of the major basin's rivers (its sub-basin's outflow times the arc's
  * share of the sub-basin's largest upstream area) and how the particles draw it: rivers
@@ -405,11 +420,7 @@ function riverParticles(
   hold: (ref: number) => number,
 ) {
   if (!net) return { layer: null, ref: 1, width: () => 0 };
-  const maxArea = new Map<number, number>();
-  for (let a = 0; a < net.n; a++) {
-    const sb = net.subBasin[a];
-    if (scheme.nodes.has(sb)) maxArea.set(sb, Math.max(maxArea.get(sb) ?? 0, net.area[a]));
-  }
+  const maxArea = maxAreaOf(net, scheme);
   const q = new Float32Array(net.n);
   for (let a = 0; a < net.n; a++) {
     const max = maxArea.get(net.subBasin[a]);

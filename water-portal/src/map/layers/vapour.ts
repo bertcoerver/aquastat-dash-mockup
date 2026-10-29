@@ -275,7 +275,7 @@ export class VapourLayer extends Layer<VapourLayerProps> {
     const region = viewRegion(viewport, p.grid.bounds);
     if (!region || !s.texture) return;
     const dpr = this.context.device.getDefaultCanvasContext().cssToDeviceRatio();
-    const metresPerPixel = (viewport as unknown as { metersPerPixel: number }).metersPerPixel;
+    const metresPerPixel = viewport.metersPerPixel;
     const rgb = ([r, g, b]: [number, number, number]): [number, number, number] => [r / 255, g / 255, b / 255];
     // The ground at the bottom of the view, nearest the camera (on the globe zoomed out,
     // off it: then the middle of the view).

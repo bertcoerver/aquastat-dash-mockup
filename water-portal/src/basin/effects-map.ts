@@ -213,6 +213,11 @@ export function initEffectsMap({ map, majorBasins, onChange }: Options): Effects
     let s = statuses.get(id);
     if (!s) {
       statuses.set(id, (s = { kind: "loading" }));
+      // (The oldest go: a range played adds one per step, each holding its grids.)
+      for (const old of statuses.keys()) {
+        if (statuses.size <= 16) break;
+        statuses.delete(old);
+      }
       const box = boxes.get(major)!;
       const load = (v: "PCP" | "AETI" | "T") => (within ? withinSubBasins(v, range, major, box, within) : loadBasinGrid(v, range, major, box));
       Promise.all((kind === "rain" ? (["PCP"] as const) : (["AETI", "T"] as const)).map(load))
@@ -405,11 +410,31 @@ function ground(g: BasinGrid, stops: [number, Color][], full: number, opacity: n
     image.width = g.width;
     image.height = g.height;
     const data = new ImageData(g.width, g.height);
-    for (let i = 0; i < g.values.length; i++) data.data.set(rampColor(stops, g.values[i] / full), i * 4);
+    // (The ramp's colours looked up, not worked out per cell.)
+    const lut = rampTable(stops);
+    const last = lut.length / 4 - 1;
+    for (let i = 0; i < g.values.length; i++) {
+      const t = g.values[i] / full;
+      const k = t > 0 ? Math.min(last, Math.round(t * last)) : 0; // (NaN: the first colour, as rampColor)
+      data.data.set(lut.subarray(k * 4, k * 4 + 4), i * 4);
+    }
     image.getContext("2d")!.putImageData(data, 0, 0);
     grounds.set(g, (cached = { full, image }));
   }
   return { image: cached.image, bounds: g.bounds, opacity };
+}
+
+const rampTables = new WeakMap<[number, Color][], Uint8ClampedArray>();
+/** A ramp's colours at 1024 steps of 0–1, RGBA (kept per ramp). */
+function rampTable(stops: [number, Color][]) {
+  let lut = rampTables.get(stops);
+  if (!lut) {
+    const steps = 1024;
+    lut = new Uint8ClampedArray(steps * 4);
+    for (let k = 0; k < steps; k++) lut.set(rampColor(stops, k / (steps - 1)), k * 4);
+    rampTables.set(stops, lut);
+  }
+  return lut;
 }
 
 function rampColor(stops: [number, Color][], t: number): Color {

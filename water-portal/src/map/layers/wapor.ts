@@ -608,10 +608,13 @@ export interface CheckedWaporPeriod {
 export async function checkedWaporPeriod(variable: WaporVariable, range: DayRange): Promise<CheckedWaporPeriod | null> {
   const period = await publishedWaporPeriod(variable, range);
   if (!period) return null;
-  const quality = period.qualityUrl && (await waporAvailable(period.qualityUrl).catch(() => false));
-  const qualityUrl = quality ? period.qualityUrl : null;
-  const l1 = { ...period, qualityUrl };
-  const l2 = waporHasL2(variable) ? await checkedL2(l1) : null;
+  // (The quality raster and L2, checked at once: each is a round trip to the bucket.)
+  const [quality, l2Published] = await Promise.all([
+    period.qualityUrl ? waporAvailable(period.qualityUrl).catch(() => false) : false,
+    waporHasL2(variable) ? publishedWaporPeriod(variable, range, "L2").catch(() => null) : null,
+  ]);
+  const l1 = { ...period, qualityUrl: quality ? period.qualityUrl : null };
+  const l2 = l2Published ? await checkedL2(l2Published, l1) : null;
   const checked = { ...l1, l2 };
   await openWapor(shownPeriod(checked));
   return { period: checked, quality: period.qualityUrl ? (quality ? "ready" : "missing") : null };
@@ -626,10 +629,8 @@ export const waporOpened = (period: RasterSum) => ownUrls(period).every((url) =>
 /** Open a period's rasters. */
 export const openWapor = (period: RasterSum) => Promise.all(ownUrls(period).map(openRaster)).then(() => {});
 
-/** An L1 period's L2 one, if it's published (null if not, or the bucket can't be reached: L1 is shown). */
-async function checkedL2(l1: WaporPeriod): Promise<WaporPeriod | null> {
-  const l2 = await publishedWaporPeriod(l1.variable, l1.range, "L2").catch(() => null);
-  if (!l2) return null;
+/** An L2 period as published, filled from its L1 one, with its quality raster if that's published. */
+async function checkedL2(l2: WaporPeriod, l1: WaporPeriod): Promise<WaporPeriod> {
   // Its filled pixels have L1's quality: with both quality rasters, or neither.
   const quality = l1.qualityUrl && l2.qualityUrl && (await waporAvailable(l2.qualityUrl).catch(() => false));
   return { ...l2, qualityUrl: quality ? l2.qualityUrl : null, fill: l1 };
@@ -672,10 +673,16 @@ function openRaster(url: string): Promise<GeoTIFF> {
     raster.then((geotiff) => rasters.get(url) === raster && opened.set(url, geotiff), () => rasters.delete(url));
   }
   rasters.set(url, raster);
-  for (const old of rasters.keys()) {
-    if (rasters.size <= MAX_OPEN_RASTERS) break;
-    rasters.delete(old);
-    opened.delete(old);
+  if (rasters.size > MAX_OPEN_RASTERS) {
+    // (Not those a layer draws: playback opens many ahead, and the map would blank
+    // until the one shown is read again.)
+    const drawn = new Set([...sourceUrls.values()].flat());
+    for (const old of rasters.keys()) {
+      if (rasters.size <= MAX_OPEN_RASTERS) break;
+      if (drawn.has(old)) continue;
+      rasters.delete(old);
+      opened.delete(old);
+    }
   }
   return raster;
 }
@@ -686,6 +693,8 @@ interface RasterTile {
   width: number;
   height: number;
   nodata: number | null;
+  /** Whether any pixel is nodata (looked for once: it's asked at every hover and stretch). */
+  hasNodata: boolean;
   /** Pixel (col, row) to lon/lat: [a, b, c, d, e, f], lon = a·col + b·row + c, lat = d·col + e·row + f. */
   transform: RasterArray["transform"];
 }
@@ -727,7 +736,9 @@ function rasterTile(url: string, { x, y, z }: TileIndex, signal?: AbortSignal): 
     const geotiff = await openRaster(url);
     const pool = defaultDecoderPool();
     const { array } = await level(geotiff, z).fetchTile(x, y, { boundless: false, pool, signal });
-    return { values: samples(array), width: array.width, height: array.height, nodata: array.nodata, transform: array.transform };
+    const values = samples(array);
+    const { nodata } = array;
+    return { values, width: array.width, height: array.height, nodata, hasNodata: nodata !== null && values.includes(nodata), transform: array.transform };
   });
 }
 
@@ -760,13 +771,17 @@ async function fullSource(url: string, signal?: AbortSignal): Promise<SampleSour
   if (!image) throw new Error(`No such raster: ${url}`);
   const { transform, width, height, tileWidth, tileHeight, nodata } = image;
   const tile = (x: number, y: number) =>
-    cachedTile(`full/${x}/${y} ${url}`, signal, async () => ({
-      values: await cogTile(url, x, y, signal),
-      width: tileWidth,
-      height: tileHeight,
-      nodata,
-      transform: [transform[0], 0, transform[2] + transform[0] * x * tileWidth, 0, transform[4], transform[5] + transform[4] * y * tileHeight],
-    }));
+    cachedTile(`full/${x}/${y} ${url}`, signal, async () => {
+      const values = await cogTile(url, x, y, signal);
+      return {
+        values,
+        width: tileWidth,
+        height: tileHeight,
+        nodata,
+        hasNodata: nodata !== null && values.includes(nodata),
+        transform: [transform[0], 0, transform[2] + transform[0] * x * tileWidth, 0, transform[4], transform[5] + transform[4] * y * tileHeight],
+      };
+    });
   return { transform, width, height, tileWidth, tileHeight, tile };
 }
 
@@ -825,7 +840,7 @@ function resampledTile(url: string, grid: string, { x, y, z }: TileIndex, signal
       }
     }
     const transform: RasterArray["transform"] = [a, 0, c + a * col0, 0, e, f + e * row0];
-    return { values, width, height, nodata: null, transform };
+    return { values, width, height, nodata: null, hasNodata: false, transform };
   });
 }
 
@@ -891,7 +906,7 @@ function tileSources(period: RasterSum, quality: boolean, get: GetTile): TileSou
   const { fill } = period;
   if (!fill) return sources;
   const grid = get(gridTerm(period));
-  if (!grid || grid.nodata === null || !grid.values.includes(grid.nodata)) return sources;
+  if (!grid?.hasNodata) return sources;
   const onGrid = (url: string) => ({ url, grid: gridTerm(period).url });
   return [...sources, ...fill.terms.map((t) => onGrid(t.url)), ...(quality && fill.qualityUrl ? [onGrid(fill.qualityUrl)] : [])];
 }
@@ -910,7 +925,7 @@ function assemble(period: RasterSum, quality: boolean, get: GetTile): PeriodTile
   let qualities = quality && period.qualityUrl ? get({ url: period.qualityUrl })!.values : null;
   const { fill } = period;
   const grid = fill && get(gridTerm(period))!;
-  if (fill && grid && grid.nodata !== null && grid.values.includes(grid.nodata)) {
+  if (fill && grid?.hasNodata) {
     const onGrid = (url: string) => get({ url, grid: gridTerm(period).url })!;
     const filled = combineTiles(fill, fill.terms.map((t) => onGrid(t.url)));
     const filledQuality = qualities && fill.qualityUrl ? onGrid(fill.qualityUrl).values : null;
@@ -1048,7 +1063,15 @@ interface Box {
  * a row or column of the grid crosses the globe's edge, the edge is found by bisection,
  * as the parts near it span many degrees on very few pixels.
  */
+let visibleBoxOf: { viewport: Viewport; box: Box | null } | null = null;
 function visibleBox(viewport: Viewport): Box | null {
+  // (Asked by each of the periods' layers for the same view.)
+  if (visibleBoxOf && (visibleBoxOf.viewport === viewport || viewport.equals(visibleBoxOf.viewport))) return visibleBoxOf.box;
+  const box = visibleBoxOnce(viewport);
+  visibleBoxOf = { viewport, box };
+  return box;
+}
+function visibleBoxOnce(viewport: Viewport): Box | null {
   const { width, height } = viewport;
   const longitude = viewport.unproject([width / 2, height / 2])[0];
   // Off the globe, unproject gives the nearest point on the horizon instead; that
@@ -1328,10 +1351,9 @@ export function waporViewRange(period: WaporPeriod, maxGap: number | null, cut: 
   const { signed } = period.variable;
   const filter = maxGap !== null;
 
-  // The values in view, tile by tile (NaN: none, or hidden).
-  const chunks: Float32Array[] = [];
-  let min = Infinity;
-  let max = -Infinity;
+  // The tiles in view, each with the columns inside the box (the values are read in
+  // place: no copy of a tile per pass).
+  const inView: { tile: PeriodTile; cols: boolean[] }[] = [];
   const key = `${drawn.variable.id} ${drawn.key} ${drawn.qualityUrl} ${filter}`;
   const made = assembled.key === key ? assembled.tiles : new Map<string, PeriodTile>();
   assembled = { key, tiles: new Map() }; // (only those still in view)
@@ -1344,45 +1366,49 @@ export function waporViewRange(period: WaporPeriod, maxGap: number | null, cut: 
       tile = assemble(drawn, filter, get);
     }
     assembled.tiles.set(at, tile);
-    const { quality, width, height, transform: [a, , c, , e, f] } = tile;
-    const sum = tile.values.slice(); // (the one kept stays as it is)
-    // Columns and rows inside the box, by their pixel centres (the grid is lon/lat).
+    const { width, transform: [a, , c] } = tile;
+    // Columns inside the box, by their pixel centres (the grid is lon/lat).
     const cols = Array.from({ length: width }, (_, i) => {
       const lon = unwrap(a * (i + 0.5) + c);
       return lon >= box.west && lon <= box.east;
     });
-    for (let row = 0; row < height; row++) {
-      const lat = e * (row + 0.5) + f;
-      const inRow = lat >= box.south && lat <= box.north;
-      for (let col = 0; col < width; col++) {
-        const p = row * width + col;
-        // As in the shader: no negative values (unless signed), and no quality value (255) is hidden too.
-        const shown = signed ? sum[p] === sum[p] : sum[p] >= 0;
-        if (!inRow || !cols[col] || !shown || (quality && quality[p] > maxGap!)) {
-          sum[p] = Number.NaN;
-          continue;
+    inView.push({ tile, cols });
+  }
+  /** Each shown value in view (as in the shader: no negative values unless signed, none hidden by the quality filter). */
+  const each = (fn: (v: number) => void) => {
+    for (const { tile, cols } of inView) {
+      const { values, quality, width, height, transform: [, , , , e, f] } = tile;
+      for (let row = 0; row < height; row++) {
+        const lat = e * (row + 0.5) + f;
+        if (lat < box.south || lat > box.north) continue;
+        for (let col = 0; col < width; col++) {
+          if (!cols[col]) continue;
+          const p = row * width + col;
+          const v = values[p];
+          if (!(signed ? v === v : v >= 0) || (quality && quality[p] > maxGap!)) continue;
+          fn(v);
         }
-        if (sum[p] < min) min = sum[p];
-        if (sum[p] > max) max = sum[p];
       }
     }
-    chunks.push(sum);
-  }
+  };
+  let min = Infinity;
+  let max = -Infinity;
+  let total = 0;
+  each((v) => {
+    total++;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  });
   if (!(max >= min)) return null;
   if (cut === 0 || max === min) return [min, max];
 
-  let total = 0;
-  for (const sum of chunks) for (const v of sum) if (v === v) total++; // (not NaN)
   const every = Math.max(1, Math.ceil(total / SAMPLE));
   const sample = new Float32Array(Math.ceil(total / every));
   let n = 0;
   let k = 0;
-  for (const sum of chunks) {
-    for (const v of sum) {
-      if (v !== v) continue;
-      if (k++ % every === 0) sample[n++] = v;
-    }
-  }
+  each((v) => {
+    if (k++ % every === 0) sample[n++] = v;
+  });
   const sorted = sample.subarray(0, n).sort();
   /** The value below which `share` of the pixels lie. */
   const quantile = (share: number) => sorted[Math.min(n - 1, Math.max(0, Math.round(share * (n - 1))))];
@@ -1419,8 +1445,13 @@ export function waporValueAt(period: RasterSum, [lng, lat]: LngLat, maxGap: numb
       const col = Math.floor(((((lng - c) % 360) + 360) % 360) / a);
       const row = Math.floor((lat - f) / e);
       if (col >= width || row < 0 || row >= height || !loadedTile(drawn, true, get)) continue;
-      const key = `${drawn.key} ${drawn.qualityUrl} ${index.z}/${index.x}/${index.y}`;
-      if (hoverTile?.key !== key) hoverTile = { key, tile: assemble(drawn, true, get) };
+      const at = `${index.z}/${index.x}/${index.y}`;
+      const key = `${drawn.key} ${drawn.qualityUrl} ${at}`;
+      if (hoverTile?.key !== key) {
+        // (As the stretch pass made it, if it did, with the quality band too.)
+        const made = assembled.key === `${drawn.variable.id} ${drawn.key} ${drawn.qualityUrl} true` ? assembled.tiles.get(at) : undefined;
+        hoverTile = { key, tile: made ?? assemble(drawn, true, get) };
+      }
       const { values, quality } = hoverTile.tile;
       const p = row * width + col;
       const v = values[p];
@@ -1446,6 +1477,8 @@ function band(device: Texture["device"], data: RasterTypedArray, format: "r32flo
 // MultiCOGLayer opens its rasters again whenever it gets a new `sources` object. While
 // playing, the map has two periods' layers: the one shown and the next.
 const sourcesByKey = new Map<string, Record<string, WaporSource>>();
+/** The rasters of each `sources` (by its key): kept open while a layer draws them. */
+const sourceUrls = new Map<string, string[]>();
 
 /**
  * The period's raster (or sum of rasters), coloured with `ramp`; nothing where
@@ -1484,7 +1517,12 @@ export function waporLayer({
     period.terms.forEach(({ url, grid }, i) => grid || (sources![`t${i}`] = source(url)));
     if (period.qualityUrl) sources.quality = source(period.qualityUrl);
     sourcesByKey.set(key, sources);
-    for (const old of sourcesByKey.keys()) if (sourcesByKey.size > 4) sourcesByKey.delete(old);
+    sourceUrls.set(key, ownUrls(period));
+    for (const old of sourcesByKey.keys()) {
+      if (sourcesByKey.size <= 4) break;
+      sourcesByKey.delete(old);
+      sourceUrls.delete(old);
+    }
   }
   return new GlobeMultiCOGLayer({
     id,

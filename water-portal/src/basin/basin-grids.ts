@@ -51,7 +51,17 @@ function frameOf([w, s, e, n]: Box): Frame {
   return { width, height, bounds: [w - cell, n + cell - height * cell, w - cell + width * cell, n + cell] };
 }
 
+/** How many grids (a megabyte or so each) are kept: a range played adds one per step. */
+const KEPT_GRIDS = 16;
 const grids = new Map<string, Promise<BasinGrid>>();
+
+/** The last few `max` of a map's entries are kept: the oldest go. */
+function keepLast<K, V>(map: Map<K, V>, max: number) {
+  for (const key of map.keys()) {
+    if (map.size <= max) break;
+    map.delete(key);
+  }
+}
 
 /** A variable's mean mm/day over a range, on the basin's grid (kept; a failed one is forgotten). */
 export function loadBasinGrid(variable: GridVariable, range: DayRange, major: number, box: Box): Promise<BasinGrid> {
@@ -61,6 +71,7 @@ export function loadBasinGrid(variable: GridVariable, range: DayRange, major: nu
     grid = readGrid(variable, range, major, box);
     grid.catch(() => grids.delete(key));
     grids.set(key, grid);
+    keepLast(grids, KEPT_GRIDS);
   }
   return grid;
 }
@@ -93,6 +104,7 @@ export function withinSubBasins(variable: GridVariable, range: DayRange, major: 
     }));
     grid.catch(() => masked.delete(key));
     masked.set(key, grid);
+    keepLast(masked, KEPT_GRIDS);
   }
   return grid;
 }
@@ -105,11 +117,7 @@ function subBasinMask(major: number, box: Box, subs: { key: string; ids: Set<num
   let mask = masks.get(key);
   if (!mask) {
     const frame = frameOf(box);
-    mask = tilesOver(frame, FAO_TILES.subBasins).then((all) => {
-      const features = all.filter((f) => subs.ids.has((f.properties as SubBasinProperties).SDG6_SB_ID));
-      const { data } = drawn(frame, features, () => "#fff").getImageData(0, 0, frame.width, frame.height);
-      return Uint8Array.from({ length: frame.width * frame.height }, (_, i) => (data[i * 4 + 3] >= 128 ? 1 : 0));
-    });
+    mask = tilesOver(frame, FAO_TILES.subBasins).then((all) => maskOf(frame, all.filter((f) => subs.ids.has((f.properties as SubBasinProperties).SDG6_SB_ID))));
     mask.catch(() => masks.delete(key));
     masks.set(key, mask);
   }
@@ -205,7 +213,17 @@ export function loadTranspiration(range: DayRange, major: number, box: Box): Pro
  * and those whose colour no neighbour across shares (two sub-basins' colours blended
  * can look like a third's).
  */
-async function subBasinZones(major: number, frame: Frame): Promise<Int32Array> {
+const zones = new Map<number, Promise<Int32Array>>();
+function subBasinZones(major: number, frame: Frame): Promise<Int32Array> {
+  let z = zones.get(major);
+  if (!z) {
+    z = subBasinZonesOnce(major, frame);
+    z.catch(() => zones.delete(major));
+    zones.set(major, z);
+  }
+  return z;
+}
+async function subBasinZonesOnce(major: number, frame: Frame): Promise<Int32Array> {
   const features = (await tilesOver(frame, FAO_TILES.subBasins)).filter((f) => (f.properties as SubBasinProperties).SDG6_MB_ID === major);
   const ids = [...new Set(features.map((f) => (f.properties as SubBasinProperties).SDG6_SB_ID))];
   const index = new Map(ids.map((id, i) => [id, i + 1]));
@@ -264,11 +282,23 @@ async function tilesOver(frame: Frame, tiles: string): Promise<Feature[]> {
 
 // --- The basin's outline -------------------------------------------------------------
 
-/** 1 where a cell's centre lies in the major basin, else 0. */
-async function basinMask(major: number, frame: Frame): Promise<Uint8Array> {
-  const features = (await tilesOver(frame, FAO_TILES.majorBasins)).filter((f) => (f.properties as MajorBasinProperties).SDG6_MB_ID === major);
+/** 1 where a cell's centre lies in one of the features, else 0. */
+function maskOf(frame: Frame, features: Feature[]): Uint8Array {
   const { data } = drawn(frame, features, () => "#fff").getImageData(0, 0, frame.width, frame.height);
   return Uint8Array.from({ length: frame.width * frame.height }, (_, i) => (data[i * 4 + 3] >= 128 ? 1 : 0));
+}
+
+const basinMasks = new Map<number, Promise<Uint8Array>>();
+
+/** 1 where a cell's centre lies in the major basin, else 0 (kept: every variable and range over the basin needs it; a failed one is forgotten). */
+function basinMask(major: number, frame: Frame): Promise<Uint8Array> {
+  let mask = basinMasks.get(major);
+  if (!mask) {
+    mask = tilesOver(frame, FAO_TILES.majorBasins).then((all) => maskOf(frame, all.filter((f) => (f.properties as MajorBasinProperties).SDG6_MB_ID === major)));
+    mask.catch(() => basinMasks.delete(major));
+    basinMasks.set(major, mask);
+  }
+  return mask;
 }
 
 async function loadTile(tiles: string, x: number, y: number, z: number): Promise<Feature[]> {

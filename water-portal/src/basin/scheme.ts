@@ -53,6 +53,8 @@ export interface SchemeLine {
   raw: LonLat[];
   /** Simplified (simplify()). */
   path: LonLat[];
+  /** Per vertex of `raw`, the tolerance below which it's kept (worked out once; see simplify). */
+  rank?: Float64Array;
 }
 
 export interface Scheme {
@@ -292,21 +294,37 @@ export function lineQ(line: SchemeLine, q: (id: number) => number, scheme: Schem
   return joined * keep + Math.max(0, out - qin);
 }
 
-/** Simplify every river line to `tolerance` degrees (of latitude); nothing to do if they are already. */
+/**
+ * Simplify every river line to `tolerance` degrees (of latitude); nothing to do if they
+ * are already. Douglas–Peucker is run once per line, all the way down, noting for each
+ * vertex the tolerance below which it's kept (douglasPeuckerRanks): a tolerance is then
+ * a filter, so the slider's steps cost no more than a pass over the vertices.
+ */
 export function simplify(scheme: Scheme, tolerance: number) {
   if (scheme.simplifiedAt === tolerance) return;
   scheme.simplifiedAt = tolerance;
-  for (const line of scheme.lines) line.path = line.kind === "river" && tolerance > 0 ? douglasPeucker(line.raw, tolerance) : line.raw;
+  for (const line of scheme.lines) {
+    if (line.kind !== "river" || tolerance <= 0 || line.raw.length < 3) {
+      line.path = line.raw;
+      continue;
+    }
+    const rank = (line.rank ??= douglasPeuckerRanks(line.raw));
+    line.path = line.raw.filter((_, i) => rank[i] > tolerance);
+  }
 }
 
-function douglasPeucker(points: LonLat[], tolerance: number): LonLat[] {
-  if (points.length < 3) return points;
+/**
+ * Per vertex, the largest tolerance at which Douglas–Peucker keeps it: the ends always
+ * (Infinity); a vertex, its distance from the chord it was the furthest from, no more
+ * than the vertex's whose chord that was (it's only looked at once that one is kept).
+ */
+function douglasPeuckerRanks(points: LonLat[]): Float64Array {
   const k = Math.cos((points[0][1] * Math.PI) / 180);
-  const keep = new Uint8Array(points.length);
-  keep[0] = keep[points.length - 1] = 1;
-  const stack: [number, number][] = [[0, points.length - 1]];
+  const rank = new Float64Array(points.length);
+  rank[0] = rank[points.length - 1] = Infinity;
+  const stack: [number, number, number][] = [[0, points.length - 1, Infinity]];
   while (stack.length) {
-    const [i, j] = stack.pop()!;
+    const [i, j, above] = stack.pop()!;
     const [ax, ay] = [points[i][0] * k, points[i][1]];
     const [bx, by] = [points[j][0] * k, points[j][1]];
     const dx = bx - ax;
@@ -320,10 +338,10 @@ function douglasPeucker(points: LonLat[], tolerance: number): LonLat[] {
       const d = Math.hypot(px - ax - t * dx, py - ay - t * dy);
       if (d > worst) [worst, at] = [d, m];
     }
-    if (worst > tolerance) {
-      keep[at] = 1;
-      stack.push([i, at], [at, j]);
-    }
+    if (at < 0) continue;
+    const r = Math.min(worst, above);
+    rank[at] = r;
+    stack.push([i, at, r], [at, j, r]);
   }
-  return points.filter((_, i) => keep[i]);
+  return rank;
 }

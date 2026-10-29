@@ -363,7 +363,7 @@ export class RainLayer extends Layer<RainLayerProps> {
     if (!region || !s.texture) return;
     const dpr = this.context.device.getDefaultCanvasContext().cssToDeviceRatio();
     // Metres per CSS pixel at the ground in the middle of the view.
-    const metresPerPixel = (viewport as unknown as { metersPerPixel: number }).metersPerPixel;
+    const metresPerPixel = viewport.metersPerPixel;
     const [r, g, b] = p.color;
 
     s.model.setBindings({ uGrid: s.texture });
