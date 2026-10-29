@@ -172,7 +172,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
   let hover: { subBasin: number; value: number; kind: SchemeKind } | null = null;
   let lastMajor: number | null = null;
   const slider = $("bs-simplify");
-  const input = $("bs-simplify-input") as HTMLInputElement;
+  const input = $<HTMLInputElement>("bs-simplify-input");
   /** The basin's scheme last drawn (for the slider). */
   let drawnScheme: Scheme | null = null;
 
@@ -206,7 +206,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
     let s = schemes.get(major);
     if (!s) {
       schemes.set(major, (s = { kind: "loading" }));
-      Promise.all([loadRivers(major), loadMiddles()])
+      void Promise.all([loadRivers(major), loadMiddles()])
         .then(([net, middles]) => {
           const scheme = buildScheme(net, major, subBasins, middles);
           schemes.set(major, { kind: "ready", scheme, net });

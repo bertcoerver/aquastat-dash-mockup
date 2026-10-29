@@ -185,7 +185,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMa
     const controller = (loading = new AbortController());
     status = { kind: "loading" };
     render();
-    waporPixelArea(variable, lngLat[1]).then((area) => {
+    void waporPixelArea(variable, lngLat[1]).then((area) => {
       if (loading !== controller) return;
       pixelArea = area;
       render();

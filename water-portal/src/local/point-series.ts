@@ -122,7 +122,7 @@ export async function loadPointSeries(
   function put(i: number, raw: (number | null)[]) {
     if (read[i]) return;
     read[i] = 1;
-    const value = (k: number) => (raw[k] === null ? Number.NaN : parts[k].sign * parts[k].variable.scale * raw[k]!);
+    const value = (k: number) => (raw[k] === null ? Number.NaN : parts[k].sign * parts[k].variable.scale * raw[k]);
     if (series.ratio) {
       const [num, den] = [value(0), value(1)];
       series.ratio.num[i] = num;
@@ -176,7 +176,7 @@ export async function loadPointSeries(
       if (signal.aborted) return;
       dekads.forEach((dk, i) => {
         const raw = parts.map((p, k) => byPart[k].get(waporDekadUrl(p.variable, dk)));
-        if (raw.every((v) => v !== undefined)) put(i, raw as (number | null)[]);
+        if (raw.every((v) => v !== undefined)) put(i, raw);
       });
       onUpdate(series);
     },

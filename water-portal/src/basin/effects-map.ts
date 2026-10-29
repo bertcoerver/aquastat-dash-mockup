@@ -218,7 +218,7 @@ export function initEffectsMap({ map, majorBasins, onChange }: Options): Effects
       }
       const box = boxes.get(major)!;
       const load = (v: "PCP" | "AETI" | "T") => (within ? withinSubBasins(v, range, major, box, within) : loadBasinGrid(v, range, major, box));
-      Promise.all((kind === "rain" ? (["PCP"] as const) : (["AETI", "T"] as const)).map(load))
+      void Promise.all((kind === "rain" ? (["PCP"] as const) : (["AETI", "T"] as const)).map(load))
         .then((grids) => statuses.set(id, { kind: "ready", grids }))
         .catch((err: Error) => statuses.set(id, { kind: "error", message: err.message }))
         .then(() => onChange());

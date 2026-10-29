@@ -124,7 +124,7 @@ export function initWaporRaster({ map: waterMap, getView, onVariable, onUnits, s
     waporLegend.show(draft, "checking");
     waporLegend.quality(draft?.qualityUrl ? "checking" : null);
     if (!range || !draft) return hideWapor();
-    waporTimer = window.setTimeout(async () => {
+    waporTimer = window.setTimeout(() => void (async () => {
       let checked: CheckedWaporPeriod | null = null;
       let failed = false; // couldn't reach the bucket
       try {
@@ -139,7 +139,7 @@ export function initWaporRaster({ map: waterMap, getView, onVariable, onUnits, s
         return waporLegend.show(draft, failed ? "error" : "missing");
       }
       showCheckedWapor(checked, false);
-    }, 250);
+    })(), 250);
   }
 
   /** Show a checked period; `seamless` (a playback frame): it's loaded already. */
@@ -206,7 +206,7 @@ export function initWaporRaster({ map: waterMap, getView, onVariable, onUnits, s
     const lat = map.getCenter().lat;
     const level = shownLevel();
     const wanted = (areaWanted = `${waporVariable.id} ${lat} ${level}`);
-    waporPixelArea(waporVariable, lat, level).then((area) => areaWanted === wanted && waporLegend.pixelArea(area, lat));
+    void waporPixelArea(waporVariable, lat, level).then((area) => areaWanted === wanted && waporLegend.pixelArea(area, lat));
   }
   map.on("moveend", showPixelArea);
 

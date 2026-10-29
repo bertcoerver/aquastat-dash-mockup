@@ -8,6 +8,10 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint src test vite.config.ts",
+    "test": "vitest run",
+    "smoke": "node scripts/smoke.mjs",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build",
     "tiles": "./scripts/build-tiles.sh",
     "postinstall": "patch-package",
     "lists": "node scripts/build-lists.mjs",
@@ -34,8 +38,12 @@
   },
   "devDependencies": {
     "@types/geojson": "^7946.0.16",
+    "eslint": "^10.13.0",
     "patch-package": "^8.0.1",
+    "playwright": "^1.63.0",
     "typescript": "~5.9.0",
-    "vite": "^8.3.0"
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.5"
   }
 }

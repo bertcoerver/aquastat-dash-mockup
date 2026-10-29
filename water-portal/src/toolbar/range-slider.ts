@@ -102,7 +102,7 @@ export function initRangeSlider(
     pane.style.setProperty("--range-min", `${Math.ceil(around + (labelPx * BOUNDARIES) / 365)}px`);
   };
   new ResizeObserver(fitTicks).observe(track);
-  document.fonts.ready.then(fitTicks);
+  void document.fonts.ready.then(fitTicks);
 
   /** Move `grip` to track position `p` (in boundaries; `from` is the range when the drag began). */
   function moveTo(grip: Grip, p: number, from: { p: number; range: DayRange }) {

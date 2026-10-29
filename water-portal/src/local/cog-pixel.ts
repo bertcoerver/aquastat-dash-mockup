@@ -161,7 +161,7 @@ function alike(url: string, like: Image): Image {
  * With another raster's layout, `use` runs while the layout is checked (a tile waits
  * for the check, see readTile); if it's not the same, the raster is read again on its own.
  */
-async function read<T>(url: string, use: (image: Image) => Promise<T>, own = false): Promise<T | null> {
+async function read<T>(url: string, use: (image: Image) => T | Promise<T>, own = false): Promise<T | null> {
   let image: Image | null = null;
   try {
     image = await openImage(url, own);
@@ -307,16 +307,16 @@ async function readImage(url: string): Promise<Image> {
     nodata: nodata ? Number(nodata) : null,
     tileOffsets,
     tileByteCounts,
-    compression: compression as Image["compression"],
+    compression: compression,
     layout,
     metadata: {
-      sampleFormat: sampleFormat as DecoderMetadata["sampleFormat"],
+      sampleFormat: sampleFormat,
       bitsPerSample,
       samplesPerPixel,
       width: tileWidth,
       height: tileHeight,
-      predictor: predictor as DecoderMetadata["predictor"],
-      planarConfiguration: planarConfiguration as DecoderMetadata["planarConfiguration"],
+      predictor: predictor,
+      planarConfiguration: planarConfiguration,
       littleEndian: le,
     },
   };
@@ -401,7 +401,7 @@ function compressedTile(image: Image, index: number, signal?: AbortSignal): Prom
   return new Promise((resolve, reject) => {
     const abort = () => {
       if (--read.waiting === 0) read.controller.abort(signal.reason);
-      reject(signal.reason);
+      reject(signal.reason as Error);
     };
     if (signal.aborted) return abort();
     signal.addEventListener("abort", abort, { once: true });
@@ -428,7 +428,7 @@ async function readTile(image: Image, index: number, signal?: AbortSignal): Prom
 
 /** A raster's pixel size, in its CRS's units (degrees for WaPOR); null if there's no such raster. */
 export function cogPixelSize(url: string): Promise<[number, number] | null> {
-  return read(url, async ({ transform: [a, b, , d, e] }) => [Math.hypot(a, d), Math.hypot(b, e)]);
+  return read(url, ({ transform: [a, b, , d, e] }) => [Math.hypot(a, d), Math.hypot(b, e)]);
 }
 
 /** What the map needs of a raster's full resolution image (see cogTile). */
@@ -436,7 +436,7 @@ export type CogImage = Pick<Image, "width" | "height" | "tileWidth" | "tileHeigh
 
 /** A raster's full resolution image; null if there's no such raster. */
 export function cogImage(url: string): Promise<CogImage | null> {
-  return read(url, async ({ width, height, tileWidth, tileHeight, transform, nodata }) => ({ width, height, tileWidth, tileHeight, transform, nodata }));
+  return read(url, ({ width, height, tileWidth, tileHeight, transform, nodata }) => ({ width, height, tileWidth, tileHeight, transform, nodata }));
 }
 
 /**

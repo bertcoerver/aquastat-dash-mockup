@@ -63,7 +63,7 @@ export function initCorsCheck() {
   const inner = window.fetch;
   window.fetch = async (input, init) => {
     const request = input instanceof Request ? input : null;
-    const url = new URL(request ? request.url : String(input), window.location.href);
+    const url = new URL(input instanceof Request ? input.url : input instanceof URL ? input.href : input, window.location.href);
     const elsewhere = url.origin !== window.location.origin;
     try {
       const response = await inner(input, init);

@@ -46,6 +46,10 @@ Other commands:
 | `npm run preview` | Serve the built `dist/` locally, to check a build |
 | `npm run deploy` | Build the site and publish it to GitHub Pages (the `gh-pages` branch), from this machine since the tiles and model output aren't committed. `scripts/pre-push` does this on each push to `main` that changes `water-portal/`; install it once with `ln -s ../../water-portal/scripts/pre-push .git/hooks/pre-push` from the repo root |
 | `npm run typecheck` | Only check the TypeScript for errors |
+| `npm run lint` | ESLint, for what the type checker doesn't catch (`eslint.config.js`) |
+| `npm test` | The unit tests (`test/*.test.ts`, [Vitest](https://vitest.dev)): the date rules, the basin statistics' sums, the WaPOR rasters a range adds up, the sub-basin network, the axis and CSV helpers |
+| `npm run smoke` | Drive the built site through its three views in a headless browser and fail on any error (`scripts/smoke.mjs`; needs Playwright's Chromium: `npx playwright install chromium`) |
+| `npm run check` | Type-check, lint, test and build, as [the GitHub Actions workflow](../.github/workflows/ci.yml) does on every push |
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
 | `npm run rivers` | Rebuild the river network per major basin and the sub-basins' middles for the Basin view's water balance scheme (`public/data/rivers/`, `public/data/sub-basin-middles.json`; from `../river-flow-poc`'s `rivers.bin` and `nodes.json`) |

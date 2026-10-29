@@ -388,13 +388,23 @@ export class RiverParticlesLayer extends Layer<RiverParticlesLayerProps> {
     s.segments?.destroy();
     s.arcTexture?.destroy();
     this.destroyTargets();
-    for (const t of s.state ?? []) t.framebuffer.destroy(), t.texture.destroy();
+    for (const t of s.state ?? []) {
+      t.framebuffer.destroy();
+      t.texture.destroy();
+    }
   }
 
   private destroyTargets() {
     const s = this.state;
-    if (s.field) s.field.framebuffer.destroy(), s.field.texture.destroy(), s.field.colors.destroy();
-    for (const t of s.trails ?? []) t.framebuffer.destroy(), t.texture.destroy();
+    if (s.field) {
+      s.field.framebuffer.destroy();
+      s.field.texture.destroy();
+      s.field.colors.destroy();
+    }
+    for (const t of s.trails ?? []) {
+      t.framebuffer.destroy();
+      t.texture.destroy();
+    }
     s.field = null;
     s.trails = null;
   }

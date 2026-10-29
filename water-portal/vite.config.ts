@@ -1,7 +1,9 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   server: { port: 5173 },
+  // The unit tests (test/*.test.ts): pure modules, no DOM.
+  test: { include: ["test/**/*.test.ts"], environment: "node" },
   // deck.gl-raster's GeoTIFF decoder worker uses top-level await.
   worker: { format: "es" },
   build: {

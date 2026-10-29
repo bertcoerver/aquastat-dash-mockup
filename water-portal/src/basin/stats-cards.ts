@@ -1075,7 +1075,13 @@ function upstreamSets(c: BasinCtx, major: number) {
     if (found) return found;
     found = new Set<number>([id]);
     const todo = [id];
-    while (todo.length) for (const up of inflows.get(todo.pop()!) ?? []) if (!found.has(up)) found.add(up) && todo.push(up);
+    while (todo.length) {
+      for (const up of inflows.get(todo.pop()!) ?? []) {
+        if (found.has(up)) continue;
+        found.add(up);
+        todo.push(up);
+      }
+    }
     found.delete(id);
     upstream.set(id, found);
     return found;

@@ -39,7 +39,7 @@ export function initSlowServerCheck() {
       // (Not timed in the background, where requests are slowed; the warning shown is
       // checked again once the page is back.)
       clearTimeout(recheck);
-      if (!warning.hidden) recheck = window.setTimeout(check, WHILE_SHOWN_MS);
+      if (!warning.hidden) recheck = window.setTimeout(() => void check(), WHILE_SHOWN_MS);
       return;
     }
     checking = true;
@@ -51,7 +51,7 @@ export function initSlowServerCheck() {
     warning.hidden = !slow;
     clearTimeout(recheck);
     if (!slow) return;
-    recheck = window.setTimeout(check, WHILE_SHOWN_MS);
+    recheck = window.setTimeout(() => void check(), WHILE_SHOWN_MS);
     const s = (ms / 1000).toFixed(1);
     warning.textContent = `⚠ Slow connection to Google Cloud (${s} s)`;
     warning.title =

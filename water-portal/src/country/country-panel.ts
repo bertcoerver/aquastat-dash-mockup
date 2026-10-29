@@ -32,7 +32,7 @@ import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import { dkY } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
 import { TOPICS, type Card, type Ctx, type MapClass, type MapSpec, type Region, type Tile, type TopicDef } from "./cards";
-import { WORLD, latestYear, loadTopic, periodLabel, type Period, type Topic } from "./data";
+import { WORLD, latestYear, loadTopic, periodLabel, type Topic } from "./data";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { slideSelection } from "../panels/segmented";
 import { SHAPE_NOTES, SHAPES, freeShape, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
@@ -112,7 +112,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
 
   const state = {
     view: "country" as View,
-    period: { from: 0, to: 0 } as Period,
+    period: { from: 0, to: 0 },
     selection: null as Selection | null,
     topic: "sdg" as Topic,
     status: new Map<Topic, Status>(),

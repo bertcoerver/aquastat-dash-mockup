@@ -81,5 +81,5 @@ export function basinTree(majors: MajorBasin[], subs: SubBasin[]): BasinNode[] {
 function sortTree(nodes: BasinNode[]) {
   // Numeric, so "White Nile 2" comes before "White Nile 10".
   nodes.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
-  for (const node of nodes) sortTree(node.children as BasinNode[]);
+  for (const node of nodes) sortTree(node.children);
 }

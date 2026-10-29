@@ -171,10 +171,10 @@ const waterMap = createMap(
     // (A click on a dam in the Local view: the dam, where it is.)
     onClick(lngLat, onArea, symbol, drawn) {
       const hit = symbol ? localMaps?.featureAt(symbol) : null;
-      if (hit) selectPoint(hit.lngLat, "map", hit.feature);
-      else selectPoint(onArea ? lngLat : null, "map", null, drawn);
+      if (hit) void selectPoint(hit.lngLat, "map", hit.feature);
+      else void selectPoint(onArea ? lngLat : null, "map", null, drawn);
     },
-    onMarkerDrop: (lngLat) => selectPoint(lngLat, "map"),
+    onMarkerDrop: (lngLat) => void selectPoint(lngLat, "map"),
     onHover: showHover,
     // A point of the Local view's vector maps: its tooltip.
     onSymbolHover: (id, x, y, lngLat) => localMaps?.hover(id, x, y, lngLat),
@@ -202,7 +202,7 @@ boxes = {
 const upstreamOf = upstreamFinder(subBasins);
 const downstreamOf = downstreamFinder(subBasins);
 /** The box around a sub-basin and everything upstream of it. */
-const catchmentBox = (id: number) => unionBox([id, ...upstreamOf(id)].map((sub) => boxes!.sub.get(sub)).filter((b): b is Box => !!b));
+const catchmentBox = (id: number) => unionBox([id, ...upstreamOf(id)].map((sub) => boxes.sub.get(sub)).filter((b): b is Box => !!b));
 let toolbarApi: Toolbar | null = null;
 // Basin view: statistics charts in the panel, each with its map.
 const basinStats = initBasinStats({
@@ -260,15 +260,15 @@ const picker = initPlacePicker({
     showBox(picked.kind === "sub" ? catchmentBox(picked.basin.id) : picked.basin.bbox);
   },
   onPoint(lngLat) {
-    selectPoint(lngLat, "coordinates");
+    void selectPoint(lngLat, "coordinates");
     if (lngLat) showPoint(lngLat, Math.max(map.getZoom(), 5), "ease");
   },
   // A dam by name: it, where it is (closer in than a point by coordinates).
   onFeature(feature, lngLat) {
-    selectPoint(lngLat, "coordinates", feature);
+    void selectPoint(lngLat, "coordinates", feature);
     showPoint(lngLat, Math.max(map.getZoom(), 8), "fly");
   },
-  onDropFeature: () => selectPoint(selection.get().lngLat, "coordinates"),
+  onDropFeature: () => void selectPoint(selection.get().lngLat, "coordinates"),
   onDamCountry: (box) => showBox(box),
 });
 
@@ -284,7 +284,7 @@ selection.subscribe((s) => {
   countryPanel.setSelection(s);
   basinStats.setSelection(s);
   localPanel.setSelection(s);
-  refreshHover();
+  void refreshHover();
 });
 
 function loadList<T>(name: string): Promise<T[]> {
@@ -300,7 +300,7 @@ function fromColumns<T>(columns: Record<keyof T, unknown[]>): T[] {
 async function loadData<T>(name: string): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}data/${name}.json`);
   if (!response.ok) throw new Error(`${name}.json: ${response.status} ${response.statusText}`);
-  return response.json();
+  return response.json() as Promise<T>;
 }
 
 // The graph panes (one per view, one shows at a time) share a width that can be changed,
@@ -436,8 +436,8 @@ const rangePlayer = initRangePlayer({
     toolbarApi?.setPlayback({ status, bufferedTo: null, loading: null });
     // (Locked before the first step: its ranges are the ones held, until it stops.)
     // (Both unlocked, as a stop can come once the view has changed.)
-    if (status === "playing") (view === "basin" ? basinStats : view === "local" ? localMaps! : countryPanel).lockLegend();
-    else for (const panel of [basinStats, countryPanel, localMaps!]) panel.unlockLegend();
+    if (status === "playing") (view === "basin" ? basinStats : view === "local" ? localMaps : countryPanel).lockLegend();
+    else for (const panel of [basinStats, countryPanel, localMaps]) panel.unlockLegend();
     waterMap.setPlayback(stepMs);
   },
 });
@@ -473,6 +473,6 @@ toolbarApi.setTimeless(!(timed.local && timed.basin));
 // The Basin view's range ends at the latest dekad of the model output. Without the
 // output (not built yet, or unreachable) it isn't limited; Q and ΔS then say so.
 loadModelFiles().then(
-  (files) => toolbarApi!.setBasinLastDekad(files.last),
+  (files) => toolbarApi.setBasinLastDekad(files.last),
   (err: Error) => console.warn(err.message),
 );

@@ -154,7 +154,7 @@ export function initWaporLegend({
   // The unit, from a menu: the map's colours stay, the legend's numbers are per day,
   // month or year, or the total over the period; per m², or over a pixel at the centre
   // of the view.
-  const unitButton = $("wapor-unit") as HTMLButtonElement;
+  const unitButton = $<HTMLButtonElement>("wapor-unit");
   let units: WaporUnits = WAPOR_UNITS[0];
   let lastRamp: WaporRamp | null = null;
   let periodDays = 1;
@@ -208,7 +208,7 @@ export function initWaporLegend({
   }
   showVariable(initial);
   const section = $("wapor-quality");
-  const input = $("wapor-quality-input") as HTMLInputElement;
+  const input = $<HTMLInputElement>("wapor-quality-input");
   const value = $("wapor-quality-value");
   const status = $("wapor-quality-status");
   input.max = String(MAX_GAP + 1);
@@ -227,7 +227,7 @@ export function initWaporLegend({
   // ramp (none while locked).
   let stretch: RampChoice = DEFAULT_STRETCH;
   const rampMenu = initRampMenu(
-    $("wapor-ramp") as HTMLButtonElement,
+    $<HTMLButtonElement>("wapor-ramp"),
     "the values in view",
     stretch,
     (cut) => onStretch((stretch = cut)),

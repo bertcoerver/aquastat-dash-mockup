@@ -64,7 +64,6 @@ import {
   type BasinCtx,
   type BasinMapSpec,
   type BasinTile,
-  type BasinUnits,
   type FluxStatus,
   type MeasureKey,
   type TopicDef,
@@ -156,7 +155,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     /** The model's output: "majors" (per major basin) or a major basin's id (its sub-basins). */
     fluxes: new Map<string, FluxStatus>(),
     /** Totals in mm by default, as before there was a choice. */
-    units: BASIN_UNITS[3] as BasinUnits,
+    units: BASIN_UNITS[3],
     /** The measures mapped against the other years. */
     against: new Set<MeasureKey>(),
     /** How much of the basins' values the colours span (% cut at either end). */
@@ -516,7 +515,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     let status = state.transpiration.get(key);
     if (!status) {
       state.transpiration.set(key, (status = { kind: "loading" }));
-      loadTranspiration(daysOfDekads(range), major, box).then(
+      void loadTranspiration(daysOfDekads(range), major, box).then(
         (sub) => state.transpiration.set(key, { kind: "ready", sub }),
         (err: Error) => state.transpiration.set(key, { kind: "error", message: err.message }),
       ).then(render);
@@ -532,7 +531,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     let status = state.fluxes.get(key);
     if (!status) {
       state.fluxes.set(key, (status = { kind: "loading" }));
-      load().then(
+      void load().then(
         (result) => state.fluxes.set(key, { kind: "ready", result }),
         (err: Error) => state.fluxes.set(key, { kind: "error", message: err.message }),
       ).then(render);

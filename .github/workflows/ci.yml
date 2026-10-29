@@ -1,0 +1,30 @@
+# The water portal's checks on every push and pull request that touches it: types,
+# lint, unit tests, the build, and a smoke test of the built site in a headless browser.
+name: Water portal
+
+on:
+  push:
+    paths: ["water-portal/**", ".github/workflows/ci.yml"]
+  pull_request:
+    paths: ["water-portal/**", ".github/workflows/ci.yml"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: water-portal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: water-portal/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run smoke

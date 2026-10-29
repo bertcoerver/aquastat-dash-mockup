@@ -88,17 +88,17 @@ export function showMapTip(el: HTMLElement, tip: MapTip | null) {
   if (!dock || !docked) {
     if (has) {
       el.classList.add("map-tip");
-      el.innerHTML = html(tip!) + (dock ? FOLLOW_KEY : "");
+      el.innerHTML = html(tip) + (dock ? FOLLOW_KEY : "");
     }
     el.hidden = !has;
-    following = has ? { el, tip: tip! } : following?.el === el ? null : following;
+    following = has ? { el, tip: tip } : following?.el === el ? null : following;
     if (has) lastFollowing = following;
     return;
   }
   el.hidden = true;
   if (!has && ((owner !== el && owner !== null) || overDock)) return;
   owner = has ? el : null;
-  setDock(has ? html(tip!) : null);
+  setDock(has ? html(tip) : null);
 }
 
 /** Fill the pinned box (null: empty it), gliding from its width to the new one. */

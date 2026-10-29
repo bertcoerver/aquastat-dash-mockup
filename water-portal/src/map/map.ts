@@ -427,7 +427,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 
   /** The statistics maps' layers, bottom to top: in the view's order (setLayerOrder), else as `groups` are. */
   function stacked(groups: Record<string, Layer[]>) {
-    const order = state.order[state.view as StatView] ?? [];
+    const order = state.order[state.view] ?? [];
     const names = Object.keys(groups);
     const rank = (slot: string) => (order.includes(slot) ? names.length + order.length - order.indexOf(slot) : names.indexOf(slot));
     return names.sort((a, b) => rank(a) - rank(b)).flatMap((slot) => groups[slot]);
@@ -435,7 +435,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 
   // Only the circles on the near side of the globe: they are drawn without a depth
   // test (like everything here), so the far side's would show through.
-  const shownSymbols = () => symbolTweens[state.view as StatView]?.get() ?? null;
+  const shownSymbols = () => symbolTweens[state.view]?.get() ?? null;
   /** The picked point's circle's radius (px; one of a bar's, or not drawn: a point's), null: none picked, or it's being dragged off. */
   function featureRadius() {
     const feature = state.selection.feature;
@@ -472,14 +472,14 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     if (visibleSymbols()?.items !== before) render();
   });
 
-  const shownBars = () => barTweens[state.view as StatView]?.get() ?? null;
+  const shownBars = () => barTweens[state.view]?.get() ?? null;
   let barsZoom = Math.round(map.getZoom() * 20) / 20;
   // Tilted for the bars (and back flat when they go), unless it was tilted already.
   const TILT = 40;
   let tilted = false;
   function tilt() {
     // (The bars set, not those still shrinking away.)
-    const want = Boolean(state.bars[state.view as StatView]);
+    const want = Boolean(state.bars[state.view]);
     if (want && !tilted && map.getPitch() < 15) {
       tilted = true;
       map.easeTo({ pitch: TILT, duration: 800 });

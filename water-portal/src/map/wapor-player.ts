@@ -239,7 +239,7 @@ export function initWaporPlayer({
     };
     run = current;
     report();
-    for (let i = 0; i < settings.loaders; i++) load(current);
+    for (let i = 0; i < settings.loaders; i++) void load(current);
   }
 
   function stop() {

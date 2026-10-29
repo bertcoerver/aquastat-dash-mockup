@@ -133,7 +133,7 @@ export const DAMS: VectorMap<Dams> = {
 };
 
 /** All the vector maps, in the checklist's order. */
-export const VECTOR_MAPS: VectorMap[] = [DAMS as unknown as VectorMap];
+export const VECTOR_MAPS: VectorMap[] = [DAMS];
 
 const loaded = new Map<string, Promise<PointData>>();
 /** A map's data (loaded once). */
@@ -149,4 +149,4 @@ export function loadVectorMap(m: VectorMap): Promise<PointData> {
 }
 
 /** The dams' data (loaded once: the same as their map's). */
-export const damsData = () => loadVectorMap(DAMS as unknown as VectorMap) as Promise<Dams>;
+export const damsData = () => loadVectorMap(DAMS) as Promise<Dams>;
