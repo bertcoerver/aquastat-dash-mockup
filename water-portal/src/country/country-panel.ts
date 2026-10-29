@@ -5,7 +5,7 @@
  * each with number tiles and chart cards (cards.ts).
  *
  * Every tile and card has a map that goes with it: hovering previews it, clicking pins
- * it (map-drivers.ts); unpinned, the map shows the topic's first tile. Many bring more
+ * it (panels/stat-panel.ts); unpinned, the map shows the topic's first tile. Many bring more
  * maps along (cards.ts, `also`), shown with theirs, each in a shape of its own: those
  * take the places of the maps checked in the legend while shown. The legend lists the
  * maps of all the topics, so maps of different topics can be shown together. Within a card,
@@ -27,16 +27,16 @@ import { flyTo, type Box } from "../map/fly-to";
 import { cssRgb as css, mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale } from "../basin/variables";
-import { initLayerLegend, onePerSlot, toggled, type LegendKey, type SizesKey } from "../panels/legend";
+import { initLayerLegend, type LegendKey, type SizesKey } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import { dkY } from "../toolbar/dekads";
 import type { DekadRange, View } from "../toolbar/range-rules";
 import { TOPICS, type Card, type Ctx, type MapClass, type MapSpec, type Region, type Tile, type TopicDef } from "./cards";
 import { WORLD, latestYear, loadTopic, periodLabel, type Topic } from "./data";
-import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
+import type { Driver } from "../panels/map-drivers";
+import { initPanelCore, type PanelLayer } from "../panels/stat-panel";
 import { slideSelection } from "../panels/segmented";
-import { SHAPE_NOTES, SHAPES, freeShape, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
-import { iconSvg } from "../panels/shape-icons";
+import { SHAPE_NOTES, SHAPES, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
 import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } from "../panels/shape-style";
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
@@ -81,12 +81,8 @@ export interface CountryPanel {
 /** How the maps are drawn, in the legend's order: fills, circles, bars (each a Shape). */
 const SLOTS: Shape[] = ["fill", "circles", "bars"];
 
-/** A map on the map: its tile or card, and how it's drawn (the legend's slot). */
-interface Layer {
-  d: Driver;
-  spec: MapSpec;
-  slot: Shape;
-}
+/** A map on the map: its tile or card, and how it's drawn (the legend's slot, which is also its way). */
+type Layer = PanelLayer<MapSpec> & { slot: Shape };
 
 type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
 
@@ -116,11 +112,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     selection: null as Selection | null,
     topic: "sdg" as Topic,
     status: new Map<Topic, Status>(),
-    pinned: new Map<Topic, Driver>(),
-    /** The pinned chart's maps unchecked in the legend since it was pinned (by title), per topic. */
-    dropped: new Map<Topic, Set<string>>(),
-    /** The maps checked in the legend, oldest first, per topic (none: the topic's first tile's). */
-    chosen: new Map<Topic, string[]>(),
     mapHover: null as number | null,
     /** Classes (or categories) switched off in the map legend, per map on the map (by id). */
     hiddenClasses: new Map<string, Set<number>>(),
@@ -142,7 +133,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const button = (e.target as Element).closest<HTMLElement>("[data-topic]");
     if (!button) return;
     state.topic = button.dataset.topic as Topic;
-    drivers.clearPreview();
+    core.drivers.clearPreview();
     load();
     render();
   });
@@ -165,27 +156,31 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     );
   }
 
-  // --- Preview and pin -------------------------------------------------------------------
-  // Tiles and cards are both drivers (map-drivers.ts). The map follows the previewed
+  // --- Preview, pin and checklist ----------------------------------------------------------
+  // Tiles and cards are both drivers (panels/stat-panel.ts). The map follows the previewed
   // one, else the pinned one, else the topic's first tile. Pins are kept per topic.
-  const drivers = initDrivers($("cp-body"), {
+  const core = initPanelCore<Ctx, MapSpec>({
+    root: $("cp-body"),
+    slots: SLOTS,
+    scope: () => state.topic,
     enabled: () => state.view === "country",
-    pinned: () => state.pinned.get(state.topic) ?? null,
-    setPinned(d) {
-      if (d) state.pinned.set(state.topic, d);
-      else state.pinned.delete(state.topic);
-      state.dropped.delete(state.topic);
+    current: () => current,
+    menuMaps,
+    known: (id) => !!topicOf(id),
+    firstId: () => topicDef().tiles[0].id,
+    layerOf,
+    leadLayers,
+    shapesOf: (spec) => shapesOf(spec),
+    onPin(d) {
       const area = areaOf(d);
       if (area !== null && area !== WORLD) flyToArea(area);
     },
-    onChange() {
-      drawMap();
-      markAll();
-    },
+    onChange: drawMap,
     onX: setYear,
     onCsv: download,
     tooltip,
   });
+  const { parseId, optionId, markAll } = core;
 
   // --- The legend ----------------------------------------------------------------------------
   // Its title is a checklist of all the topics' maps, each once (several charts can share one),
@@ -196,45 +191,18 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   const legend = initLayerLegend($("cp-legend"), {
     slots: SLOTS,
     onOrder: (slots) => map.setLayerOrder("country", slots),
-    options() {
-      if (!current) return { options: [], current: [] };
-      const ctx = current.ctx;
-      const on = current.layers.map((l) => optionId(ctx, l.spec));
-      const taken = new Set<string>(current.layers.map((l) => l.slot));
-      const options = menuMaps(ctx).map(({ id, spec, group }) => {
-        const m = shapesOf(spec);
-        const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
-        // (On the map, as drawn: a chart's map can be moved out of another's shape.)
-        const drawn = current!.layers.find((l) => optionId(ctx, l.spec) === id)?.slot;
-        return { id, label: spec.title, group, icons, icon: drawn ?? freeShape(m, taken) };
-      });
-      return { options, current: on };
-    },
-    onToggle(id) {
-      if (!current) return;
-      const ctx = current.ctx;
-      const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
-      // Checked, it's drawn as it was offered.
-      if (spec && !current.layers.some((l) => optionId(ctx, l.spec) === id)) {
-        const m = shapesOf(spec);
-        m.set(freeShape(m, new Set(current.layers.map((l) => l.slot))));
-      }
-      toggle(id);
-    },
+    options: core.checklist,
+    onToggle: core.check,
     // An icon: the map switches (the one in the slot it takes moving out of the way), or
-    // is added so. Switched, it goes last in the checklist, so it takes its new slot from
-    // the map there; the checked maps it covered stay off (not shown again in the slot it left).
+    // is added so.
     onShape(id, shape) {
       if (!current) return;
       const ctx = current.ctx;
       const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
       if (!spec) return;
       switchShape(current.layers.map((l) => shapesOf(l.spec)), shapesOf(spec), shape);
-      if (!current.layers.some((l) => optionId(ctx, l.spec) === id)) return toggle(id);
-      const shown = new Set(current.layers.map((l) => l.spec.title));
-      const ids = (state.chosen.get(state.topic) ?? []).filter((i) => shown.has(specFor(ctx, { id: i, sub: null }).title));
-      const moved = ids.find((i) => specFor(ctx, { id: i, sub: null }).title === spec.title);
-      state.chosen.set(state.topic, moved ? [...ids.filter((i) => i !== moved), moved] : ids);
+      if (!current.layers.some((l) => optionId(ctx, l.spec) === id)) return core.toggle(id);
+      core.switched((s) => s.title === spec.title);
       drawMap();
     },
     // How much of the countries' values the colours span: a menu on the ramp.
@@ -293,34 +261,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     menuMapsOf.set(ctx, maps);
     return maps;
   }
-  /** The checklist's option for a map (by its title, as charts share maps). */
-  const optionId = (ctx: Ctx, spec: MapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
-  /** Check or uncheck a map. */
-  function toggle(id: string) {
-    if (!current) return;
-    const ctx = current.ctx;
-    const pin = state.pinned.get(state.topic);
-    const lead = pin ? leadLayers(ctx, pin) : [];
-    const dropped = state.dropped.get(state.topic) ?? new Set<string>();
-    const own = lead.find((l) => optionId(ctx, l.spec) === id);
-    if (own) {
-      // One of the pinned chart's maps.
-      if (!dropped.delete(own.spec.title)) dropped.add(own.spec.title);
-    } else {
-      const titles = new Set(lead.map((l) => l.spec.title));
-      const ids = toggled(current.layers.filter((l) => !titles.has(l.spec.title)).map((l) => optionId(ctx, l.spec)), id);
-      state.chosen.set(state.topic, ids);
-      // Checked in a slot the pinned chart's maps use, it takes that slot.
-      if (ids.includes(id)) {
-        const slot = layerOf(ctx, { id, sub: null }).slot;
-        for (const l of lead) if (l.slot === slot) dropped.add(l.spec.title);
-      }
-    }
-    if (pin) state.dropped.set(state.topic, dropped);
-    drivers.clearPreview();
-    drawMap();
-    markAll();
-  }
   // Each map's shape (colours, circles, bars): its icons in the legend.
   const shapes = initShapePicks();
   /** The shapes a map can take: an amount's circles or bars, any value's colours too (not a mix of categories). */
@@ -354,11 +294,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   const render = perFrame(draw);
 
   const topicDef = (): TopicDef => TOPICS.find((t) => t.id === state.topic)!;
-  /** A map's tile or card, and which of the maps it brings along it is ("<driver>~<index>"; null: its own). */
-  const parseId = (id: string) => {
-    const [base, k] = id.split("~");
-    return { base, also: k === undefined ? null : Number(k) };
-  };
   /** The topic a tile or card is in: the tab's, else the first other that has it (undefined: none). */
   const topicOf = (id: string): TopicDef | undefined => {
     const { base } = parseId(id);
@@ -461,37 +396,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       `</span></h3><p>${esc(card.caption(ctx))}</p>${chart}</section>`;
   }
 
-  /** The previewed or pinned tile or card. */
-  const leadDriver = (): Driver | null => drivers.preview() ?? state.pinned.get(state.topic) ?? null;
-
-  /** The driver the map follows now: previewed, pinned, or the first map on it (its tile or card). */
-  function activeDriver(): Driver | null {
-    const d = leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : { id: topicDef().tiles[0].id, sub: null });
-    return d && { ...d, id: parseId(d.id).base };
-  }
-
   const areaOf = (d: Driver | null | undefined) => (d?.sub?.startsWith("area:") ? Number(d.sub.slice(5)) : null);
-
-  /** The maps on the map: those checked in the legend (else the first tile's), with the previewed or pinned one in its slot. */
-  function shownLayers(ctx: Ctx): Layer[] {
-    const topic = topicDef();
-    const known = (id: string) => !!topicOf(id);
-    const kept = state.chosen.get(state.topic);
-    const chosen = (kept ?? []).filter(known);
-    const lead = leadDriver();
-    // (The first tile's only alone: under a chart's map, it would show when that one changes
-    // slot. None if all were unchecked.)
-    const first = kept?.length === 0 || lead ? [] : [topic.tiles[0].id];
-    const layers = (chosen.length ? chosen : first).map((id) => layerOf(ctx, { id, sub: null }));
-    if (!lead) return onePerSlot(layers, SLOTS);
-    const set = leadLayers(ctx, lead);
-    const titles = new Set(set.map((l) => l.spec.title));
-    // (Less those unchecked since it was pinned, also as its rows are previewed.)
-    const pin = state.pinned.get(state.topic);
-    const dropped = pin && parseId(pin.id).base === parseId(lead.id).base ? state.dropped.get(state.topic) : undefined;
-    const left = set.filter((l) => !dropped?.has(l.spec.title));
-    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...left], SLOTS);
-  }
 
   /**
    * A tile's or card's map and those it brings along, each in a shape of its own: one
@@ -510,14 +415,15 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const slot = taken.has(want) ? shapesFor(spec).find((s) => !taken.has(s)) : want;
       if (!slot) return;
       taken.add(slot);
-      out.push({ d: { id: `${base}~${i}`, sub: lead.sub }, spec, slot });
+      out.push({ d: { id: `${base}~${i}`, sub: lead.sub }, spec, slot, mode: slot });
     });
     return [...out, own];
   }
 
   function layerOf(ctx: Ctx, d: Driver): Layer {
     const spec = specFor(ctx, d);
-    return { d, spec, slot: slotOf(spec) };
+    const slot = slotOf(spec);
+    return { d, spec, slot, mode: slot };
   }
 
   function specFor(ctx: Ctx, d: Driver): MapSpec {
@@ -529,21 +435,17 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     return (also !== null ? card.also?.(ctx, d.sub)[also] : undefined) ?? card.map(ctx, d.sub);
   }
 
-  function markAll() {
-    markDrivers(panel, activeDriver(), drivers.preview(), state.pinned.get(state.topic) ?? null);
-  }
-
   // --- The map ---------------------------------------------------------------------------------
 
   function drawMap() {
     if (!current) return;
     const { ctx } = current;
-    const layers = shownLayers(ctx);
+    const layers = core.shownLayers(ctx) as Layer[];
     current.layers = layers;
     // A map of another topic needs its data (drawn again once loaded).
     for (const { d } of layers) load(topicOf(d.id)?.id);
     // A series hovered in the pinned card keeps the pinned row's countries picked out.
-    const area = areaOf(drivers.preview()) ?? areaOf(state.pinned.get(state.topic));
+    const area = areaOf(core.drivers.preview()) ?? areaOf(core.pinned());
     // A row of a regional chart picks out its countries; else a region selected on its own does.
     const pickedArea = area ?? (ctx.country ? null : ctx.region?.code ?? null);
     const picked = pickedArea === null || pickedArea === WORLD ? null : new Set(regions.find((r) => r.code === pickedArea)?.members ?? [pickedArea]);

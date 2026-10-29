@@ -61,11 +61,21 @@ try {
   await step("country cards", async () => {
     await page.waitForFunction(() => document.querySelectorAll("#cp-cards [data-driver]").length > 0, null, { timeout: 30000 });
   });
-  await step("hover a country card", async () => {
-    await page.mouse.move(120, 300); // (unfolds the pane)
-    await page.waitForTimeout(400);
-    await page.locator("#cp-cards [data-driver]").first().hover({ force: true });
-    await page.waitForTimeout(400);
+  /** The pointer over the graph pane's heading unfolds it (panels/foldable.ts). */
+  const unfold = async () => {
+    await page.mouse.move(120, 60, { steps: 3 });
+    await page.waitForTimeout(700);
+  };
+  /** The pointer onto a card: its map is previewed (panels/stat-panel.ts). */
+  const hoverCard = async (selector) => {
+    await unfold();
+    const box = await page.locator(selector).first().boundingBox();
+    if (!box) throw new Error(`no card ${selector}`);
+    await page.mouse.move(box.x + 30, box.y + 10, { steps: 5 });
+    await page.waitForFunction((s) => !!document.querySelector(`${s}.previewing`), selector, { timeout: 5000 });
+  };
+  await step("hover a country card: its map previewed", async () => {
+    await hoverCard("#cp-cards [data-driver]");
     await page.mouse.move(700, 450);
     await page.waitForTimeout(300);
   });
@@ -88,13 +98,8 @@ try {
     await page.click('.tab[data-view="basin"]');
     await page.waitForSelector("#wb-panel:not([hidden])", { timeout: 10000 });
     await page.waitForTimeout(2500);
-    const card = page.locator("#bs-cards [data-driver]").first();
-    if (await card.count()) {
-      await page.mouse.move(120, 300);
-      await page.waitForTimeout(400);
-      await card.hover({ force: true });
-      await page.waitForTimeout(400);
-    }
+    // (Its cards need the model output, which a checkout doesn't have.)
+    if (await page.locator("#bs-cards [data-driver]").count()) await hoverCard("#bs-cards [data-driver]");
   });
   await step("hover the globe", async () => {
     for (let i = 0; i < 8; i++) {

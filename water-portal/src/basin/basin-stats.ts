@@ -6,7 +6,7 @@
  * years of the record.
  *
  * Every tile and card has a map: hovering previews it, clicking pins it
- * (map-drivers.ts); unpinned, the map shows the one picked in the legend, else the
+ * (panels/stat-panel.ts); unpinned, the map shows the one picked in the legend, else the
  * first tile. Many bring more maps along (stats-cards.ts, `also`), each drawn its own
  * way, as the card asks (as rain, along the rivers…) unless the legend switched it:
  * they take the places of the maps checked in the legend while shown. Hovering a month
@@ -33,8 +33,9 @@ import type { Place } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
 import { cssRgb as css, mixColor, type Color } from "../map/theme";
 import { unlessLoading } from "../panels/load-bar";
-import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
-import { initLayerLegend, onePerSlot, toggled, type LegendKey, type LegendLayer, type SizesKey } from "../panels/legend";
+import type { Driver } from "../panels/map-drivers";
+import { initPanelCore, type PanelLayer } from "../panels/stat-panel";
+import { initLayerLegend, type LegendKey, type LegendLayer, type SizesKey } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Selection } from "../selection";
 import type { MajorBasin } from "../toolbar/place-picker";
@@ -45,8 +46,7 @@ import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
 import { initSchemeMap } from "./scheme-map";
 import { initEffectsMap } from "./effects-map";
 import { loadMiddles } from "./rivers";
-import { SHAPE_NOTES, SHAPES, freeShape, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
-import { iconSvg } from "../panels/shape-icons";
+import { SHAPE_NOTES, SHAPES, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
 import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } from "../panels/shape-style";
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
@@ -116,12 +116,7 @@ const isScheme = (l: { slot: string }) => l.slot === "lines";
 const isEffect = (l: { slot: string }) => l.slot === "rain" || l.slot === "vapour";
 
 /** A map on the map: its tile or card, and how it's drawn (the legend's slot, and which of its ways). */
-interface Layer {
-  d: Driver;
-  spec: BasinMapSpec;
-  slot: string;
-  mode: string;
-}
+type Layer = PanelLayer<BasinMapSpec>;
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; series: WaporSeries };
 
@@ -143,12 +138,6 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     selection: null as Selection | null,
     /** The WaPOR series, loaded once: every range is summed from them. */
     status: { kind: "idle" } as Status,
-    /** Pins and the legend's picks, per scope ("world", "major"). */
-    pinned: new Map<string, Driver>(),
-    /** The pinned chart's maps unchecked in the legend since it was pinned (by title), per scope. */
-    dropped: new Map<string, Set<string>>(),
-    /** The maps checked in the legend, oldest first (none: the first tile's). */
-    chosen: new Map<string, string[]>(),
     hover: null as Place | null,
     /** The sub-basins picked out up- and downstream of the hovered one, in place of the map's colours. */
     flow: null as Flow | null,
@@ -176,7 +165,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
   // Folded with no chart pinned, the pane shows none of its tiles and cards: they're
   // drawn once it opens (not at every step of a range being played, say).
   const pane = section.closest<HTMLElement>(".wb-panel")!;
-  const unseen = () => pane.classList.contains("resting") && !state.pinned.get(scope());
+  const unseen = () => pane.classList.contains("resting") && !core.pinned();
   let stale = false;
   new MutationObserver(() => stale && !unseen() && render()).observe(pane, { attributeFilter: ["class"] });
 
@@ -188,37 +177,8 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
   const legend = initLayerLegend($("bs-legend"), {
     slots: SLOTS,
     onOrder: (slots) => map.setLayerOrder("basin", slots),
-    options() {
-      if (!current) return { options: [], current: [] };
-      const ctx = current.ctx;
-      const on = current.layers.map((l) => optionId(ctx, l.spec));
-      const taken = new Set(current.layers.map((l) => l.slot));
-      // A map against the other years, or in its own units (not the legend's), is its measure's
-      // in another option of the unit menu: listed only while on the map (a chart's), or (against
-      // the other years) as the measure's map (picked in its unit menu).
-      const listed = menuMaps(ctx).filter(
-        ({ id, spec }) => on.includes(id) || (spec.units && (!spec.against || ctx.against.has(spec.measure))),
-      );
-      const options = listed.map(({ id, spec }) => {
-        const m = shapesOf(spec, ctx);
-        const icons = m.options.map((o) => ({ id: o.id, html: iconSvg(o.icon), label: o.label, title: o.title }));
-        // (On the map, as drawn: a card can have it drawn its own way.)
-        const drawn = current!.layers.find((l) => optionId(ctx, l.spec) === id)?.mode;
-        return { id, label: spec.title, icons, icon: drawn ?? freeShape(m, taken) };
-      });
-      return { options, current: on };
-    },
-    onToggle(id) {
-      if (!current) return;
-      const ctx = current.ctx;
-      const spec = menuMaps(ctx).find((m) => m.id === id)?.spec;
-      // Checked, it's drawn as it was offered.
-      if (spec && !current.layers.some((l) => optionId(ctx, l.spec) === id)) {
-        const m = shapesOf(spec, ctx);
-        m.set(freeShape(m, new Set(current.layers.map((l) => l.slot))));
-      }
-      toggle(id);
-    },
+    options: () => core.checklist(),
+    onToggle: (id) => core.check(id),
     // An icon: the map switches (the one in the slot it takes moving out of the way), or
     // is added so.
     onShape(id, shape) {
@@ -230,8 +190,8 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
       const drawnAs = (l: Layer): MapShapes => ({ ...shapesOf(l.spec, ctx), current: l.mode });
       switchShape(current.layers.map(drawnAs), shapesOf(spec, ctx), shape);
       state.switched.add(spec.title);
-      if (!current.layers.some((l) => optionId(ctx, l.spec) === id)) return toggle(id);
-      switched((s) => s.title === spec.title);
+      if (!current.layers.some((l) => optionId(ctx, l.spec) === id)) return core.toggle(id);
+      core.switched((s) => s.title === spec.title);
       drawMap();
     },
     // How much of the basins' values the colours span: a menu on the ramp.
@@ -259,12 +219,11 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
           if (id !== "value") state.units = BASIN_UNITS[Number(id)];
           // A chart of every year maps against the others: in a unit, its map stays, unpinned,
           // as the measure's values (its tile's map).
-          const pin = state.pinned.get(scope());
+          const pin = core.pinned();
           if (layer.spec.against && pin?.id === layer.d.id) {
             const option = topicDef().tiles.find((t) => t.measure === m)?.id ?? optionId(current!.ctx, layer.spec);
-            state.chosen.set(scope(), [...(state.chosen.get(scope()) ?? []).filter((i) => i !== option), option]);
-            state.pinned.delete(scope());
-            state.dropped.delete(scope());
+            core.setChosen([...(core.chosen() ?? []).filter((i) => i !== option), option]);
+            core.forgetPin();
           }
         }
         render();
@@ -293,32 +252,6 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     },
     onLock: () => drawMap(),
   });
-  /** Check or uncheck a map. */
-  function toggle(id: string) {
-    if (!current) return;
-    const ctx = current.ctx;
-    const pin = state.pinned.get(scope());
-    const lead = pin && isDriver(pin) ? leadLayers(ctx, pin) : [];
-    const dropped = state.dropped.get(scope()) ?? new Set<string>();
-    const own = lead.find((l) => optionId(ctx, l.spec) === id);
-    if (own) {
-      // One of the pinned chart's maps.
-      if (!dropped.delete(own.spec.title)) dropped.add(own.spec.title);
-    } else {
-      const titles = new Set(lead.map((l) => l.spec.title));
-      const ids = toggled(current.layers.filter((l) => !titles.has(l.spec.title)).map((l) => optionId(ctx, l.spec)), id);
-      state.chosen.set(scope(), ids);
-      if (pin && ids.includes(id)) {
-        // Checked in a slot the pinned chart's maps use, it takes that slot.
-        const slot = layerOf(ctx, { id, sub: null }).slot;
-        for (const l of lead) if (l.slot === slot) dropped.add(l.spec.title);
-      }
-    }
-    if (state.pinned.get(scope()) === pin && pin) state.dropped.set(scope(), dropped);
-    drivers.clearPreview();
-    drawMap();
-    markAll();
-  }
   // How a map's circles or bars look: in its colours (storage change's by sign), the 98th
   // percentile at full size.
   const styles = initShapeStyles();
@@ -345,18 +278,6 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
 
   // Each other map's shape (colours, circles, bars): its icons in the legend.
   const shapes = initShapePicks();
-  /**
-   * A map switched shape: it goes last in the checklist, so it takes its new slot from the
-   * map there, and the checked maps it covered stay off (not shown again in the slot it left).
-   */
-  function switched(match: (spec: BasinMapSpec) => boolean) {
-    const ctx = current?.ctx;
-    if (!ctx) return;
-    const shown = new Set(current!.layers.map((l) => l.spec.title));
-    const ids = (state.chosen.get(scope()) ?? []).filter((id) => shown.has(specFor(ctx, { id, sub: null }).title));
-    const moved = ids.find((id) => match(specFor(ctx, { id, sub: null })));
-    state.chosen.set(scope(), moved ? [...ids.filter((id) => id !== moved), moved] : ids);
-  }
 
   // Where a basin's circle or bar stands: a sub-basin's middle; a major basin's, the
   // middle of its sub-basin nearest the middle of them all (by area), so it's inside it.
@@ -404,19 +325,26 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
   const topicDef = (): TopicDef => allTopics;
   const scope = () => (state.selection?.majorBasin ? "major" : "world");
 
-  const drivers = initDrivers(section, {
+  // Tiles and cards are both drivers (panels/stat-panel.ts). The map follows the previewed
+  // one, else the pinned one, else the first tile. Pins are kept per scope.
+  const core = initPanelCore<BasinCtx, BasinMapSpec>({
+    root: section,
+    slots: SLOTS,
+    scope,
     enabled: () => state.view === "basin",
-    pinned: () => state.pinned.get(scope()) ?? null,
-    setPinned(d) {
-      if (d) state.pinned.set(scope(), d);
-      else state.pinned.delete(scope());
-      state.dropped.delete(scope());
-      if (d) flyToRow(d.sub);
-    },
-    onChange() {
-      drawMap();
-      markAll();
-    },
+    current: () => current,
+    menuMaps,
+    known: (id) => isDriver({ id, sub: null }),
+    firstId: () => topicDef().tiles[0].id,
+    layerOf,
+    leadLayers,
+    shapesOf,
+    // A map against the other years, or in its own units (not the legend's), is its measure's
+    // in another option of the unit menu: listed only while on the map (a chart's), or (against
+    // the other years) as the measure's map (picked in its unit menu).
+    listed: (ctx, { id, spec }, on) => on.includes(id) || !!(spec.units && (!spec.against || ctx.against.has(spec.measure))),
+    onPin: (d) => d && flyToRow(d.sub),
+    onChange: drawMap,
     // A step on a chart: what its card says it is (a month, a dekad), else a year on a
     // chart of the same days every year (the index of its range).
     onX(x, d) {
@@ -446,8 +374,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     menuMapsOf.set(ctx, maps);
     return maps;
   }
-  /** The checklist's option for a map (by its title, as charts share maps). */
-  const optionId = (ctx: BasinCtx, spec: BasinMapSpec) => menuMaps(ctx).find((m) => m.spec.title === spec.title)?.id ?? spec.id;
+  const { parseId, optionId, leadDriver, markAll } = core;
 
   /**
    * How a map can be drawn and is: as the scheme's lines or particles, as rain or vapour,
@@ -720,49 +647,10 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     map.setBars("basin", null);
   }
 
-  /** A map's tile or card, and which of the maps it brings along it is ("<driver>~<index>"; null: its own). */
-  const parseId = (id: string) => {
-    const [base, k] = id.split("~");
-    return { base, also: k === undefined ? null : Number(k) };
-  };
   const isDriver = (d: Driver | null | undefined): d is Driver => {
     const base = d && parseId(d.id).base;
     return !!d && (topicDef().tiles.some((t) => t.id === base) || topicDef().cards.some((c) => c.id === base));
   };
-
-  /** The previewed or pinned tile or card. */
-  function leadDriver(): Driver | null {
-    const d = drivers.preview() ?? state.pinned.get(scope()) ?? null;
-    return isDriver(d) ? d : null;
-  }
-
-  /** The tile or card the map follows: previewed, pinned, or the first map on it. */
-  function activeDriver(): Driver | null {
-    const d = leadDriver() ?? (current ? shownLayers(current.ctx)[0]?.d ?? null : null);
-    return d && { ...d, id: parseId(d.id).base };
-  }
-
-  /**
-   * The maps on the map: those checked in the legend (else the first tile's), with the
-   * previewed or pinned one in its slot.
-   */
-  function shownLayers(ctx: BasinCtx): Layer[] {
-    const lead = leadDriver();
-    const kept = state.chosen.get(scope());
-    const chosen = (kept ?? []).filter((id) => isDriver({ id, sub: null }));
-    // (The first tile's only alone: under a chart's map, it would show when that one changes
-    // slot. None if all were unchecked.)
-    const first = kept?.length === 0 || lead ? [] : [topicDef().tiles[0].id];
-    const layers = (chosen.length ? chosen : first).map((id) => layerOf(ctx, { id, sub: null }));
-    if (!lead) return onePerSlot(layers, SLOTS);
-    const set = leadLayers(ctx, lead);
-    const titles = new Set(set.map((l) => l.spec.title));
-    // (Less those unchecked since it was pinned, also as its rows are previewed.)
-    const pin = state.pinned.get(scope());
-    const dropped = pin && parseId(pin.id).base === parseId(lead.id).base ? state.dropped.get(scope()) : undefined;
-    const left = set.filter((l) => !dropped?.has(l.spec.title));
-    return onePerSlot([...layers.filter((m) => !titles.has(m.spec.title)), ...left], SLOTS);
-  }
 
   /**
    * A tile's or card's map and those it brings along, each drawn as the card asks
@@ -806,17 +694,13 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     return (also !== null ? card.also?.(ctx, d.sub)[also] : undefined) ?? card.map(ctx, d.sub);
   }
 
-  function markAll() {
-    markDrivers(section, activeDriver(), drivers.preview(), state.pinned.get(scope()) ?? null);
-  }
-
   /** Each coloured map's colours as drawn, by its slot, for the tooltip. */
   let tipColors = new Map<string, (v: number) => Color | null>();
 
   function drawMap() {
     if (!current) return;
     const { ctx } = current;
-    const layers = shownLayers(ctx);
+    const layers = core.shownLayers(ctx);
     current.layers = layers;
     if (!layers.length) {
       // (All unchecked: the legend has only the checklist.)
@@ -1071,10 +955,9 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
       state.selection = selection;
       forgetFailedFluxes();
       if (selection.majorBasin?.id !== majorBefore) {
-        drivers.clearPreview();
+        core.drivers.clearPreview();
         // (A pin is of a basin's chart: another basin's map starts unpinned.)
-        state.pinned.delete("major");
-        state.dropped.delete("major");
+        core.forgetPin("major");
       }
       render();
     },

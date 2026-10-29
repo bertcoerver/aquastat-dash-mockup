@@ -163,6 +163,7 @@ water-portal/
     ├── panels/
     │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
+    │   ├── stat-panel.ts   The Country and Basin panels' core: the preview, the pin, the legend's checklist, the maps on the map
     │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
     │   ├── tuning-pane.ts  Hidden pane of sliders for the particles, rain and vapour (triple-click a legend)
     │   ├── shape-switch.ts A map's switch: the areas' colours, circles or 3D bars
