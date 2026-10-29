@@ -4,7 +4,8 @@
  * either side of the dates move the range a year. The markup lives in index.html; this module keeps the range valid for the active view (see
  * range-rules.ts) and shows when the system, not the user, moved an end. The tabs sit
  * at the top of the view's own pane (its .tabs-slot): the statistics panel, or in the
- * Local view the point pane.
+ * Local view the point pane. Where no map on screen has time (the Local view with only
+ * GAEZ's maps or the dams), the range is hidden (setTimeless).
  */
 import type { PlaybackState } from "../map/wapor-player";
 import {
@@ -51,6 +52,8 @@ export interface Toolbar {
   setCountryLastYear(year: number): void;
   /** Basin view: the latest dekad with model output; later dekads can't be selected. */
   setBasinLastDekad(dk: number): void;
+  /** No map on screen has time: hide the range (and its play button), and let nothing change it. */
+  setTimeless(timeless: boolean): void;
 }
 
 /**
@@ -103,6 +106,7 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     });
   }
 
+  const pane = document.getElementById("pane-range")!;
   const play = document.getElementById("play-button")!;
   play.addEventListener("click", () => onPlay?.());
 
@@ -166,6 +170,12 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     setBasinLastDekad(dk) {
       limitBasinDekads(dk);
       fitLimit("basin");
+    },
+    setTimeless(timeless) {
+      // (Fading out, see toolbar.css. Inert: no clicks, drags or keys meanwhile, and its
+      // calendars close as they lose the focus.)
+      pane.inert = timeless;
+      pane.classList.toggle("timeless", timeless);
     },
   };
 }

@@ -13,7 +13,7 @@
  * legend maps that series, and clicking a year on a line chart sets the year in the
  * top bar. For a range of years, every value is the mean of its yearly values. Clicking a row of a region (or country) also flies the map there, keeping
  * the selected country in view where both fit (see flyToArea).
- * Hovering a country on the map shows its value. A switch in a map's legend section draws
+ * Hovering a country on the map shows its values (panels/map-tip.ts), each in its colour there. A switch in a map's legend section draws
  * it as the countries' colours, circles or 3D bars (panels/shape-switch.ts); the amounts'
  * maps are circles or bars. Their key of sizes is a menu of how they look
  * (panels/shape-style.ts: the map's colours or by sign, the full size). A colour ramp in the legend is a menu
@@ -40,6 +40,7 @@ import { iconSvg } from "../panels/shape-icons";
 import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } from "../panels/shape-style";
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
+import { showMapTip, type MapTipRow } from "../panels/map-tip";
 
 export interface CountryInfo {
   regions: { code: number; name: string }[];
@@ -129,6 +130,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   const tooltip = $("cp-tooltip");
   const cardsEl = $("cp-cards");
   let current: { ctx: Ctx; layers: Layer[]; csv: Map<string, (string | number)[][]> } | null = null;
+  /** Each map's colour per country as drawn (CSS; null: none), by its slot, for the tooltip. */
+  let tipColors = new Map<Shape, (m49: number) => string | null>();
 
   // --- Topic tabs ------------------------------------------------------------------
   $("cp-topics").innerHTML = TOPICS.map((t) => `<button role="tab" data-topic="${t.id}">${t.label}</button>`).join("");
@@ -343,7 +346,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     tooltip.style.left = `${e.clientX + 14}px`;
     tooltip.style.top = `${e.clientY + 14}px`;
   });
-  mapEl.addEventListener("pointerleave", () => (tooltip.hidden = true));
+  mapEl.addEventListener("pointerleave", () => showMapTip(tooltip, null));
 
   // --- Rendering -------------------------------------------------------------------------------
   let frame = 0;
@@ -392,7 +395,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     panel.hidden = !shown;
     if (!shown) {
       legend.show(null);
-      tooltip.hidden = true;
+      showMapTip(tooltip, null);
       current = null;
       map.setCountryFills(null);
       map.setCountrySymbols(null);
@@ -564,11 +567,16 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const keys = new Map<string, LegendKey | null>();
     const sizes = new Map<string, SizesKey>();
     const css = (c: Color, alpha = 1) => `rgb(${c[0]} ${c[1]} ${c[2]} / ${alpha})`;
+    tipColors = new Map();
 
     for (const { spec, slot } of layers) {
       const p = paint(spec, picked ? new Set<number>() : null, outside);
       keys.set(slot, p.key);
       if (slot === "fill") {
+        tipColors.set(slot, (m49) => {
+          const c = p.color(m49);
+          return c && c !== "off" ? css(c) : null;
+        });
         for (const m49 of countries) {
           const c = p.color(m49);
           fills.set(m49, c === "off" ? theme.land : c ?? theme.noData);
@@ -585,6 +593,18 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const partsOf = (m49: number) => pies?.amounts(m49)?.map((v, i) => (off?.has(i) ? 0 : v)) ?? null;
       const values = countries.map((m49) => (pies ? partsOf(m49)?.reduce((s, v) => s + v, 0) ?? NaN : Math.abs(spec.value(m49))));
       const size = shapeSizes(values, style.full, (ref) => legend.hold(`${spec.title}:${spec.unit}:${slot}:${style.full}`, ref));
+      // (A pie's swatch is a pie of its parts.)
+      tipColors.set(slot, (m49) => {
+        const own = p.color(m49);
+        if (!own || own === "off") return null;
+        const parts = partsOf(m49);
+        if (pies && parts) {
+          const total = parts.reduce((t, v) => t + v, 0) || 1;
+          let at = 0;
+          return `conic-gradient(${parts.map((v, i) => `${pies.parts[i].color} ${(at / total) * 360}deg ${((at += v) / total) * 360}deg`).join(", ")})`;
+        }
+        return css(bySign ? signColor(spec.value(m49), theme.storageRise, theme.storageFall) : own);
+      });
       countries.forEach((m49, i) => {
         const v = values[i];
         const center = centerOf.get(m49);
@@ -715,26 +735,28 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     return { color: (m49: number) => colors.get(m49) ?? null, key, colorOf };
   }
 
+  /**
+   * The country under the pointer: a row per map with a value there (none: no tooltip),
+   * in its colour.
+   */
   function showMapTooltip() {
     const m49 = state.mapHover;
     if (m49 === null || !current) return;
-    const rows = current.layers.map(({ spec }) => {
+    const rows = current.layers.flatMap(({ spec, slot }): MapTipRow[] => {
       const v = spec.value(m49);
-      let text = `${fmt(v)} ${esc(spec.unit)}`;
-      if (spec.style.kind === "categories") {
-        const style = spec.style;
+      const color = tipColors.get(slot)?.(m49) ?? null;
+      const style = spec.style;
+      if (style.kind === "categories") {
         const cat = style.category(m49);
-        text = !cat ? "–" : style.of ? `${esc(style.categories[cat.index].label)}: ${Math.round(cat.share * 100)}% ${esc(style.of)}` : esc(style.categories[cat.index].label);
-      } else if (spec.style.kind === "pies") {
-        const parts = spec.style.parts;
-        const amounts = spec.style.amounts(m49);
-        const total = amounts?.reduce((s, x) => s + x, 0) ?? NaN;
-        text += total > 0 ? ` (${amounts!.map((x, i) => `${esc(parts[i].label)} ${Math.round((x / total) * 100)}%`).join(", ")})` : "";
+        if (!cat) return [];
+        const share = `${Math.round(cat.share * 100)}%`;
+        return [{ color, value: style.categories[cat.index].label, unit: style.of ? `${share} ${style.of}` : "", label: spec.title }];
       }
-      return `${esc(spec.title)}: ${text}`;
+      if (!Number.isFinite(v)) return [];
+      return [{ color, value: fmt(v), unit: spec.unit, label: spec.title }];
     });
-    tooltip.innerHTML = `<b>${esc(names.get(m49) ?? String(m49))}</b><br>${rows.join("<br>")}`;
-    tooltip.hidden = false;
+    const region = regions.find((r) => r.code === regionOf.get(m49));
+    showMapTip(tooltip, { title: names.get(m49) ?? String(m49), source: [region?.name, shownPeriod(current.ctx)].filter(Boolean).join(" · "), rows });
   }
 
   // --- The camera ------------------------------------------------------------------------------
@@ -783,7 +805,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     },
     hover(m49) {
       state.mapHover = m49;
-      if (m49 === null) tooltip.hidden = true;
+      if (m49 === null) showMapTip(tooltip, null);
       else showMapTooltip();
     },
     showArea: (area) => flyToArea(area),

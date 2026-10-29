@@ -15,7 +15,7 @@
  * the map back to. Within a card, hovering a row picks out its basins on the map (a
  * major basin, a sub-basin outlined), hovering a series in a legend maps that
  * series, and clicking a year on a chart of the same days every year selects that year.
- * Hovering a basin on the map shows its value. A switch in a map's legend section draws
+ * Hovering a basin on the map shows its values (panels/map-tip.ts), each in its colour there. A switch in a map's legend section draws
  * it as the basins' colours, circles or 3D bars (panels/shape-switch.ts), except where
  * a map has its own (the scheme's, the rain and vapour's); the key of the circles' and
  * bars' sizes is a menu of how they look (panels/shape-style.ts: the map's colours or by
@@ -28,7 +28,7 @@
  * theirs, m³/s). And the ramp is a menu of how much of the basins' values the colours
  * span (panels/ramp-menu.ts).
  */
-import type { WaterMap } from "../map/map";
+import type { Flow, WaterMap } from "../map/map";
 import { flyTo, type Extent } from "../map/fly-to";
 import type { Place } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
@@ -74,6 +74,7 @@ import {
 } from "./stats-cards";
 import { loadSeries, monthlyStats, periodStats, windowRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
 import { fmt, rampScale, type ColorScale } from "./variables";
+import { showMapTip, type MapTipRow } from "../panels/map-tip";
 
 interface Options {
   map: WaterMap;
@@ -83,6 +84,8 @@ interface Options {
   setMapOverride(override: boolean): void;
   /** Select a range in the top bar (from clicking a year on a chart). */
   setRange(range: DekadRange): void;
+  /** Whether a map on screen has time (none: the range changes nothing on the map). */
+  onTimed(timed: boolean): void;
 }
 
 export interface BasinStats {
@@ -91,6 +94,11 @@ export interface BasinStats {
   setSelection(selection: Selection): void;
   /** What is under the pointer on the map (null: nothing). */
   hover(place: Place | null): void;
+  /**
+   * The sub-basins upstream and downstream of the hovered one picked out on the map (in
+   * place of the colours): a key for them in the legend (null: none).
+   */
+  flow(flow: Flow | null): void;
   /** Lock the legend's ranges (when a range starts playing, so the dekads compare). */
   lockLegend(): void;
   /** Let the legend's ranges fit the values again (when it stops). */
@@ -121,7 +129,7 @@ const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 /** The first dekad of the WaPOR record. */
 const FIRST_DK = mk(WAPOR_MIN_YEAR, 0, 0);
 
-export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, setRange }: Options): BasinStats {
+export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, setRange, onTimed }: Options): BasinStats {
   const majorNames = new Map(majorBasins.map((b) => [b.id, b.name]));
   const subNames = new Map(subBasins.map((b) => [b.id, b.name]));
   const majorIds = majorBasins.map((b) => b.id);
@@ -141,6 +149,8 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     /** The maps checked in the legend, oldest first (none: the first tile's). */
     chosen: new Map<string, string[]>(),
     hover: null as Place | null,
+    /** The sub-basins picked out up- and downstream of the hovered one, in place of the map's colours. */
+    flow: null as Flow | null,
     /** The model's output: "majors" (per major basin) or a major basin's id (its sub-basins). */
     fluxes: new Map<string, FluxStatus>(),
     /** Totals in mm by default, as before there was a choice. */
@@ -479,7 +489,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     tooltip.style.left = `${e.clientX + 14}px`;
     tooltip.style.top = `${e.clientY + 14}px`;
   });
-  mapEl.addEventListener("pointerleave", () => (tooltip.hidden = true));
+  mapEl.addEventListener("pointerleave", () => showMapTip(tooltip, null));
 
   // --- Loading -------------------------------------------------------------------------------
   function load() {
@@ -707,7 +717,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
   function clear() {
     current = null;
     legend.show(null);
-    tooltip.hidden = true;
+    showMapTip(tooltip, null);
     map.setBasinStatFills(null);
     schemeMap.draw(null, []);
     effectsMap.draw(null, null, []);
@@ -812,6 +822,9 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     markDrivers(section, activeDriver(), drivers.preview(), state.pinned.get(scope()) ?? null);
   }
 
+  /** Each coloured map's colours as drawn, by its slot, for the tooltip. */
+  let tipColors = new Map<string, (v: number) => Color | null>();
+
   function drawMap() {
     if (!current) return;
     const { ctx } = current;
@@ -826,6 +839,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       map.setBasinSymbols(null);
       map.setBars("basin", null);
       setMapOverride(false);
+      tellTimed();
       return;
     }
     const major = ctx.major?.id ?? null;
@@ -865,9 +879,11 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     };
     const scales = new Map<string, ColorScale>();
     const colors = new Map<number, Color>();
+    tipColors = new Map();
     if (fill) {
       const { ids, values, scale, shown } = paint(fill);
       scales.set("fill", scale);
+      tipColors.set("fill", (v) => scale.color(v));
       ids.forEach((id, i) => {
         const c = scale.color(values[i]) ?? (fill.level === "major" ? theme.noData : null);
         if (c) colors.set(id, shown(id) ? c : mixColor(c, theme.land, 0.78));
@@ -896,6 +912,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       const where = (id: number) => river?.get(id) ?? middles.get(id);
       const size = shapeSizes(values, style.full, (ref) => legend.hold(`${spec.title}:${spec.unit}:${spec.level}:${slot}:${style.full}`, ref), spec.level === "sub");
       const colorOf = (v: number) => (style.colours === "sign" ? signColor(v, theme.storageRise, theme.storageFall) : scale.color(v));
+      tipColors.set(slot, colorOf);
       // Their key, in their colours (in place of a ramp).
       sizes.set(slot, sizeKey(slot as "circles" | "bars", size, (v) => css(colorOf(v) ?? theme.border, slot === "circles" ? 0.8 : 1), signed(spec)));
       ids.forEach((id, i) => {
@@ -953,32 +970,83 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       }),
     );
     showMapTooltip();
+    tellTimed();
   }
 
+  /**
+   * What's under the pointer: a river of the scheme (its discharge), else the basin, a
+   * row per map with a value there (none: no tooltip), in its colour (the scheme's,
+   * rain's and vapour's have none).
+   */
   function showMapTooltip() {
     const layers = current?.layers ?? [];
     const item = schemeMap.hovered();
     const sized = item && layers.find((l) => l.slot !== "fill" && l.spec.scheme === item.kind);
     if (item && sized && Number.isFinite(item.value)) {
-      const name = subNames.get(item.subBasin) ?? String(item.subBasin);
       const what = item.kind === "Q" ? `${sized.spec.title} in the river` : sized.spec.title;
-      tooltip.innerHTML = `<b>${esc(name)}</b><br>${esc(what)}: ${fmt(item.value)} ${esc(sized.spec.unit)}`;
-      tooltip.hidden = false;
-      return;
+      const major = majorNames.get(subsById.get(item.subBasin)?.majorBasin ?? NaN);
+      return showMapTip(tooltip, {
+        title: subNames.get(item.subBasin) ?? String(item.subBasin),
+        source: [major ? `Sub-basin of ${major}` : "Sub-basin", sized.spec.period].join(" · "),
+        rows: [{ color: null, value: fmt(item.value), unit: sized.spec.unit, label: what }],
+      });
     }
     const place = state.hover;
-    if (!place) return void (tooltip.hidden = true);
+    if (!place) return showMapTip(tooltip, null);
+    if (state.flow) return showFlowTip(state.flow);
     // Each map's value there, under the basin's name.
-    let name = "";
-    const rows = layers.flatMap(({ spec }) => {
+    let title = "";
+    let source = "";
+    const rows = layers.flatMap(({ spec, slot }): MapTipRow[] => {
       const target = spec.level === "major" ? place.majorBasin : place.subBasin;
       if (!target || (spec.only && !spec.only.has(target.id))) return [];
-      name ||= (spec.level === "major" ? majorNames : subNames).get(target.id) ?? target.name;
-      return [`${esc(spec.title)}: ${fmt(spec.value(target.id))} ${esc(spec.unit)}`];
+      const v = spec.value(target.id);
+      if (!Number.isFinite(v)) return [];
+      if (!title) {
+        title = (spec.level === "major" ? majorNames : subNames).get(target.id) ?? target.name;
+        const major = place.majorBasin && (majorNames.get(place.majorBasin.id) ?? place.majorBasin.name);
+        source = [spec.level === "major" ? "Major basin" : major ? `Sub-basin of ${major}` : "Sub-basin", spec.period].join(" · ");
+      }
+      const c = tipColors.get(slot)?.(v);
+      return [{ color: c ? `rgb(${c[0]} ${c[1]} ${c[2]})` : null, value: fmt(v), unit: spec.unit, label: spec.title }];
     });
-    if (!rows.length) return void (tooltip.hidden = true);
-    tooltip.innerHTML = `<b>${esc(name)}</b><br>${rows.join("<br>")}`;
-    tooltip.hidden = false;
+    showMapTip(tooltip, { title, source, rows });
+  }
+
+  /** Up- and downstream of the hovered sub-basin: how many, how big, and where the water goes. */
+  function showFlowTip({ sub, upstream, downstream }: Flow) {
+    const css = (c: Color) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
+    const count = (n: number) => `${n} sub-basin${n === 1 ? "" : "s"}`;
+    const area = (ids: Set<number>) => [...ids].reduce((sum, id) => sum + (subsById.get(id)?.area ?? 0), 0);
+    // Where it all ends: the sea or an inland sink (-999, -888 past the last sub-basin).
+    let last = sub;
+    for (const seen = new Set<number>(); subsById.has(subsById.get(last)?.downstream ?? NaN) && !seen.has(last); ) {
+      seen.add(last);
+      last = subsById.get(last)!.downstream;
+    }
+    const end = subsById.get(last)?.downstream === -888 ? "an inland sink" : "the sea";
+    const rows: MapTipRow[] = [];
+    if (upstream) {
+      rows.push({ color: css(map.theme.upstreamVeil), value: fmt(area(upstream)), unit: "km²", label: `Upstream: ${count(upstream.size)}` });
+    }
+    if (downstream) {
+      rows.push({ color: css(map.theme.downstreamVeil), value: String(downstream.size), unit: downstream.size === 1 ? "sub-basin" : "sub-basins", label: `Downstream, to ${end}` });
+    }
+    const major = majorNames.get(subsById.get(sub)?.majorBasin ?? NaN);
+    showMapTip(tooltip, { title: subNames.get(sub) ?? String(sub), source: major ? `Sub-basin of ${major}` : "Sub-basin", rows });
+  }
+
+  /**
+   * Whether the map has time: the Basin view always does (its maps are all over the
+   * range), unless up- and downstream are picked out over all its colours.
+   */
+  let timed = true;
+  function tellTimed() {
+    const layers = current?.layers ?? [];
+    const now = state.view !== "basin" || !state.flow || layers.some((l) => l.slot !== "fill");
+    if (now === timed) return;
+    timed = now;
+    onTimed(timed);
   }
 
   function download(id: string) {
@@ -1008,6 +1076,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     },
     setView(view) {
       state.view = view;
+      tellTimed();
       forgetFailedFluxes();
       load();
       render();
@@ -1026,6 +1095,18 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     hover(place) {
       state.hover = place;
       if (state.view === "basin") showMapTooltip();
+    },
+    flow(flow) {
+      state.flow = flow;
+      tellTimed();
+      if (state.view === "basin") showMapTooltip();
+      const css = (c: Color) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
+      const items = [
+        ...(flow?.upstream ? [{ label: "Upstream: draining into it", background: css(map.theme.upstreamVeil), absent: !flow.upstream.size }] : []),
+        ...(flow?.downstream ? [{ label: "Downstream: where it drains to", background: css(map.theme.downstreamVeil), absent: !flow.downstream.size }] : []),
+      ];
+      const note = items.some((k) => !k.absent) ? "Of the sub-basin under the pointer" : "The sub-basin under the pointer has none";
+      legend.overlay(flow ? { title: "Upstream and downstream", note, items } : null);
     },
   };
 }

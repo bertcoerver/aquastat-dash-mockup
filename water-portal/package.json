@@ -13,6 +13,7 @@
     "lists": "node scripts/build-lists.mjs",
     "country-info": "node scripts/build-country-info.mjs",
     "rivers": "node scripts/build-rivers.mjs",
+    "dams": "node scripts/build-dams.mjs",
     "deploy": "./scripts/deploy-pages.sh"
   },
   "dependencies": {

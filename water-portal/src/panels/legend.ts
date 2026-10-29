@@ -1,9 +1,10 @@
 /*
- * The map legend of the Basin and Country views: one or more layers at once. Its title
+ * The map legend of the Basin, Country and Local views: one or more layers at once. Its title
  * is a checklist of the maps (title-menu.ts), then the period (the same for all the
  * layers), and each layer on the map has a section below it. A layer goes in a slot, by how it's drawn (a fill, lines, circles, bars):
  * one layer per slot. A section has the layer's title (with a × to take it off the map:
- * the last one too, leaving the map empty), a note, and its key, with the unit to its
+ * the last one too, leaving the map empty), the attribute it shows (a vector map's: a
+ * menu of its others, local/local-maps.ts), a note, and its key, with the unit to its
  * right (a menu of units where the view has one):
  *
  * - a colour ramp with ticks, also a menu of how much of the values it spans (ramp-menu.ts);
@@ -43,8 +44,8 @@ export interface Tick {
 }
 
 export type LegendKey =
-  /** `fixed`: the range is set (a share): the ramp isn't a menu. */
-  | { kind: "ramp"; gradient: string; ticks: Tick[]; fixed?: boolean }
+  /** `fixed`: the range is set (a share): the ramp isn't a menu. `format`: the ticks' labels (else as fmtStop). */
+  | { kind: "ramp"; gradient: string; ticks: Tick[]; fixed?: boolean; format?: (value: number) => string }
   /** `state`: shown on the map, switched off, or none of the picked places fall in it. */
   | { kind: "classes"; items: { label: string; background: string; state: "on" | "off" | "absent" }[] }
   | { kind: "lines" | "circles" | "bars"; items: SizeItem[] };
@@ -65,6 +66,8 @@ export interface LegendLayer {
   /** Its option in the checklist (the × unchecks it). */
   id: string;
   title: string;
+  /** The attribute it shows, under the title (a menu, with Options.attributes); none: no row. */
+  attribute?: string;
   note: string;
   /** Shown once, above the sections (the first layer's that has one): "" while it has no key. */
   period: string;
@@ -100,6 +103,18 @@ export interface LayerLegend {
   lock(): void;
   /** Let the ranges fit the values again (if locked). */
   unlock(): void;
+  /**
+   * A key of what the map shows for now in place of the colours (the colours' section
+   * hidden meanwhile; the legend shown even if hidden); null: the maps' again.
+   */
+  overlay(key: OverlayKey | null): void;
+}
+
+/** A key shown for now (overlay): swatches, each with its label (`absent`: struck out, as a class none of the places fall in). */
+export interface OverlayKey {
+  title: string;
+  note: string;
+  items: { label: string; background: string; absent?: boolean }[];
 }
 
 interface Options {
@@ -114,6 +129,8 @@ interface Options {
   onShape?(id: string, shape: string): void;
   /** The ramp's menu (of the fill slot): `of` is what the colours span, "the basins' values". */
   ramp: { of: string; initial: WaporStretch; onPick(cut: WaporStretch): void };
+  /** The attributes' menu of the map in `slot`, where its layer has an `attribute`. */
+  attributes?: { options(slot: string): { options: MenuOption[]; current: string | null }; onPick(slot: string, id: string): void; title(slot: string): string };
   /** The units' menu of the map in `slot`, where its layer has `units`. */
   units?: { options(slot: string): { options: MenuOption[]; current: string | null }; onPick(slot: string, id: string): void; title(slot: string): string };
   /** The menu on the circles' and bars' sizes (shape-style.ts), of the map in `slot`, and its title. */
@@ -150,13 +167,14 @@ export function nice(x: number) {
 }
 
 /** The ticks under a colour ramp, with as many decimals as their range needs. */
-export function ticksHtml(ticks: Tick[]) {
+export function ticksHtml(ticks: Tick[], format?: (value: number) => string) {
   const values = ticks.map((t) => t.value).filter(Number.isFinite);
   const span = values.length ? Math.max(...values) - Math.min(...values) : 0;
-  return ticks.map((t) => `<span style="left:${t.at * 100}%">${Number.isFinite(t.value) ? fmtStop(t.value, span) : "–"}</span>`).join("");
+  const label = format ?? ((v: number) => fmtStop(v, span));
+  return ticks.map((t) => `<span style="left:${t.at * 100}%">${Number.isFinite(t.value) ? esc(label(t.value)) : "–"}</span>`).join("");
 }
 
-export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, onShape, onOrder, ramp, units, sizes, onClass, onLock }: Options): LayerLegend {
+export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, onShape, onOrder, ramp, attributes, units, sizes, onClass, onLock }: Options): LayerLegend {
   const menuButton = aside.querySelector<HTMLButtonElement>(".legend-title .title-menu")!;
   const menu = initTitleMenu(menuButton, options, onToggle, { multi: true, onIcon: onShape });
   const titleRow = aside.querySelector<HTMLElement>(".legend-title")!;
@@ -177,6 +195,9 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
   interface Parts extends LegendSection {
     title: HTMLElement;
     remove: HTMLButtonElement;
+    attributeRow: HTMLElement;
+    attribute: HTMLButtonElement;
+    attributeMenu: { setLabel(label: string): void } | null;
     note: HTMLElement;
     unit: HTMLButtonElement;
     unitMenu: { setLabel(label: string): void };
@@ -191,8 +212,24 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     layer: LegendLayer | null;
   }
 
+  // The overlay's section: on top, without a × or arrows (it isn't a map to take off or move).
+  const overlayEl = document.createElement("section");
+  overlayEl.className = "legend-layer legend-overlay";
+  overlayEl.hidden = true;
+  overlayEl.innerHTML =
+    `<div class="legend-layer-head"><span class="legend-layer-title"></span></div>` +
+    `<small class="legend-layer-note"></small><ul class="cp-classes"></ul>`;
+  periodRow.after(overlayEl);
+  let overlaid: OverlayKey | null = null;
+  let shown: LegendLayer[] | null = null; // (as last given to show)
+  /** The legend shown with maps or an overlay; with the overlay alone, without the checklist. */
+  function frame() {
+    aside.hidden = !shown && !overlaid;
+    titleRow.hidden = !shown;
+  }
+
   const sections = new Map<string, Parts>();
-  let after: Element = periodRow;
+  let after: Element = overlayEl;
   for (const slot of slots) {
     const el = document.createElement("section");
     el.className = "legend-layer";
@@ -204,6 +241,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       `<button type="button" class="legend-move" data-by="-1" title="Draw above the map over it" aria-label="Move up">${ARROW_SVG}</button>` +
       `<button type="button" class="legend-move" data-by="1" title="Draw under the map below it" aria-label="Move down">${ARROW_SVG}</button>` +
       `<button type="button" class="legend-remove" title="Take off the map" aria-label="Take off the map">×</button></span></div>` +
+      `<div class="legend-attribute" hidden><button class="title-menu" id="${id}-attribute" type="button" aria-haspopup="listbox" ` +
+      `aria-expanded="false" aria-label="Attribute shown"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button></div>` +
       `<small class="legend-layer-note"></small>` +
       `<div class="legend-extra"></div>` +
       `<div class="legend-key"><div class="legend-key-body">` +
@@ -225,6 +264,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     const unit = q<HTMLButtonElement>(".unit-menu");
     const rampButton = q<HTMLButtonElement>(".legend-ramp");
     const sizesButton = q<HTMLButtonElement>(".legend-sizes");
+    const attribute = q<HTMLButtonElement>(".legend-attribute .title-menu");
     if (sizes) initTitleMenu(sizesButton, () => sizes.options(slot), (option) => sizes.onPick(slot, option));
     const parts: Parts = {
       el,
@@ -232,6 +272,9 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       after: q(".legend-after"),
       title: q(".legend-layer-title"),
       remove: q(".legend-remove"),
+      attributeRow: q(".legend-attribute"),
+      attribute,
+      attributeMenu: attributes ? initTitleMenu(attribute, () => attributes.options(slot), (id) => attributes.onPick(slot, id)) : null,
       note: q(".legend-layer-note"),
       unit,
       unitMenu: units
@@ -300,7 +343,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     const now = [...sections.values()].filter((p) => parts.includes(p));
     now.sort((a, b) => (a.el.compareDocumentPosition(b.el) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
     if (!now.every((p, i) => p === parts[i])) {
-      let after: Element = periodRow;
+      let after: Element = overlayEl;
       for (const p of parts) {
         after.after(p.el);
         after = p.el;
@@ -372,9 +415,14 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
 
   function showSection(p: Parts, layer: LegendLayer | null) {
     p.layer = layer;
-    p.el.hidden = !layer;
+    p.el.hidden = !layer || (!!overlaid && p.el.dataset.slot === fill);
     if (!layer) return;
     p.title.textContent = layer.title;
+    p.attributeRow.hidden = layer.attribute === undefined;
+    if (layer.attribute !== undefined) {
+      p.attributeMenu?.setLabel(layer.attribute);
+      p.attribute.title = attributes?.title(p.el.dataset.slot!) ?? "";
+    }
     p.note.textContent = layer.note;
     p.unitMenu.setLabel(layer.unit);
     // Nothing to pick from: plain text.
@@ -396,7 +444,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       // Locked, there's nothing to pick either.
       p.rampMenu?.setEnabled(!key.fixed && !held);
       p.ramp.style.background = key.gradient;
-      p.ticks.innerHTML = ticksHtml(key.ticks);
+      p.ticks.innerHTML = ticksHtml(key.ticks, key.format);
     } else if (key?.kind === "classes") {
       p.classes.innerHTML = key.items.map((k, i) => classItem(i, k.label, k.background, k.state)).join("");
     } else if (key) {
@@ -450,8 +498,14 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       return sections.get(slot)!;
     },
     show(layers) {
-      aside.hidden = !layers;
-      if (!layers) return;
+      shown = layers;
+      frame();
+      if (!layers) {
+        // (Under the overlay: only the checklist.)
+        for (const p of sections.values()) showSection(p, null);
+        periodRow.hidden = true;
+        return;
+      }
       menu.setLabel(layers.length > 1 ? `${layers.length} layers on the map` : layers.length ? "1 layer on the map" : "No layers on the map");
       const period = layers.find((l) => l.period)?.period ?? "";
       periodRow.textContent = period;
@@ -470,6 +524,21 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     },
     unlock() {
       if (held) setLock(false);
+    },
+    overlay(key) {
+      if (JSON.stringify(key) === JSON.stringify(overlaid)) return;
+      overlaid = key;
+      overlayEl.hidden = !key;
+      if (key) {
+        overlayEl.querySelector(".legend-layer-title")!.textContent = key.title;
+        overlayEl.querySelector(".legend-layer-note")!.textContent = key.note;
+        overlayEl.querySelector(".cp-classes")!.innerHTML = key.items
+          .map((k) => `<li${k.absent ? ` class="off"` : ""}><span class="cp-swatch" style="background:${k.background}"></span>${esc(k.label)}</li>`)
+          .join("");
+      }
+      frame();
+      const p = sections.get(fill)!;
+      showSection(p, p.layer);
     },
   };
 }

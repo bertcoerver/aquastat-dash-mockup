@@ -65,6 +65,18 @@
 }
 
 /* The graticule's longitudes (graticule.ts): small, with a halo of the page's colour. */
+/* The picked dam's name, beside its target (map.ts). */
+.feature-label {
+  font: 600 13px/1 var(--sans);
+  color: var(--ink);
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow:
+    0 0 2px var(--surface),
+    0 0 2px var(--surface),
+    0 0 3px var(--surface),
+    0 0 4px var(--surface);
+}
 .graticule-label {
   font: 500 11px/1 var(--sans);
   color: var(--muted);

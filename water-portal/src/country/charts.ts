@@ -66,7 +66,7 @@ const xTitle = (axis: string | undefined, unit: string, right: number, ticksY: n
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** A thumbtack, 10 × 10. */
-const PIN = "M2.5 0H7.5V1L6.5 2V4.5L8.5 6.5V7.5H5.5V10H4.5V7.5H1.5V6.5L3.5 4.5V2L2.5 1Z";
+export const PIN = "M2.5 0H7.5V1L6.5 2V4.5L8.5 6.5V7.5H5.5V10H4.5V7.5H1.5V6.5L3.5 4.5V2L2.5 1Z";
 /** The pin icon in an SVG chart, its top left at (x, y). */
 const pinAt = (x: number, y: number) => `<path class="ch-pin" transform="translate(${x.toFixed(1)},${y.toFixed(1)})" d="${PIN}"/>`;
 

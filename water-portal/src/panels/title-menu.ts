@@ -19,6 +19,7 @@
  * drawn, say): a click on one, or ←/→ on the option, picks another (onIcon).
  *
  * Options can be in groups: a heading goes before each group (its options together).
+ * Or in a tree: each option indented by its level (a parent, still an option, above its own).
  */
 
 export interface MenuOption {
@@ -28,6 +29,8 @@ export interface MenuOption {
   hint?: string;
   /** Its group's name, a heading above the group. */
   group?: string;
+  /** How deep it is in a tree (0: the top), for its indent. */
+  level?: number;
   /** Icons to the right (`html`: an <svg>), and the id of the one picked. */
   icons?: { id: string; html: string; label: string; title: string }[];
   icon?: string;
@@ -76,6 +79,7 @@ export function initTitleMenu(
         li.role = "option";
         li.dataset.index = String(i);
         li.setAttribute("aria-selected", String(chosen.has(o.id)));
+        if (o.level) li.style.setProperty("--level", String(o.level));
         const text = document.createElement("span");
         text.textContent = o.label;
         li.append(text);

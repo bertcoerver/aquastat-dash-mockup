@@ -8,7 +8,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { View } from "../toolbar/range-rules";
-import { basinOutlinesLayer, majorBasinsLayers, subBasinOutlinesLayer, subBasinVeilLayer, subBasinsLayers, type BasinFills } from "./layers/basins";
+import { basinOutlinesLayer, majorBasinsLayers, subBasinOutlinesLayer, subBasinsLayers, type BasinFills } from "./layers/basins";
 import { bordersLayer } from "./layers/borders";
 import { graticuleLabels, graticuleLayer } from "./layers/graticule";
 import { HorizonExtension } from "./layers/horizon";
@@ -17,22 +17,33 @@ import { markerLayer } from "./layers/marker";
 import { barsLayer, type Bar } from "./layers/bars";
 import { basinSchemeLayers, PARTICLES_ID, type BasinScheme, type SchemeArrow, type SchemeLineStyle } from "./layers/basin-scheme";
 import { EFFECTS_ID, effectGroundLayers, effectLayers, type BasinEffects } from "./layers/basin-effects";
-import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type WaporPeriod } from "./layers/wapor";
+import { DEFAULT_RAMP, onWaporLevel, openWapor, waporLayer, waporOpened, waporShownLevel, type RasterSum, type WaporPeriod } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat, Place } from "./places";
 import { spinControl } from "./spin";
-import { THEMES, mixColor, type Color, type MapTheme } from "./theme";
+import { THEMES, type Color, type MapTheme } from "./theme";
 import { animate as ease, createFade, createTween, easeOut, linear, type Fade, type Timing } from "./tween";
 
 /** Layers the user can switch on and off (see the layers menu). */
 /** Map layers with a switch in the Layers menu (upstream, downstream: what hovering a sub-basin picks out). */
-export type ToggleableLayer = "rivers" | "lakes" | "graticule" | "upstream" | "downstream";
+export type ToggleableLayer = "rivers" | "lakes" | "graticule" | "upstream" | "downstream" | "countries" | "basins" | "subBasins";
 
 /** What's under the pointer, as the map picks it out (setHovered). */
-export type Hovered = { country: number } | { major: number } | { sub: number; upstream: Set<number>; downstream: Set<number> };
+/** A sub-basin's: `flow`, whether those up- and downstream of it are picked out (if any; switched on in the Layers menu). */
+/** The sub-basins picked out upstream and downstream of the hovered one (null: switched off in the Layers menu). */
+export interface Flow {
+  sub: number;
+  upstream: Set<number> | null;
+  downstream: Set<number> | null;
+}
+
+export type Hovered = { country: number } | { major: number } | { sub: number; flow: boolean; upstream: Set<number>; downstream: Set<number> };
 const hoverKey = (h: Hovered | null) => (!h ? "" : "country" in h ? `c${h.country}` : "major" in h ? `m${h.major}` : `s${h.sub}`);
 const NONE = new Set<number>();
+
+/** The views with statistics maps of their own: circles, bars and the order they're drawn in. */
+export type StatView = "country" | "basin" | "local";
 
 export interface WaterMap {
   map: maplibregl.Map;
@@ -50,6 +61,8 @@ export interface WaterMap {
   setWaporMaxGap(maxGap: number | null): void;
   /** The colour map for the WaPOR raster, in its variable's unit per day. */
   setWaporRamp(ramp: WaporRamp): void;
+  /** Local view: a GAEZ map (gaez.ts), drawn where the WaPOR raster is, in its colours (null: none). */
+  setGaez(gaez: { sum: RasterSum; ramp: WaporRamp } | null): void;
   /** Show the selection: a marker at the point (Local view), and the country and basins filled. */
   setSelection(selection: MapSelection): void;
   /** Move the camera to show a box: [west, south, east, north], west > east across 180°. */
@@ -58,9 +71,14 @@ export interface WaterMap {
   showPoint(center: LngLat, zoom: number, how?: "fly" | "ease"): void;
   /**
    * Outline what's under the pointer: a country (Country view), a major basin, or a
-   * sub-basin with those upstream of it veiled (Basin view); null: none.
+   * sub-basin with those up- and downstream of it filled (Basin view); null: none.
    */
   setHovered(hovered: Hovered | null): void;
+  /**
+   * Called as the sub-basins upstream and downstream of the hovered one start or stop
+   * being picked out (which of them: either may be switched off, or have none).
+   */
+  onFlow(listener: (flow: Flow | null) => void): void;
   /**
    * Basin view: fill sub-basins with their own colours (the water balance model's
    * values), instead of the selected fill (null: none). `key`
@@ -93,17 +111,19 @@ export interface WaterMap {
   setCountrySymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
   /** Basin view: circles on basins (a statistics map drawn as circles), by `key` as above. */
   setBasinSymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
+  /** Local view: circles on points (a vector map's, local/local-maps.ts), by `key` as above. */
+  setLocalSymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
   /**
-   * The Country or Basin view: 3D bars on the areas (a statistics map drawn as bars), by
-   * `key` as above. While a view's bars are shown, the map is tilted, to see them stand.
+   * 3D bars on the areas or points (a statistics map drawn as bars), by `key` as above.
+   * While a view's bars are shown, the map is tilted, to see them stand.
    */
-  setBars(view: "country" | "basin", bars: { key: string; items: Bar[] } | null): void;
+  setBars(view: StatView, bars: { key: string; items: Bar[] } | null): void;
   /**
-   * The Country or Basin view: the order to draw its statistics maps in, by slot, top
-   * first (the legend's: "circles", "bars", "lines", "rain", "vapour"). The colours stay
-   * at the bottom; slots not named keep their own order, under those named.
+   * The order to draw a view's statistics maps in, by slot, top first (the legend's:
+   * "circles", "bars", "lines", "rain", "vapour"). The colours (and the Local view's
+   * raster) stay at the bottom; slots not named keep their own order, under those named.
    */
-  setLayerOrder(view: "country" | "basin", slots: string[]): void;
+  setLayerOrder(view: StatView, slots: string[]): void;
   /**
    * A range playing in the Country or Basin view, a step every `stepMs` (null: not
    * playing): the map's changes are then eased over the whole step, evenly, so they flow
@@ -130,6 +150,8 @@ export interface BasinStatFills {
 
 interface MapSelection {
   lngLat: LngLat | null;
+  /** A point of the Local view's maps at `lngLat` (a dam): its circle's id, and its name to show beside it. */
+  feature: { id: string; name: string } | null;
   country: number | null;
   majorBasin: number | null;
   subBasin: number | null;
@@ -139,9 +161,10 @@ interface MapOptions {
   dark: boolean;
   /**
    * A click anywhere: the point on the globe (null off the globe), and whether it hit
-   * a country or basin (whichever is shown) rather than the ocean.
+   * a country or basin (whichever is shown) rather than the ocean; in the Local view,
+   * the circle or bar clicked (its `id`; null: none).
    */
-  onClick?: (lngLat: LngLat | null, onArea: boolean) => void;
+  onClick?: (lngLat: LngLat | null, onArea: boolean, symbol: string | null) => void;
   /**
    * The pointer moved: the point under it, or null off the globe or off the map; and
    * what's drawn there (picked from the map as shown, so at once: no tiles to load),
@@ -153,6 +176,11 @@ interface MapOptions {
    * Dropped on the ocean or off the globe, it goes back to where it was.
    */
   onMarkerDrop?: (lngLat: LngLat) => void;
+  /**
+   * Local view: the circle or bar under the pointer (its `id`; null: none), where the
+   * pointer is on the page, for a tooltip, and on the map (null: off the globe).
+   */
+  onSymbolHover?: (id: string | null, x: number, y: number, lngLat: LngLat | null) => void;
 }
 
 /** How long a change of the map's colours and sizes is eased over (when not playing). */
@@ -161,26 +189,28 @@ const EASE_MS = 400;
 /** How near the marker a press picks it up, in pixels. */
 const MARKER_GRAB = 10;
 
-export function createMap(container: HTMLElement, { dark, onClick, onHover, onMarkerDrop }: MapOptions): WaterMap {
+export function createMap(container: HTMLElement, { dark, onClick, onHover, onMarkerDrop, onSymbolHover }: MapOptions): WaterMap {
   const theme = dark ? THEMES.dark : THEMES.light;
   const state = {
     view: "country" as View,
-    selection: { lngLat: null, country: null, majorBasin: null, subBasin: null } as MapSelection,
-    visible: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true } as Record<ToggleableLayer, boolean>,
+    selection: { lngLat: null, feature: null, country: null, majorBasin: null, subBasin: null } as MapSelection,
+    visible: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true, countries: true, basins: false, subBasins: false } as Record<ToggleableLayer, boolean>,
     wapor: null as WaporEntry | null,
     waporNext: null as WaporEntry | null, // seamless: loading, not drawn yet
     waporLast: null as WaporEntry | null, // seamless: the one before, under `wapor` while it fades in
     waporFade: 1, // `wapor`'s opacity
     waporMaxGap: null as number | null,
     waporRamp: DEFAULT_RAMP,
+    gaez: null as { sum: RasterSum; ramp: WaporRamp } | null,
     hovered: null as Hovered | null,
     valueFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     outlined: [] as number[],
     countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
     basinSymbols: null as { key: string; items: CountrySymbol[] } | null,
-    bars: { country: null, basin: null } as Record<"country" | "basin", { key: string; items: Bar[] } | null>,
-    order: { country: [], basin: [] } as Record<"country" | "basin", string[]>,
+    localSymbols: null as { key: string; items: CountrySymbol[] } | null,
+    bars: { country: null, basin: null, local: null } as Record<StatView, { key: string; items: Bar[] } | null>,
+    order: { country: [], basin: [], local: [] } as Record<StatView, string[]>,
     basinStats: null as BasinStatFills | null,
     scheme: null as BasinScheme | null,
     effects: null as BasinEffects | null,
@@ -197,10 +227,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   const symbolTweens = {
     country: tween<CountrySymbol>((s) => s.id, { radius: 0 }),
     basin: tween<CountrySymbol>((s) => s.id, { radius: 0 }),
+    local: tween<CountrySymbol>((s) => s.id, { radius: 0 }),
   };
   const barTweens = {
     country: tween<Bar>((b) => b.position.join(), { height: 0 }),
     basin: tween<Bar>((b) => b.position.join(), { height: 0 }),
+    local: tween<Bar>((b) => b.position.join(), { height: 0 }),
   };
   const schemeTweens = {
     lines: tween<SchemeLineStyle>((l) => l.id, { width: 0 }),
@@ -235,6 +267,14 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   // The URL keeps the place and the zoom, not a tilt or turn (the bars' tilt, say):
   // always opened flat, north up.
   map.jumpTo({ pitch: 0, bearing: 0 });
+  // MapLibre skips its ResizeObserver's first report, taking it for the size the map was
+  // made at. Safari can lay the page out again in between (a tab opened in the
+  // background, a window being restored), and the map then stays at that first size —
+  // a small globe in the top-left — until reloaded. Catch it up whenever the two differ.
+  new ResizeObserver(() => {
+    const canvas = map.getCanvas();
+    if (canvas.clientWidth !== container.clientWidth || canvas.clientHeight !== container.clientHeight) map.resize();
+  }).observe(container);
   // Let go mid-drag, the globe spins on for a while (MapLibre's own inertia stops short).
   map.dragPan.enable({
     linearity: 0.6,
@@ -249,6 +289,21 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   map.addControl(spinControl(map), "bottom-right");
   // The graticule's longitudes: markers, shown with its lines.
   const graticuleNames = graticuleLabels(map);
+  // The picked point's name (a dam's), beside its target: a marker too (deck.gl draws no text here).
+  const featureLabel = document.createElement("div");
+  featureLabel.className = "feature-label";
+  const featureMarker = new maplibregl.Marker({ element: featureLabel, anchor: "left", opacityWhenCovered: "0" });
+  let featureShown = "";
+  function showFeatureLabel() {
+    const { lngLat, feature } = state.selection;
+    const radius = featureRadius();
+    const key = radius !== null && lngLat && feature ? `${feature.name} ${lngLat} ${radius}` : "";
+    if (key === featureShown) return;
+    featureShown = key;
+    if (!key) return void featureMarker.remove();
+    featureLabel.textContent = feature!.name;
+    featureMarker.setOffset([radius! + 10, 0]).setLngLat(lngLat!).addTo(map);
+  }
   // MapLibre spells the credits out at first, until the map is moved; keep them to the
   // ⓘ from the start (they show on a click).
   const attrib = container.querySelector(".maplibregl-ctrl-attrib")!;
@@ -270,41 +325,49 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     return fade.copies();
   }
 
+  let wasFlow = false; // (whether the last layers had sub-basins picked out up- and downstream)
+
   // Bottom to top. Rivers and lakes stay on top of whichever areas are shown.
   function layers() {
     const basins = state.view === "basin";
     const stats = basins ? state.basinStats : null;
+    // Upstream and downstream of the sub-basin under the pointer: the sub-basins filled
+    // green and red, over plain land (no map's colours meanwhile). At once, not eased:
+    // they follow the pointer.
+    const hovered = state.hovered;
+    const { flow, upstream, downstream } = flowOf();
+    const fillTiming = flow || wasFlow ? null : timing();
+    wasFlow = flow;
+    const colors = new Map<number, Color>();
+    for (const id of upstream) colors.set(id, theme.upstreamVeil);
+    for (const id of downstream) colors.set(id, theme.downstreamVeil);
+    const flowFills = flow && hovered && "sub" in hovered ? { key: `flow:${hovered.sub}`, colors } : undefined;
     const major = majorBasinsLayers({
       fill: theme.land,
       border: theme.basinBorder,
       visible: basins,
+      // (outside the Basin view: the outlines alone, if switched on)
+      outlined: basins || state.visible.basins,
       // the most precise one only
       selected: state.selection.subBasin || stats ? null : state.selection.majorBasin,
       selectedColor: theme.selected,
-      fills: faded(fades.major, stats?.level === "major" ? stats : undefined, timing()),
+      fills: faded(fades.major, stats?.level === "major" && !flow ? stats : undefined, fillTiming),
     });
-    // Sub-basins are only drawn to fill the selected one, or to show the water balance
-    // model's values or a statistics map.
-    const values = stats ? (stats.level === "sub" ? stats : undefined) : state.valueFills;
+    // Sub-basins are only drawn to fill the selected one, to show the water balance
+    // model's values or a statistics map, or up- and downstream.
+    const values = flow ? undefined : stats ? (stats.level === "sub" ? stats : undefined) : state.valueFills;
     const sub = subBasinsLayers({
       fill: [0, 0, 0, 0],
       border: theme.basinBorder,
-      visible: basins && Boolean(stats ? values : values || state.selection.subBasin),
+      visible: basins && (flow || Boolean(stats ? values : values || state.selection.subBasin)),
+      // (in the Basin view, only with up- and downstream picked out)
+      outlined: basins ? flow : state.visible.subBasins,
+      outlineWidth: basins ? 0.9 : 0.6,
       selected: values ? null : state.selection.subBasin,
       selectedColor: theme.selectedSubBasin,
-      fills: faded(fades.sub, values, timing()),
+      fills: faded(fades.sub, flowFills ?? values, fillTiming),
     });
-    // Under the pointer: an outline thinner than the selected one's; upstream and
-    // downstream of a sub-basin, veils (green and red mixed into their colours: the
-    // values still show through), and an outline around it with everything upstream
-    // of it, and one around the way down.
-    const hovered = state.hovered;
-    const upstream = hovered && "sub" in hovered && state.visible.upstream ? hovered.upstream : NONE;
-    const downstream = hovered && "sub" in hovered && state.visible.downstream ? hovered.downstream : NONE;
-    const veil = new Map<number, Color>();
-    for (const id of upstream) veil.set(id, mixColor(values?.colors.get(id) ?? theme.land, theme.upstreamVeil, 0.45));
-    for (const id of downstream) veil.set(id, mixColor(values?.colors.get(id) ?? theme.land, theme.downstreamVeil, 0.45));
-    const veilKey = hovered && "sub" in hovered ? `${hovered.sub}:${values?.key ?? ""}` : "";
+    // (Under the pointer: an outline thinner than the selected one's.)
     const scheme = basins ? state.scheme : null;
     const effects = basins ? state.effects : null;
     const outlined = stats
@@ -313,18 +376,21 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     return [
       ...countriesLayer({
         color: theme.land,
-        selected: state.selection.country,
+        // (Not in the Local view: it's about the point, not the country it's in.)
+        selected: state.view === "local" ? null : state.selection.country,
         selectedColor: theme.selected,
         visible: !basins,
         fills: faded(fades.countries, state.view === "country" ? state.countryFills : undefined, timing()),
       }),
       ...[state.waporLast, state.wapor, state.waporNext].flatMap((entry) => (entry ? waporLayers(entry) : [])),
+      gaezLayer(),
       ...major.areas,
       ...sub.areas,
-      subBasinVeilLayer({ id: "sub-basins-upstream", colors: veil, key: veilKey, visible: basins }),
-      bordersLayer({ color: theme.border, visible: !basins }),
+      // The country view always has them; the others if switched on.
+      bordersLayer({ color: theme.border, visible: state.view === "country" || state.visible.countries }),
       graticuleLayer({ color: theme.graticule, visible: state.visible.graticule }),
-      major.outlines, // (sub.outlines: not drawn for now)
+      sub.outlines, // (not in the Basin view, for now)
+      major.outlines,
       ...effectGroundLayers(effects),
       riversLayer({
         color: theme.river,
@@ -339,16 +405,6 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         halo: theme.markerRing,
         visible: state.view === "country" && Boolean(state.countryFills),
       }),
-      basinOutlinesLayer({
-        id: "sub-basins-upstream-outline",
-        level: "sub",
-        ids: hovered && "sub" in hovered && upstream.size ? [hovered.sub, ...upstream] : [],
-        color: theme.outline,
-        width: 2,
-        merged: true,
-        visible: basins,
-      }),
-      basinOutlinesLayer({ id: "sub-basins-downstream-outline", level: "sub", ids: [...downstream], color: theme.outline, width: 2, merged: true, visible: basins }),
       basinOutlinesLayer({ id: "major-basin-hovered", level: "major", ids: hovered && "major" in hovered ? [hovered.major] : [], color: theme.outline, halo: theme.markerRing, width: 1.75, visible: basins }),
       basinOutlinesLayer({ id: "sub-basin-hovered", level: "sub", ids: hovered && "sub" in hovered ? [hovered.sub] : [], color: theme.outline, halo: theme.markerRing, width: 1.75, visible: basins }),
       countryOutlineLayer({
@@ -363,21 +419,23 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         lines: basinSchemeLayers(scheme, schemeShown()),
         vapour: effects?.vapour ? effectLayers({ ...effects, rain: undefined }) : [],
         rain: effects?.rain ? effectLayers({ ...effects, vapour: undefined }) : [],
-        bars: [barsLayer({ bars: shownBars(), zoom: barsZoom })],
-        circles: [countrySymbolsLayer({ symbols: visibleSymbols() })],
+        // (In the Local view they're points of their own, with a tooltip each.)
+        bars: [barsLayer({ bars: shownBars(), zoom: barsZoom, pickable: state.view === "local" })],
+        circles: [countrySymbolsLayer({ symbols: visibleSymbols(), pickable: state.view === "local" })],
       }),
-      // The clicked point: only the Local view is about a point.
-      markerLayer({
+      // The clicked point: only the Local view is about a point. A dam picked: a target
+      // round its circle (as drawn: of the size it has, else as a point), and its name.
+      ...markerLayer({
         position: state.view === "local" ? (state.dragged ?? state.selection.lngLat) : null,
-        fill: theme.marker,
         ring: theme.markerRing,
+        around: featureRadius(),
       }),
     ];
   }
 
   /** The statistics maps' layers, bottom to top: in the view's order (setLayerOrder), else as `groups` are. */
   function stacked(groups: Record<string, Layer[]>) {
-    const order = state.view === "country" || state.view === "basin" ? state.order[state.view] : [];
+    const order = state.order[state.view as StatView] ?? [];
     const names = Object.keys(groups);
     const rank = (slot: string) => (order.includes(slot) ? names.length + order.length - order.indexOf(slot) : names.indexOf(slot));
     return names.sort((a, b) => rank(a) - rank(b)).flatMap((slot) => groups[slot]);
@@ -386,7 +444,14 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   // Only the circles on the near side of the globe: they are drawn without a depth
   // test (like everything here), so the far side's would show through.
   let symbolsKey = "";
-  const shownSymbols = () => (state.view === "country" || state.view === "basin" ? symbolTweens[state.view].get() : null);
+  const shownSymbols = () => symbolTweens[state.view as StatView]?.get() ?? null;
+  /** The picked point's circle's radius (px; one of a bar's, or not drawn: a point's), null: none picked, or it's being dragged off. */
+  function featureRadius() {
+    const feature = state.selection.feature;
+    if (state.view !== "local" || !feature || state.dragged) return null;
+    return state.localSymbols?.items.find((s) => s.id === feature.id)?.radius ?? 4;
+  }
+
   function visibleSymbols() {
     const symbols = shownSymbols();
     if (!symbols) return null;
@@ -411,14 +476,14 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     if (symbolsKey !== before) render();
   });
 
-  const shownBars = () => (state.view === "country" || state.view === "basin" ? barTweens[state.view].get() : null);
+  const shownBars = () => barTweens[state.view as StatView]?.get() ?? null;
   let barsZoom = Math.round(map.getZoom() * 20) / 20;
   // Tilted for the bars (and back flat when they go), unless it was tilted already.
   const TILT = 40;
   let tilted = false;
   function tilt() {
     // (The bars set, not those still shrinking away.)
-    const want = (state.view === "country" || state.view === "basin") && Boolean(state.bars[state.view]);
+    const want = Boolean(state.bars[state.view as StatView]);
     if (want && !tilted && map.getPitch() < 15) {
       tilted = true;
       map.easeTo({ pitch: TILT, duration: 800 });
@@ -429,7 +494,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   }
 
   function handleClick(info: PickingInfo) {
-    onClick?.(toLngLat(info.coordinate), Boolean(info.object));
+    const symbol = state.view === "local" && info.layer && SYMBOL_LAYERS.includes(info.layer.id) ? (info.object as { id?: string } | null)?.id ?? null : null;
+    onClick?.(toLngLat(info.coordinate), Boolean(info.object), symbol);
   }
 
   const overlay = new MapboxOverlay({
@@ -438,6 +504,10 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     onClick: handleClick,
     onHover: (info) => {
       const lngLat = toLngLat(info.coordinate);
+      if (state.view === "local") {
+        const symbol = info.layer && SYMBOL_LAYERS.includes(info.layer.id) ? (info.object as { id?: string } | null)?.id ?? null : null;
+        onSymbolHover?.(symbol, info.x + container.getBoundingClientRect().left, info.y + container.getBoundingClientRect().top, lngLat);
+      }
       // deck.gl's own pick, unless it's of something over the areas (a circle, a bar):
       // then a second one, of the areas only (each waits on the GPU).
       const isArea = (id: string | undefined) => !!id && AREA_LAYERS.some((a) => id.startsWith(a));
@@ -447,9 +517,39 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   });
   map.addControl(overlay);
   map.on("load", () => render());
-  map.getCanvasContainer().addEventListener("pointerleave", () => onHover?.(null, null));
+  map.getCanvasContainer().addEventListener("pointerleave", () => {
+    onHover?.(null, null);
+    onSymbolHover?.(null, 0, 0, null);
+  });
   function render() {
     overlay.setProps({ layers: drawn() });
+    showFeatureLabel();
+  }
+
+  /**
+   * Whether the sub-basins upstream and downstream of the hovered one are picked out
+   * (also when it has none: the map's colours are left off all the same), and which (as
+   * switched on in the Layers menu).
+   */
+  function flowOf() {
+    const hovered = state.view === "basin" && state.hovered && "sub" in state.hovered && state.hovered.flow ? state.hovered : null;
+    return {
+      flow: !!hovered && (state.visible.upstream || state.visible.downstream),
+      upstream: hovered && state.visible.upstream ? hovered.upstream : NONE,
+      downstream: hovered && state.visible.downstream ? hovered.downstream : NONE,
+    };
+  }
+  const flowListeners: ((flow: Flow | null) => void)[] = [];
+  let flowKey = "";
+  function tellFlow() {
+    const { flow: on, upstream, downstream } = flowOf();
+    const flow = on && state.hovered && "sub" in state.hovered
+      ? { sub: state.hovered.sub, upstream: state.visible.upstream ? upstream : null, downstream: state.visible.downstream ? downstream : null }
+      : null;
+    const key = flow ? `${flow.sub}:${flow.upstream?.size}:${flow.downstream?.size}` : "";
+    if (key === flowKey) return;
+    flowKey = key;
+    for (const listener of flowListeners) listener(flow);
   }
 
   // The scheme's particles, the rain and the vapour move every frame (deck.gl draws on each of MapLibre's repaints).
@@ -565,6 +665,16 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       : null;
     return [l1, l2];
   }
+  /** The GAEZ map, once its rasters are open (as WaPOR's: the layer would open them again). */
+  function gaezLayer() {
+    const gaez = state.gaez;
+    if (!gaez) return null;
+    if (!waporOpened(gaez.sum)) {
+      openWapor(gaez.sum).then(() => state.gaez === gaez && render(), () => {});
+      return null;
+    }
+    return waporLayer({ id: `gaez ${gaez.sum.key}`, period: gaez.sum, ramp: gaez.ramp });
+  }
   // The view asks for the other level: add or drop the L2 layers. (Called while
   // deck.gl picks tiles.)
   onWaporLevel(() => {
@@ -605,12 +715,14 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (view === state.view) return;
       state.view = view;
       render();
+      tellFlow();
       animate();
       tilt();
     },
     setLayerVisible(layer, visible) {
       state.visible[layer] = visible;
       render();
+      tellFlow();
       if (layer === "graticule") graticuleNames.show(visible);
     },
     setSelection(selection) {
@@ -645,6 +757,10 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (hoverKey(hovered) === hoverKey(state.hovered)) return; // unchanged (or still none)
       state.hovered = hovered;
       render();
+      tellFlow();
+    },
+    onFlow(listener) {
+      flowListeners.push(listener);
     },
     setSubBasinFills(fills) {
       if (fills?.key === state.valueFills?.key) return;
@@ -692,6 +808,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       symbolTweens.basin.set(symbols);
       render();
     },
+    setLocalSymbols(symbols) {
+      if (symbols?.key === state.localSymbols?.key) return;
+      state.localSymbols = symbols;
+      symbolTweens.local.set(symbols);
+      render();
+    },
     setPlayback(stepMs) {
       if ((playing?.duration ?? null) === (stepMs || null)) return;
       playing = stepMs ? { duration: stepMs, easing: linear } : null;
@@ -730,6 +852,11 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     setWaporMaxGap(maxGap) {
       if (maxGap === state.waporMaxGap) return;
       state.waporMaxGap = maxGap;
+      render();
+    },
+    setGaez(gaez) {
+      if ((gaez && `${gaez.sum.key} ${gaez.ramp.colors}`) === (state.gaez && `${state.gaez.sum.key} ${state.gaez.ramp.colors}`)) return;
+      state.gaez = gaez;
       render();
     },
     setWaporRamp(ramp) {
@@ -773,6 +900,8 @@ export function facing([lng1, lat1]: [number, number], [lng2, lat2]: [number, nu
 
 // The layers of areas the pointer can be over (ids, as prefixes: their copies too), top first.
 const AREA_LAYERS = ["sub-basins", "major-basins", "m49-countries"];
+/** The circles' and bars' layers (countries.ts, bars.ts). */
+const SYMBOL_LAYERS = ["m49-symbols", "area-bars"];
 
 /** The place a picked area stands for, from its layer and tile properties. */
 function placeOf(layerId: string, p: Record<string, unknown> | undefined): Place {

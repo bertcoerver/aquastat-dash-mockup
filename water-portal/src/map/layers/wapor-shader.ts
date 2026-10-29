@@ -40,6 +40,18 @@ const rgb = (hex: string): Vec3 => {
   return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 };
 
+/** A value's colour, as the shader gives it (aetiRamp_color), as CSS. */
+export function rampColor({ quantities: q, colors }: WaporRamp, v: number) {
+  const c = colors.map(rgb);
+  let mixed = c[c.length - 1];
+  if (v <= q[0]) mixed = c[0];
+  else {
+    const i = q.findIndex((stop) => v < stop);
+    if (i > 0) mixed = c[i - 1].map((a, k) => a + (c[i][k] - a) * ((v - q[i - 1]) / (q[i] - q[i - 1]))) as Vec3;
+  }
+  return `rgb(${mixed.map((x) => Math.round(x * 255)).join(" ")})`;
+}
+
 /** Stops past a ramp's last are its last again: the shader never mixes towards them. */
 export function rampProps({ quantities, colors }: WaporRamp, maxGap: number | null = null, signed = false): AetiRampProps {
   const at = (i: number) => Math.min(i, quantities.length - 1);

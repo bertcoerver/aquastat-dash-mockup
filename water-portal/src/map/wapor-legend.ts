@@ -1,6 +1,7 @@
 /*
- * The legend for the WaPOR raster (Local view): the variable as its title, a menu of
- * the others, period, colour ramp and whether the raster is loading or not published
+ * The legend of the WaPOR raster (Local view), in its map's section of the Local legend
+ * (local/local-maps.ts: its checklist picks the variable, its title is the variable's):
+ * its source and pixel size, period, colour ramp and whether the raster is loading or not published
  * yet, a menu for the unit (per day, month or year, or the period's total; per m² or
  * over a pixel: only the numbers change), and on the ramp itself, one for how much of
  * the values in view the colours span (or WaPOR's own range). For a dekad of a 300 m variable it also has the quality slider,
@@ -18,12 +19,10 @@ import {
   WAPOR_UNITS,
   fitUnits,
   waporUnitsFor,
-  WAPOR_VARIABLES,
   fmtArea,
   unitFactor,
   waporUnit,
   waporPixel,
-  waporVariable,
   type WaporLevel,
   type WaporPeriod,
   type WaporUnits,
@@ -96,6 +95,8 @@ export interface WaporLegend {
   pixelArea(area: number | null, lat: number): void;
   /** The level the map shows (L2 when zoomed in where it has it): its pixel size. */
   level(level: WaporLevel): void;
+  /** Show another variable (picked in the Local legend's checklist): `onVariable` runs. */
+  setVariable(variable: WaporVariable): void;
   /** Show these units (picked elsewhere: the Local panel's chart). */
   setUnits(units: WaporUnits): void;
   /** Lock the colours' range as it is (if not locked yet). */
@@ -107,7 +108,7 @@ export interface WaporLegend {
 /**
  * `onMaxGap` runs when the quality slider moves: the longest gap to show, or null.
  * `onStretch` runs when a colour range is picked from the ramp's menu, and once at the start.
- * `onVariable` runs when another variable is picked from the title's menu.
+ * `onVariable` runs when another variable is shown (setVariable).
  * `onUnits` runs when the unit button is pressed.
  * `onLock` runs when the colours' range is locked or unlocked.
  */
@@ -131,34 +132,29 @@ export function initWaporLegend({
 
   let variable = initial;
   let level: WaporLevel = "L1";
-  const menu = initTitleMenu(
-    $("wapor-variable") as HTMLButtonElement,
-    () => ({ options: WAPOR_VARIABLES.map((v) => ({ id: v.id, label: v.label })), current: variable.id }),
-    (id) => {
-      if (id === variable.id) return;
-      // Another variable's values: its own range.
-      if (locked) lockRamp(false);
-      showVariable(waporVariable(id));
-      onVariable(variable);
-      // One WaPOR doesn't publish has no range of WaPOR's own.
-      if (stretch === "wapor" && !variable.styles) {
-        stretch = DEFAULT_STRETCH;
-        rampMenu.set(stretch);
-        onStretch(stretch);
-      }
-      // Not every variable has every unit (a ratio has no per month, year or pixel).
-      const fit = fitUnits(variable, units);
-      if (fit !== units) {
-        units = fit;
-        showPer();
-        if (lastRamp) showRamp(lastRamp);
-        onUnits(units);
-      }
-    },
-  );
+  function setVariable(next: WaporVariable) {
+    if (next.id === variable.id) return;
+    // Another variable's values: its own range.
+    if (locked) lockRamp(false);
+    showVariable(next);
+    onVariable(variable);
+    // One WaPOR doesn't publish has no range of WaPOR's own.
+    if (stretch === "wapor" && !variable.styles) {
+      stretch = DEFAULT_STRETCH;
+      rampMenu.set(stretch);
+      onStretch(stretch);
+    }
+    // Not every variable has every unit (a ratio has no per month, year or pixel).
+    const fit = fitUnits(variable, units);
+    if (fit !== units) {
+      units = fit;
+      showPer();
+      if (lastRamp) showRamp(lastRamp);
+      onUnits(units);
+    }
+  }
   function showVariable(v: WaporVariable) {
     variable = v;
-    menu.setLabel(v.label);
     // The pixel size in its own span, so it alone lights up when the level changes.
     const pixel = document.createElement("span");
     pixel.id = "wapor-pixel";
@@ -296,6 +292,7 @@ export function initWaporLegend({
       $("wapor-note").textContent = period.note ?? "";
     },
     ramp: showRamp,
+    setVariable,
     lock() {
       if (!locked) lockRamp(true);
     },

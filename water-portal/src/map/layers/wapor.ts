@@ -31,6 +31,9 @@
  * L2_FROM), and the view reaches those countries. So a view loads one level or the
  * other, never both. Pixels L2 has no data for (other countries, in a view across a
  * border) are filled from L1, sampled onto L2's grid.
+ *
+ * The same layer draws GAEZ's maps (gaez.ts), which have no time: rasters added up
+ * as a period's are (a RasterSum), without the period.
  */
 import type { Viewport } from "@deck.gl/core";
 import type { TileLayer } from "@deck.gl/geo-layers";
@@ -39,6 +42,7 @@ import { GeoTIFF, PerOriginSemaphore, defaultDecoderPool, type RasterArray, type
 import type { Texture } from "@luma.gl/core";
 import { MONTHS, dkD, dkFirstDay, dkLastDay, dkM, dkY, fmtDay } from "../../toolbar/dekads";
 import { type DayRange } from "../../toolbar/range-rules";
+import type { LngLat } from "../places";
 import { cogImage, cogTile } from "../../local/cog-pixel";
 import { boxInL2 } from "./wapor-l2";
 import { block, blockName, formatPlan, planRange, type Block, type BlockKind } from "./wapor-plan";
@@ -55,7 +59,8 @@ export type WaporResolution = "dekadal" | "monthly" | "annual" | "custom";
 
 const RESOLUTIONS: Record<BlockKind, WaporResolution> = { D: "dekadal", M: "monthly", A: "annual" };
 
-export type WaporVariableId = "AETI" | "RET" | "T" | "E" | "I" | "PCP" | "NPP" | "PCP-AETI" | "WP" | "T-AETI";
+/** GAEZ: a static map from GAEZ v5, drawn the same way (see gaez.ts). */
+export type WaporVariableId = "AETI" | "RET" | "T" | "E" | "I" | "PCP" | "NPP" | "PCP-AETI" | "WP" | "T-AETI" | "GAEZ";
 
 export interface WaporVariable {
   id: WaporVariableId;
@@ -107,6 +112,14 @@ export interface WaporVariable {
    * ratio to mean something; below it there's no value (e.g. WP in a desert).
    */
   ratioMin?: number;
+  /** 0 is no data (a share of land cover where there's none). */
+  zeroEmpty?: boolean;
+  /**
+   * Its rasters are areas per pixel, in ha: shown as % of the pixel's area. This is the
+   * full-resolution pixel's size in degrees, as an overview's pixels are the average of
+   * the full-resolution pixels under them (not their sum).
+   */
+  perArea?: number;
 }
 
 /**
@@ -426,6 +439,9 @@ export interface WaporPeriod {
   fill: WaporPeriod | null;
 }
 
+/** What the raster layer draws: a period's rasters added up, or a static map's (gaez.ts), which has no period. */
+export type RasterSum = Pick<WaporPeriod, "variable" | "terms" | "qualityUrl" | "key" | "level" | "l2" | "fill">;
+
 const fileName = (url: string) => url.slice(url.lastIndexOf("/") + 1);
 const termsKey = (terms: WaporTerm[]) => terms.map((t) => `${t.factor}*${t.url}${t.grid ? ` on ${t.grid}` : ""}`).join(" + ");
 
@@ -602,13 +618,13 @@ export async function checkedWaporPeriod(variable: WaporVariable, range: DayRang
 }
 
 /** A period's own rasters (not those sampled onto its grid), and its quality raster. */
-const ownUrls = (period: WaporPeriod) => [...period.terms.filter((t) => !t.grid).map((t) => t.url), ...(period.qualityUrl ? [period.qualityUrl] : [])];
+const ownUrls = (period: RasterSum) => [...period.terms.filter((t) => !t.grid).map((t) => t.url), ...(period.qualityUrl ? [period.qualityUrl] : [])];
 
 /** Whether a period's rasters are open, so its layer doesn't open them again (an L2 period's, see map.ts). */
-export const waporOpened = (period: WaporPeriod) => ownUrls(period).every((url) => opened.has(url));
+export const waporOpened = (period: RasterSum) => ownUrls(period).every((url) => opened.has(url));
 
 /** Open a period's rasters. */
-export const openWapor = (period: WaporPeriod) => Promise.all(ownUrls(period).map(openRaster)).then(() => {});
+export const openWapor = (period: RasterSum) => Promise.all(ownUrls(period).map(openRaster)).then(() => {});
 
 /** An L1 period's L2 one, if it's published (null if not, or the bucket can't be reached: L1 is shown). */
 async function checkedL2(l1: WaporPeriod): Promise<WaporPeriod | null> {
@@ -863,14 +879,14 @@ interface PeriodTile {
 type GetTile = (source: TileSource) => RasterTile | undefined;
 
 /** An L2 period's term on its own grid (not sampled onto it): where it has no data, L2 has none. */
-const gridTerm = (period: WaporPeriod) => period.terms.find((t) => !t.grid)!;
+const gridTerm = (period: RasterSum) => period.terms.find((t) => !t.grid)!;
 
 /**
  * The rasters' tiles a period's tile is made from (with its quality raster's, if
  * `quality`), as far as they can be known from those loaded: an L2 period's L1 tiles,
  * sampled onto its grid, only once its own show pixels without data.
  */
-function tileSources(period: WaporPeriod, quality: boolean, get: GetTile): TileSource[] {
+function tileSources(period: RasterSum, quality: boolean, get: GetTile): TileSource[] {
   const sources: TileSource[] = [...period.terms, ...(quality && period.qualityUrl ? [{ url: period.qualityUrl }] : [])];
   const { fill } = period;
   if (!fill) return sources;
@@ -881,13 +897,13 @@ function tileSources(period: WaporPeriod, quality: boolean, get: GetTile): TileS
 }
 
 /** Whether every tile a period's tile is made from is loaded. */
-const loadedTile = (period: WaporPeriod, quality: boolean, get: GetTile) => tileSources(period, quality, get).every((source) => get(source));
+const loadedTile = (period: RasterSum, quality: boolean, get: GetTile) => tileSources(period, quality, get).every((source) => get(source));
 
 /**
  * A period's tile, from its rasters' tiles (every one in tileSources loaded). At L2,
  * the pixels without data are L1's, quality too (none: 255, as no quality value).
  */
-function assemble(period: WaporPeriod, quality: boolean, get: GetTile): PeriodTile {
+function assemble(period: RasterSum, quality: boolean, get: GetTile): PeriodTile {
   const rasters = period.terms.map((t) => get(t)!);
   const values = combineTiles(period, rasters);
   const { width, height, transform } = rasters[0];
@@ -909,7 +925,7 @@ function assemble(period: WaporPeriod, quality: boolean, get: GetTile): PeriodTi
 }
 
 /** Load the rasters' tiles a period's tile (x, y, z) is made from. Resolves to them. */
-async function loadSources(period: WaporPeriod, index: TileIndex, quality: boolean, signal?: AbortSignal): Promise<GetTile> {
+async function loadSources(period: RasterSum, index: TileIndex, quality: boolean, signal?: AbortSignal): Promise<GetTile> {
   // (Kept here too: the cache may let go of one before the last is in.)
   const loaded = new Map<string, RasterTile>();
   const get: GetTile = (source) => loaded.get(tileKey(source, index)) ?? tiles.get(tileKey(source, index))?.value;
@@ -1117,7 +1133,7 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
     const { x, y, z } = tile.index;
     const { multiDescriptor } = this.state;
     const { device, signal } = options;
-    const { period } = this.props as unknown as { period: WaporPeriod };
+    const { period } = this.props as unknown as { period: RasterSum };
 
     const get = await loadSources(period, { x, y, z }, true, signal);
     const { values, quality, width, height } = assemble(period, true, get);
@@ -1135,7 +1151,7 @@ class GlobeMultiCOGLayer extends MultiCOGLayer {
     const layer = super.renderLayers() as TileLayer | null;
     if (!layer) return null;
     const Tileset = layer.props.TilesetClass;
-    const { period } = this.props as unknown as { period: WaporPeriod };
+    const { period } = this.props as unknown as { period: RasterSum };
     class GlobeTileset extends Tileset {
       getTileIndices({ viewport }: { viewport: Viewport }) {
         // Levels run from the coarsest (z = 0) to full resolution (the last); the
@@ -1201,9 +1217,12 @@ type WaporSource = { url: string | GeoTIFF };
  * of the first part's over the sum of the second's (none where that's below `ratioMin`,
  * or not above 0). The parts' sums are averages per day.
  */
-function combineTiles(period: WaporPeriod, rasters: RasterTile[]) {
+function combineTiles(period: RasterSum, rasters: RasterTile[]) {
   const { terms, variable } = period;
-  if (!variable.ratio) return sumTiles(rasters, terms.map((t) => t.factor), variable.signed);
+  if (!variable.ratio) {
+    const sum = sumTiles(rasters, terms.map((t) => t.factor), variable.signed);
+    return variable.zeroEmpty || variable.perArea ? staticValues(variable, sum, rasters[0]) : sum;
+  }
   const sumOf = (part: number) => {
     const i = terms.flatMap((t, k) => (t.part === part ? [k] : []));
     return sumTiles(i.map((k) => rasters[k]), i.map((k) => terms[k].factor));
@@ -1233,6 +1252,22 @@ function sumTiles(rasters: RasterTile[], factors: number[], signed = false) {
     for (let p = 0; p < sum.length; p++) if (sum[p] < 0) sum[p] = 0;
   }
   return sum;
+}
+
+/**
+ * A static map's values (gaez.ts), in place: areas per pixel as % of a full-resolution
+ * pixel's area at the row's latitude (`perArea`), and 0 as no data (`zeroEmpty`).
+ */
+function staticValues({ zeroEmpty, perArea }: WaporVariable, values: Float32Array, { width, transform: [, , , , e, f] }: RasterTile) {
+  for (let row = 0, p = 0; p < values.length; row++) {
+    // (ha → m², over the pixel's m², in %.)
+    const k = perArea ? 1e6 / pixelArea([perArea, perArea], e * (row + 0.5) + f) : 1;
+    for (let col = 0; col < width; col++, p++) {
+      const v = values[p] * k;
+      values[p] = zeroEmpty && !(v > 0) ? Number.NaN : v;
+    }
+  }
+  return values;
 }
 
 /** How much of the values in view the colour map spans: all, or without this % at either end. */
@@ -1354,6 +1389,52 @@ export function waporViewRange(period: WaporPeriod, maxGap: number | null, cut: 
   return [quantile(cut / 100), quantile(1 - cut / 100)];
 }
 
+/** A raster's pixel under the pointer, as the map draws it (see waporValueAt). */
+export interface WaporPixelValue {
+  /** Its value, per day as the rasters (null: no data there, or hidden by the quality slider). */
+  value: number | null;
+  /** The level it's read from (L1 where L2 has no tile loaded yet, as the map shows). */
+  level: WaporLevel;
+  /** The size of a full-resolution pixel, in degrees (lon, lat). */
+  fullPixel: [number, number];
+}
+
+/** The last tile looked up by waporValueAt (the pointer stays on one for a while). */
+let hoverTile: { key: string; tile: PeriodTile } | null = null;
+
+/**
+ * A period's (or static map's) pixel at a point, from the tiles the map shows: none
+ * read, so null where none is loaded there. At L2, from L1's tiles where L2's aren't in
+ * yet (the map shows L1's until they are).
+ */
+export function waporValueAt(period: RasterSum, [lng, lat]: LngLat, maxGap: number | null): WaporPixelValue | null {
+  const levels = period.level === "L1" && period.l2 && viewLevel === "L2" ? [period.l2, period] : [period];
+  for (const drawn of levels) {
+    for (const index of viewTiles[drawn.level]) {
+      const get = cachedAt(index);
+      const grid = get(drawn.terms[0]);
+      if (!grid) continue;
+      const { width, height, transform: [a, , c, , e, f] } = grid;
+      // (Longitudes wrap: from the tile's west edge, eastwards.)
+      const col = Math.floor(((((lng - c) % 360) + 360) % 360) / a);
+      const row = Math.floor((lat - f) / e);
+      if (col >= width || row < 0 || row >= height || !loadedTile(drawn, true, get)) continue;
+      const key = `${drawn.key} ${drawn.qualityUrl} ${index.z}/${index.x}/${index.y}`;
+      if (hoverTile?.key !== key) hoverTile = { key, tile: assemble(drawn, true, get) };
+      const { values, quality } = hoverTile.tile;
+      const p = row * width + col;
+      const v = values[p];
+      // As in the shader: no negative values (unless signed), and no quality value (255) is hidden too.
+      const hidden = maxGap !== null && !!quality && quality[p] > maxGap;
+      const shown = (drawn.variable.signed ? v === v : v >= 0) && !hidden;
+      const geotiff = opened.get(drawn.terms[0].url);
+      const full = geotiff ? level(geotiff, geotiff.overviews.length).transform : [a, 0, 0, 0, e];
+      return { value: shown ? v : null, level: drawn.level, fullPixel: [Math.abs(full[0]), Math.abs(full[4])] };
+    }
+  }
+  return null;
+}
+
 /** The samples of a one-band tile, in either layout. */
 const samples = (array: RasterArray) => (array.layout === "band-separate" ? array.bands[0] : array.data);
 
@@ -1382,7 +1463,7 @@ export function waporLayer({
   opacity = 1,
   onViewportLoad,
 }: {
-  period: WaporPeriod | null;
+  period: RasterSum | null;
   ramp: WaporRamp;
   maxGap?: number | null;
   onLoad?: () => void;

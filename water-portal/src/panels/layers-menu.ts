@@ -7,14 +7,23 @@
  * cover the WaPOR raster), on in the others. The graticule starts off everywhere. The
  * Basin view also has what hovering a sub-basin picks out: those upstream and
  * downstream of it (both on); switches inside a data-views element show in those views only.
+ * The outlines of countries, basins and sub-basins: the view's own (FIXED) stay on and
+ * can't be switched; the others start as they were drawn before there were switches.
  */
 import type { ToggleableLayer } from "../map/map";
 import type { View } from "../toolbar/range-rules";
 
 const DEFAULTS: Record<View, Record<ToggleableLayer, boolean>> = {
-  country: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true },
-  basin: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true },
-  local: { rivers: false, lakes: false, graticule: false, upstream: true, downstream: true },
+  country: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true, countries: true, basins: false, subBasins: false },
+  basin: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true, countries: false, basins: true, subBasins: true },
+  local: { rivers: false, lakes: false, graticule: false, upstream: true, downstream: true, countries: true, basins: false, subBasins: false },
+};
+
+/** The switches a view keeps on (shown ticked, disabled); the map draws those its own way. */
+const FIXED: Record<View, ToggleableLayer[]> = {
+  country: ["countries"],
+  basin: ["basins", "subBasins"],
+  local: [],
 };
 
 export interface LayersMenu {
@@ -61,7 +70,8 @@ export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boole
       view = next;
       for (const input of inputs) {
         const layer = input.dataset.layer as ToggleableLayer;
-        input.checked = visible[next][layer];
+        input.disabled = FIXED[next].includes(layer);
+        input.checked = input.disabled || visible[next][layer];
         onToggle(layer, input.checked);
         const only = input.closest<HTMLElement>("[data-views]");
         if (only) only.hidden = !only.dataset.views!.split(" ").includes(next);

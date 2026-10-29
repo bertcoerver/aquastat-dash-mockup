@@ -109,8 +109,8 @@
   margin-top: 4px;
   border-radius: 2px;
 }
-.legend:is([data-status="missing"], [data-status="error"]) .legend-ramp,
-.legend:is([data-status="missing"], [data-status="error"]) .legend-ticks {
+.wapor-legend:is([data-status="missing"], [data-status="error"]) .legend-ramp,
+.wapor-legend:is([data-status="missing"], [data-status="error"]) .legend-ticks {
   opacity: 0.35;
 }
 .legend-ticks {
@@ -187,7 +187,7 @@
 .legend-note:empty {
   display: none;
 }
-.legend:is([data-status="missing"], [data-status="error"]) .legend-status {
+.wapor-legend:is([data-status="missing"], [data-status="error"]) .legend-status {
   color: var(--snap);
 }
 
@@ -286,7 +286,8 @@
 .legend-layer {
   position: relative;
 }
-.legend-layer.below {
+.legend-layer.below,
+.legend-overlay:not([hidden]) ~ .legend-layer {
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
@@ -362,6 +363,17 @@
 .legend-layer .legend-quality {
   margin-top: 6px;
 }
+.wapor-legend[hidden],
+.legend-attribute[hidden] {
+  display: none;
+}
+/* A vector map's attribute (local/local-maps.ts): a menu of its others, under its title. */
+.legend-attribute {
+  margin-top: 1px;
+}
+.legend-attribute .title-menu {
+  font-weight: 500;
+}
 .scheme-key .key-dot {
   stroke: var(--surface);
   stroke-width: 1;
@@ -397,6 +409,10 @@
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
+}
+/* A tree's options (title-menu.ts, level): indented, a parent's own under it. */
+.title-menu-list [role="option"][style*="--level"] {
+  padding-left: calc(8px + var(--level) * 16px);
 }
 .title-menu-group:not(:first-child) {
   margin-top: 4px;
@@ -549,4 +565,222 @@
 }
 .tuning-body:not([hidden]) + .tuning-hint {
   display: none;
+}
+
+/* The map's tooltips (panels/map-tip.ts), as the legend: glass, the numbers in mono. A
+   box as high as the date range, pinned by it or following the pointer: one header (the
+   title, its source), then a tile per map, the same rows in each so they line up: the
+   value and its unit on one line, a band of its colour, the map's name. A tile is as wide
+   as its value needs, at least as wide as the box is high (map-tip.ts sets --tip-square).
+   The key that pins it (P) in the corner: pinned, a button that releases it. */
+.map-tip {
+  box-sizing: border-box;
+  min-height: var(--tip-square, 76px);
+  padding: 6px 0 5px;
+  font: 400 12px/1.4 var(--sans);
+  border: 1px solid color-mix(in srgb, var(--line) var(--glass), transparent);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.1);
+  overflow: hidden;
+  isolation: isolate;
+}
+/* (The glass on a layer behind the content: on the box itself, Safari draws just the
+   blur, and not what's in it, once the box animates or glides.) */
+.map-tip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: color-mix(in srgb, var(--surface) var(--glass), transparent);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+/* (Following the pointer: over .wb-tooltip's own size and background, basin.css, loaded later.) */
+.wb-tooltip.map-tip {
+  max-width: none;
+  padding: 6px 0 5px;
+  border-radius: 8px;
+  background: none;
+}
+/* Pinned (map-tip.ts places it): right of the date range, at its bottom. Empty, just as
+   wide as its key, and drawn as the zone (below). It glides to a new width, its content
+   clipped meanwhile. */
+.map-tip-dock {
+  position: fixed;
+  z-index: 10;
+  transition:
+    width 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.4s ease;
+}
+.map-tip-dock[hidden] {
+  display: none;
+}
+.map-tip-dock.mt-empty {
+  width: 30px;
+}
+/* Appearing: a fade and a small rise (the box when pinned, a tooltip after none was
+   shown); new content (empty to tiles) too. */
+@keyframes mt-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+.map-tip,
+.mt-enter {
+  animation: mt-in 0.16s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-tip-dock {
+    transition: none;
+  }
+  .map-tip,
+  .mt-enter {
+    animation: none;
+  }
+}
+/* (The header never widens the box: the tiles set its width, and a long name is cut
+   short, in full on hover.) */
+.mt-sq-head {
+  box-sizing: border-box;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 0;
+  min-width: 100%;
+  padding: 0 26px 0 9px; /* (clear of the key) */
+  white-space: nowrap;
+}
+.mt-sq-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font: 600 12px/1.3 var(--sans);
+  text-overflow: ellipsis;
+}
+/* (The source takes what's left, cut short.) */
+.mt-source {
+  width: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  font: 500 10px/1.4 var(--sans);
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+}
+.mt-squares {
+  display: flex;
+  margin-top: 4px;
+}
+.mt-sq {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: calc(var(--tip-square, 76px) - 2px);
+  padding: 0 9px;
+}
+/* (A lone tile wider: room for the header's name.) */
+.mt-sq:only-child {
+  min-width: calc(var(--tip-square, 76px) * 1.6 - 2px);
+}
+.mt-sq + .mt-sq {
+  border-left: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+}
+.mt-sq-value {
+  font: 600 14px/1.15 var(--mono);
+  white-space: nowrap;
+}
+.mt-unit {
+  font-weight: 400;
+  font-size: 10px;
+  color: var(--muted);
+}
+.mt-sq-band {
+  display: block;
+  height: 6px;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ink) 15%, transparent);
+}
+/* (Drawn without a colour: the scheme's rivers, rain, vapour.) */
+.mt-sq-band.mt-none {
+  background: repeating-linear-gradient(45deg, transparent 0 3px, color-mix(in srgb, var(--ink) 10%, transparent) 3px 4px);
+}
+/* (The name never widens its tile: as wide as the value, cut short.) */
+.mt-sq-label {
+  width: 0;
+  min-width: 100%;
+  overflow: hidden;
+  font: 400 9px/1.3 var(--sans);
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The pin, in the corner (centred in the empty box): pinned, a button. */
+.mt-key {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+}
+.mt-empty .mt-key,
+.map-tip-zone .mt-key {
+  right: 50%;
+  translate: 50% 0;
+}
+.mt-key svg {
+  display: block;
+  width: 11px;
+  height: 11px;
+  fill: currentColor;
+}
+/* (Pinned: in the accent, as a pinned chart's pin; released, muted.) */
+button.mt-key {
+  color: var(--accent);
+  cursor: pointer;
+}
+button.mt-key:hover {
+  color: color-mix(in srgb, var(--accent) 70%, var(--ink));
+}
+button.mt-key:focus-visible {
+  outline: 2px solid var(--accent);
+  border-radius: 3px;
+}
+/* Released: the zone that pins it (map-tip.ts), where the empty box would be, as big,
+   with the key; the empty box looks the same. */
+.map-tip-zone {
+  position: fixed;
+  z-index: 10;
+  box-sizing: border-box;
+  width: 30px;
+  border-radius: 8px;
+  animation: mt-in 0.16s ease-out;
+  transition: opacity 0.4s ease;
+}
+/* The outline, a while after it shows, until the pointer comes near (map-tip.ts): gone,
+   though the zone still pins and the key still works. */
+.mt-faded {
+  opacity: 0;
+}
+.map-tip-zone,
+.map-tip-dock.mt-empty {
+  border: 1px dashed color-mix(in srgb, var(--muted) 60%, transparent);
+  background: color-mix(in srgb, var(--surface) 45%, transparent);
+  box-shadow: none;
+}
+.map-tip-dock.mt-empty::before {
+  display: none;
+}
+.map-tip-zone[hidden] {
+  display: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .map-tip-zone {
+    animation: none;
+    transition: none;
+  }
 }

@@ -1,9 +1,9 @@
 /*
  * The icons of how a map is drawn (shape-switch.ts, basin/scheme-map.ts,
- * basin/effects-map.ts): in the legend's checklist, to the right of each map, each with
+ * basin/effects-map.ts, local/local-maps.ts): in the legend's checklist, to the right of each map, each with
  * its name as its tooltip. Drawn on 16 × 16 in currentColor only, shaded by opacity.
  */
-export type ShapeIcon = "fill" | "circles" | "bars" | "scheme" | "particles" | "rain" | "vapour";
+export type ShapeIcon = "fill" | "circles" | "bars" | "scheme" | "particles" | "rain" | "vapour" | "raster";
 
 const ICONS: Record<ShapeIcon, string> = {
   // Areas of three shades in a frame.
@@ -36,6 +36,13 @@ const ICONS: Record<ShapeIcon, string> = {
     `<rect x="5" y="5" width="7.5" height="3.5"/></g>` +
     `<path d="M5.5 9.8L4.8 11.6M9 9.8L8.3 11.6M12.5 9.8L11.8 11.6M6.9 13.4L6.2 15.2M10.4 13.4L9.7 15.2" stroke="currentColor" ` +
     `stroke-linecap="round" stroke-width="1.1"/>`,
+  // A grid of square pixels in shades (the Local view's rasters).
+  raster:
+    `<g fill="currentColor"><rect x="2" y="2" width="3.6" height="3.6" opacity=".3"/><rect x="6.2" y="2" width="3.6" height="3.6" opacity=".6"/>` +
+    `<rect x="10.4" y="2" width="3.6" height="3.6"/><rect x="2" y="6.2" width="3.6" height="3.6" opacity=".6"/>` +
+    `<rect x="6.2" y="6.2" width="3.6" height="3.6"/><rect x="10.4" y="6.2" width="3.6" height="3.6" opacity=".45"/>` +
+    `<rect x="2" y="10.4" width="3.6" height="3.6"/><rect x="6.2" y="10.4" width="3.6" height="3.6" opacity=".45"/>` +
+    `<rect x="10.4" y="10.4" width="3.6" height="3.6" opacity=".3"/></g>`,
   // Wisps rising.
   vapour:
     `<g stroke="currentColor" stroke-linecap="round" fill="none" stroke-width="1.5"><path d="M4 14.5C2.5 12.5 5.5 11 4 9S5.5 6 4 4.5"/>` +

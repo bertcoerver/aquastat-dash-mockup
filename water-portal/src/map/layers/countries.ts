@@ -202,13 +202,17 @@ class PieScatterLayer extends ScatterplotLayer<CountrySymbol, PieProps> {
 
 const pieColor = (k: number) => (s: CountrySymbol) => s.pieColors?.slice(k * 4, k * 4 + 4) ?? NO_COLOR;
 
-/** Circles on countries: proportional symbols (plain or pies), and rings that mark countries. */
-export function countrySymbolsLayer({ symbols }: { symbols: { key: string; items: CountrySymbol[] } | null }) {
+/**
+ * Circles on countries: proportional symbols (plain or pies), and rings that mark
+ * countries; or on points (the Local view's vector maps: `pickable`, for their tooltips).
+ */
+export function countrySymbolsLayer({ symbols, pickable = false }: { symbols: { key: string; items: CountrySymbol[] } | null; pickable?: boolean }) {
   const key = symbols?.key;
   return new PieScatterLayer({
     id: "m49-symbols",
     data: symbols?.items ?? [],
     visible: Boolean(symbols),
+    pickable,
     getPosition: (s) => s.position,
     radiusUnits: "pixels",
     getRadius: (s) => s.radius,

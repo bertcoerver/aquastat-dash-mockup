@@ -10,7 +10,7 @@ export interface MapTheme {
   selectedSubBasin: Color; // the selected sub-basin (darker: it is small on the map)
   hovered: Color; // the sub-basin under the pointer (Basin view)
   upstream: Color; // the sub-basins upstream of it
-  upstreamVeil: Color; // hovering a sub-basin: mixed into the colours of those upstream of it…
+  upstreamVeil: Color; // hovering a sub-basin: the fill of those upstream of it…
   downstreamVeil: Color; // …and of those downstream
   // (Opaque: the tiles overlap a little, and see-through fills would show the seams.)
   outline: Color; // the selected sub-basin (or country) when the map shows values

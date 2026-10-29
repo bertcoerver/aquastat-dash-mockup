@@ -283,7 +283,8 @@ svg.ch-pin {
   border-radius: 2px;
   cursor: pointer;
 }
-.cp-swatch:disabled {
+.cp-swatch:disabled,
+span.cp-swatch {
   cursor: default;
 }
 .cp-swatch:not(:disabled):hover {

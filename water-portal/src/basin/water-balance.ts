@@ -27,7 +27,8 @@ import { VARIABLES, coveredRange, networkSeries, periodMeans, type Means, type N
 import { initTitleMenu } from "../panels/title-menu";
 import { initSankey, type SankeyData } from "./sankey";
 import { initTimeseries } from "./timeseries";
-import { STYLES, colorScale, fmt } from "./variables";
+import { STYLES, colorScale, fmt, type ColorScale } from "./variables";
+import { showMapTip } from "../panels/map-tip";
 
 interface Options {
   map: WaterMap;
@@ -70,7 +71,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     override: false,
   };
   // What the last render computed, for tooltips and downloads.
-  let current: { result: NetworkResult; range: DekadRange; means: Means } | null = null;
+  let current: { result: NetworkResult; range: DekadRange; means: Means; scale: ColorScale; period: string } | null = null;
 
   const panel = $("wb-panel");
   const legend = $("wb-legend");
@@ -107,7 +108,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     tooltip.style.left = `${e.clientX + 14}px`;
     tooltip.style.top = `${e.clientY + 14}px`;
   });
-  mapEl.addEventListener("pointerleave", () => (tooltip.hidden = true));
+  mapEl.addEventListener("pointerleave", () => showMapTip(tooltip, null));
 
   // --- Loading the model -------------------------------------------------------------
   function load(id: number) {
@@ -165,7 +166,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     legend.hidden = true;
     current = null;
     if (!basinView) {
-      tooltip.hidden = true;
+      showMapTip(tooltip, null);
       map.setSubBasinFills(null);
       map.setOutlinedSubBasins([]);
       return;
@@ -175,7 +176,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
       $("wb-message").hidden = true;
       $("wb-results").hidden = true;
       $("wb-subtitle").textContent = subtitle(null);
-      tooltip.hidden = true;
+      showMapTip(tooltip, null);
       map.setSubBasinFills(null);
       map.setOutlinedSubBasins([]);
       return;
@@ -230,11 +231,11 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     }
 
     const means = periodMeans(result, range);
-    current = { result, range, means };
     const period = `${fmtStart(range.start)} – ${fmtEnd(range.end)}`;
 
     // Map and legend.
     const scale = colorScale(state.variable, [...means.values()].map((m) => m[state.variable]));
+    current = { result, range, means, scale, period };
     const colors = new Map<number, Color>();
     for (const [id, m] of means) {
       const c = scale.color(m[state.variable]);
@@ -323,12 +324,18 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     const id = state.mapHover;
     const m = id !== null ? current?.means.get(id) : undefined;
     if (!m || id === null || state.override) {
-      tooltip.hidden = true;
+      showMapTip(tooltip, null);
       return;
     }
+    // In its colour.
     const s = STYLES[state.variable];
-    tooltip.innerHTML = `<b>${byId.get(id)?.name ?? id}</b><br>${s.short}: ${fmt(m[state.variable])} ${s.unit}`;
-    tooltip.hidden = false;
+    const v = m[state.variable];
+    const c = Number.isFinite(v) ? current!.scale.color(v) : null;
+    showMapTip(tooltip, {
+      title: byId.get(id)?.name ?? String(id),
+      source: `Water balance model · ${current!.period}`,
+      rows: Number.isFinite(v) ? [{ color: c ? `rgb(${c[0]} ${c[1]} ${c[2]})` : null, value: fmt(v), unit: s.unit, label: s.label }] : [],
+    });
   }
 
   // --- Downloads -------------------------------------------------------------------------

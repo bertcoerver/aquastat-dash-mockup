@@ -19,6 +19,17 @@
   backdrop-filter: blur(12px) saturate(1.2);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.1);
 }
+/* No map on screen has time (toolbar.ts setTimeless; it's inert then): it fades out as it
+   sinks a little, and is gone once it has (visibility, after the fade); back, at once. */
+.range-pane {
+  transition: opacity 0.25s ease, translate 0.25s ease, visibility 0s;
+}
+.range-pane.timeless {
+  opacity: 0;
+  translate: 0 12px;
+  visibility: hidden;
+  transition: opacity 0.25s ease, translate 0.25s ease, visibility 0s 0.25s;
+}
 /* Once its width has been changed (floating.ts): that wide, centred on the same spot,
    but kept on screen and left of the map's controls. It can reach under the graph
    pane, which then stops above it (main.ts sets --pane-bottom). */

@@ -15,6 +15,7 @@
  * shows, every minute, to see it go.
  */
 import { BUCKET } from "../map/layers/wapor";
+import { cornerWarning } from "./corner-warning";
 import { quietFetch } from "./load-bar";
 
 const PROBE_URL = `${BUCKET}/L1-AETI-A/WAPOR-3.L1-AETI-A.2018.tif`;
@@ -26,11 +27,7 @@ const WHILE_SHOWN_MS = 60_000;
 
 /** Adds the (hidden) warning to the page's bottom-left corner and starts checking. */
 export function initSlowServerCheck() {
-  const warning = document.createElement("div");
-  warning.className = "slow-server";
-  warning.setAttribute("role", "status");
-  warning.hidden = true;
-  document.body.append(warning);
+  const warning = cornerWarning();
 
   let checking = false;
   let lastCheck = -Infinity;

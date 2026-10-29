@@ -1,9 +1,18 @@
 /*
- * The Local panel's charts: for now the time series of the WaPOR variable picked in
- * the legend, at the selected point, over WaPOR's whole record (point-series.ts). It's
- * the Basin view's chart (basin/timeseries.ts): the record above, with the date range
- * as a band to drag, and the range up close below next to each dekad's average over
- * the years. The series fills in as it's read, the selected period first.
+ * The Local panel's charts: the time series of the WaPOR variable on the map, at the
+ * selected point, over WaPOR's whole record (point-series.ts). It's the Basin view's
+ * chart (basin/timeseries.ts): the record above, with the date range as a band to drag,
+ * and the range up close below next to each dekad's average over the years. The series
+ * fills in as it's read, the selected period first. Without a map with time on the map
+ * (only GAEZ's, or vector maps), the card says so and nothing is read.
+ *
+ * A GAEZ map on the map has its own card above it, the harvested area by crop at the
+ * point (crop-card.ts).
+ *
+ * Below it the dams' cards (dam-card.ts): all of them, and the one selected, a card per
+ * attribute. As a card of the Country and Basin panels does, hovering one shows its map
+ * (the dams, by its attribute) and pinning it checks that in the legend. A card is only
+ * ever pinned by a click.
  */
 import { initTimeseries } from "../basin/timeseries";
 import { fmtArea, unitFactor, waporUnit, waporUnitsFor, waporVariable, type WaporUnits, type WaporVariable } from "../map/layers/wapor";
@@ -14,29 +23,45 @@ import { coveringDekads, type DayRange, type DekadRange, type View } from "../to
 import { setProgress } from "../panels/load-bar";
 import { loadPointSeries, waporPixelArea, type PointSeries } from "./point-series";
 import { initYearBars, type YearBar } from "./year-bars";
+import { initDamCards } from "./dam-card";
+import { initCropCard, type CropMap } from "./crop-card";
+import type { GaezMap } from "../map/layers/gaez";
+import type { Dams } from "./vector-maps";
 
 interface LocalPanelOptions {
-  variable: WaporVariable;
+  /** The WaPOR variable on the map (null: none, no map with time). */
+  variable: WaporVariable | null;
   /** A period chosen on the chart. */
   setRange(range: DekadRange): void;
   /** The same, in days (a bar of the year chart: the same days in another year). */
   setDays(days: DayRange): void;
   /** Other units picked on the chart (its y axis title goes through them). */
   onUnits(units: WaporUnits): void;
+  /** A card's vector map (by id) and attribute (none: as it is), previewed on the map while the card is hovered (null: none). */
+  previewMap(id: string | null, attribute?: string): void;
+  /** …and checked in the legend, so, the card pinned. */
+  addMap(id: string, attribute?: string): void;
 }
 
 export interface LocalPanel {
   setView(view: View): void;
   setSelection(selection: Selection): void;
-  setVariable(variable: WaporVariable): void;
+  /** The WaPOR variable on the map (null: none, no map with time). */
+  setVariable(variable: WaporVariable | null): void;
+  /** The GAEZ map checked (null: none), and the crop of those by crop. */
+  setGaez(gaez: GaezMap | null, crop: string): void;
   setRange(days: DayRange): void;
   /** Show values per day, month, year or in total, per m² or over the pixel (as the legend). */
   setUnits(units: WaporUnits): void;
+  /** The dams, once loaded (their card). */
+  setDams(dams: Dams): void;
+  /** The vector maps on the map, by id, each with its attribute (their cards are marked). */
+  setMapped(mapped: Map<string, string>): void;
 }
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
 
-export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPanelOptions): LocalPanel {
+export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMap, addMap }: LocalPanelOptions): LocalPanel {
   const $ = (id: string) => document.getElementById(id)!;
   const message = $("lp-message");
   const section = $("lp-series");
@@ -47,10 +72,51 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   // A ratio (WP): its value over the selected days matters most, so first by year.
   const barsSection = $("lp-bars");
   const updateBars = initYearBars($("lp-bars-chart"), ({ start, end }) => setDays({ start, end: Math.min(end, MAX_DAY) }));
+  // GAEZ's crops: as a dams' card, hovered it previews its map ("gaez:<id>:<crop>"), and a
+  // bar clicked or the card pinned checks it.
+  const cropsSection = $("lp-crops");
+  const cropPin = ({ map, crop }: CropMap) => `gaez:${map.id}:${crop}`;
+  const cropCard = initCropCard(
+    cropsSection,
+    (shown) => preview(shown && cropPin(shown)),
+    (shown) => addMap(mapOf(cropPin(shown)).id, shown.crop),
+  );
+  let gaez: { map: GaezMap | null; crop: string } = { map: null, crop: "" };
+  function syncCrops() {
+    cropCard.set(gaez.map, gaez.crop, state.lngLat, state.view === "local");
+    markPinned(); // (only a card on show)
+  }
 
-  // A card (the year bars, the series) pinned with a click stays when the panel folds,
-  // as in the other views (foldable.ts keeps the .pinned one); it has no map to drive.
-  const cards = [barsSection, section];
+  // The dams' cards ("dams", "dams:<attribute>"): hovered (after a moment, as
+  // map-drivers.ts's cards; moving on to another at once), the map shows the dams so.
+  const damsEl = $("lp-dams");
+  const damCards = initDamCards(damsEl, $("lp-tooltip"));
+  /** A card's map and attribute (a GAEZ map's: its crop). */
+  function mapOf(pin: string) {
+    const parts = pin.split(":");
+    const [id, attribute] = parts[0] === "gaez" ? [`gaez:${parts[1]}`, parts[2]] : parts;
+    return { id, attribute: attribute as string | undefined };
+  }
+  let hoverTimer = 0;
+  let previewing: string | null = null;
+  function preview(pin: string | null) {
+    clearTimeout(hoverTimer);
+    if (pin === previewing) return;
+    const apply = () => {
+      previewing = pin;
+      if (pin) previewMap(mapOf(pin).id, mapOf(pin).attribute);
+      else previewMap(null);
+    };
+    if (pin && previewing) apply();
+    else hoverTimer = window.setTimeout(apply, 120);
+  }
+  damsEl.addEventListener("pointerover", (e) => preview((e.target as Element).closest<HTMLElement>("[data-pin]")?.dataset.pin ?? null));
+  damsEl.addEventListener("pointerleave", () => preview(null));
+
+  // A card (the crops, the year bars, the series, the dams') pinned with a click stays when the panel
+  // folds, as in the other views (foldable.ts keeps the .pinned one); a dam card's checks
+  // the dams in the legend, by its attribute.
+  const cards = [cropsSection, barsSection, section, ...damsEl.querySelectorAll<HTMLElement>("[data-pin]")];
   let pinned: string | null = null;
   function markPinned() {
     for (const el of cards) {
@@ -61,6 +127,11 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   }
   function setPinned(next: string | null) {
     pinned = next;
+    if (next?.startsWith("dams")) addMap(mapOf(next).id, mapOf(next).attribute);
+    if (next === "crops") {
+      const { id, attribute } = mapOf(cropPin(cropCard.selection()));
+      addMap(id, attribute);
+    }
     markPinned();
   }
   const body = $("lp-body");
@@ -70,7 +141,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
     if (!id) return;
     if (target.closest("[data-unpin]")) setPinned(null);
     // Using its chart pins it, but never unpins it (a drag on it ends in a click too).
-    else if (target.closest("#lp-overview, #lp-zoom, #lp-bars-chart")) setPinned(id);
+    else if (target.closest("#lp-overview, #lp-zoom, #lp-bars-chart, #lp-crops .cc-chart")) setPinned(id);
     else setPinned(pinned === id ? null : id);
   });
   body.addEventListener("keydown", (e) => {
@@ -86,6 +157,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   const state = {
     view: "country" as View,
     lngLat: null as LngLat | null,
+    feature: null as Selection["feature"],
     variable,
     days: null as DayRange | null,
     units: { per: "day", pixel: false } as WaporUnits,
@@ -97,16 +169,16 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   let loading: AbortController | null = null;
   let loadingKey = "";
 
-  /** Read the series again if the point or variable changed (only in the Local view). */
+  /** Read the series again if the point or variable changed (only in the Local view, with a variable on the map). */
   function sync() {
     const { lngLat, variable } = state;
-    const key = state.view === "local" && lngLat ? `${variable.id} ${lngLat}` : "";
+    const key = state.view === "local" && lngLat && variable ? `${variable.id} ${lngLat}` : "";
     if (key === loadingKey) return render();
     loadingKey = key;
     loading?.abort();
     series = null;
     pixelArea = null;
-    if (!lngLat || !key) {
+    if (!lngLat || !variable || !key) {
       status = { kind: "idle" };
       return render();
     }
@@ -151,21 +223,24 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
   function render() {
     clearTimeout(timer);
     timer = 0;
-    const { variable } = state;
     message.classList.toggle("error", status.kind === "error");
     message.textContent = status.kind === "error" ? status.message : "";
     message.hidden = !message.textContent;
     // How many of the dekads have been read, on the load bar.
     setProgress("local-series", status.kind === "loading" && series ? series.loaded / series.dekads.length : null);
 
-    // The series card is always there; until there's a point, just a word to pick one.
+    // The series card is always there; without a map with time, or until there's a point, just a word.
     empty.hidden = status.kind !== "idle";
+    empty.textContent = state.variable
+      ? "Click the map, or the title to type coordinates, to see the time series there."
+      : "None of the maps on the map has time. Check one that has in the legend, such as one of WaPOR's, to see its time series here.";
     for (const el of [caption, $("lp-overview"), $("lp-zoom"), key]) el.hidden = !series;
     const ratio = series?.ratio && state.days ? yearBars(series, state.days) : null;
     barsSection.hidden = !ratio;
     markPinned(); // (only a card on show)
     $("lp-ts-title").textContent = ratio ? "Per dekad" : "Time series";
     if (ratio) {
+      const { variable } = series!;
       const [num, den] = variable.parts!.map((p) => waporVariable(p.id));
       // A part's total: its unit without the per day.
       const totalUnit = (v: WaporVariable) => v.unit.replace(/\/day$/, "");
@@ -188,7 +263,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
       updateBars(null);
     }
     if (!series) return updateChart(null);
-    const { dekads } = series;
+    const { dekads, variable } = series;
     const { units } = state;
     const unit = waporUnit(variable, units);
     const total = units.per === "total";
@@ -232,7 +307,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
 
   /** The units after the current ones, in the legend's menu's order (of those the variable has). */
   function nextUnits() {
-    const all = waporUnitsFor(state.variable);
+    const all = waporUnitsFor(state.variable!);
     const i = all.findIndex((u) => u.per === state.units.per && u.pixel === state.units.pixel);
     return all[(i + 1) % all.length];
   }
@@ -247,18 +322,34 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits }: LocalPa
 
   return {
     setView(view) {
-      // Opening the Local view pins the series card.
-      if (view === "local" && state.view !== "local") setPinned("series");
       state.view = view;
       sync();
+      syncCrops();
     },
     setSelection(selection) {
       state.lngLat = selection.lngLat;
+      const { feature } = selection;
+      const dam = feature?.map === "dams" ? feature.index : null;
+      state.feature = feature;
+      damCards.setSelected(dam);
       sync();
+      syncCrops();
+    },
+    setDams: (dams) => damCards.setData(dams),
+    setMapped(mapped) {
+      // The overview with the dams on the map at all, an attribute's card with them by it.
+      for (const el of damsEl.querySelectorAll<HTMLElement>("[data-pin]")) {
+        const { id, attribute } = mapOf(el.dataset.pin!);
+        el.classList.toggle("mapped", mapped.has(id) && (!attribute || mapped.get(id) === attribute));
+      }
     },
     setVariable(variable) {
       state.variable = variable;
       sync();
+    },
+    setGaez(map, crop) {
+      gaez = { map, crop };
+      syncCrops();
     },
     setRange(days) {
       state.days = days;

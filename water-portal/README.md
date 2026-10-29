@@ -7,7 +7,15 @@ on top. In the Local view, the map shows a WaPOR variable (actual or reference e
 selected range, to the day, added up from WaPOR's dekadal, monthly and annual rasters, and a play
 button moves the range forward as an animation; for a single dekad, a slider in its
 legend hides pixels whose
-NDVI input is gap-filled (no valid satellite observation for some dekads). In the Basin view, a panel
+NDVI input is gap-filled (no valid satellite observation for some dekads). In its place the map can show
+one of GAEZ v5's cropland maps, which have no time: cropland, irrigated and rain-fed cropland (~1 km), and
+2020's harvested area of a crop, irrigated, rain-fed or both (~10 km), all as % of the pixel's area; with
+no map that has time on it, the date range fades away. Vector maps can go on top
+of it, picked in the same legend: for now AQUASTAT's dams, as circles or 3D bars by their reservoir
+capacity, area or height, or coloured by the year completed, their purpose or whether their location
+was checked; hovering one shows its details, and clicking one (or, a dam picked, searching for another
+in the Local panel's title) selects it, at its own coordinates: the panel's dam cards then show it among all
+the dams, a card per attribute. In the Basin view, a panel
 built like the Country view's has three topics (rain and evaporation, water left, discharge), each
 with number tiles and charts about the selected sub-basin, major basin or the World: the highest
 and lowest major basins (with the selected sub-basin on top and the World below) against the
@@ -44,6 +52,7 @@ Other commands:
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
 | `npm run rivers` | Rebuild the river network per major basin and the sub-basins' middles for the Basin view's water balance scheme (`public/data/rivers/`, `public/data/sub-basin-middles.json`; from `../river-flow-poc`'s `rivers.bin` and `nodes.json`) |
+| `npm run dams` | Rebuild the dams for the Local view's Dams map (`public/data/dams.json`; from the CSV FAO's Water Portal loads for its Infrastructure > Dams layer) |
 | `npm run tiles` | Rebuild the country and border tiles (needs `tippecanoe`; downloads ~220 MB the first time) |
 
 ## Project layout
@@ -67,6 +76,9 @@ water-portal/
 │   ├── build-tiles.sh      Download M49 polygons and UN boundary lines → tippecanoe → public/tiles/
 │   ├── build-lists.mjs     Country / basin / sub-basin lists for the top bar → public/data/
 │   ├── build-country-info.mjs  Each country's region (UNSD M49) and centre → public/data/
+│   ├── build-dams.mjs      AQUASTAT's dams (with coordinates), a list per field → public/data/dams.json
+│   ├── dam-names.mjs       Mends the CSV's names that lost their accented letters ("Hirfanl?"), from AQUASTAT's regional Excel files and the words spelled right
+│   ├── build-model.py      PCP, AETI and the water balance model's Q and ΔS for the Basin view → public/data/model/
 ├── data/                   Source data: downloaded boundaries (not committed) and
 │                           fao_sb_ids.json (sub-basin routes and areas, from fao-wapor-discharge)
 └── src/                    The application code
@@ -89,6 +101,7 @@ water-portal/
     │       ├── basins.ts     SDG 6 major basins and sub-basins: areas + outlines (sub-basins only shade the hovered one and those upstream)
     │       ├── water.ts      Lakes (HydroLAKES) and rivers
     │       ├── wapor.ts      WaPOR v3 ETIa for a range (Local view): one COG or a sum
+    │       ├── gaez.ts       GAEZ v5's cropland and harvested area maps (Local view), drawn by wapor.ts's layer
     │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
@@ -99,8 +112,17 @@ water-portal/
     │       ├── haze.ts       A heat shimmer over the map, as strong as a grid says
     │       ├── basin-effects.ts  The Basin view's rain, vapour and shimmer, and the rasters on the ground
     │       └── marker.ts     The click marker
+    ├── local/              Local view: the legend's maps and the panel's charts at the selected point
+    │   ├── local-maps.ts   The legend: a checklist of WaPOR's variables and the vector maps, a section per map, the points' tooltips
+    │   ├── vector-maps.ts  The vector maps (Dams): their data file, attributes and how each is drawn, tooltips
+    │   ├── local-panel.ts  The panel: the mapped variable's time series and the same days every year, the crop and dam cards
+    │   ├── crop-card.ts    GAEZ's card: the harvested area by crop at the point; drives the map as a dam card
+    │   ├── dam-card.ts     The dam cards: the selected dam, and a card per attribute (all the dams, the selected one among them)
+    │   ├── point-series.ts The series at the point (read from the COGs, or FAO's zonal statistics)
+    │   ├── cog-pixel.ts    A lean reader of one pixel of a COG
+    │   └── year-bars.ts    The same days every year, as bars
     ├── basin/              Basin view: the water balance of the selected sub-basin
-    │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; fao_wapor_discharge.portal), and a network's series for the panel
+    │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; scripts/build-model.py), and a network's series for the panel
     │   ├── variables.ts    PCP / AETI / Q / ΔS: labels, units, colour scales
     │   ├── timeseries.ts   Time series charts (drag to choose the period)
     │   ├── sankey.ts       Sankey diagram of the network's water balance
@@ -127,12 +149,15 @@ water-portal/
     │   ├── shape-style.ts  How circles and bars look: a menu on their key (colours, full size)
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
     │   ├── load-bar.ts     Load bar under the graph pane's heading while anything loads
-    │   └── slow-server.ts  Warning in the bottom-left corner when the connection to Google Cloud is slow
+    │   ├── corner-warning.ts The bottom-left corner's warnings, one above the other
+    │   ├── slow-server.ts  Warning there when the connection to Google Cloud is slow
+    │   └── cors-check.ts   Warning there when a server's data is blocked by the browser (no CORS headers)
     ├── toolbar/
     │   ├── dekads.ts       Dates as dekad numbers (3 per month, 36 per year), and as day numbers
-    │   ├── place-picker.ts Region / country, basin / sub-basin search or coordinates, per view
+    │   ├── place-picker.ts Region / country, basin / sub-basin search, or a dam or coordinates, per view
     │   ├── tree-combobox.ts  Text field with a dropdown tree that narrows as you type (search keeps whole branches)
     │   ├── country-tree.ts Regions → countries
+    │   ├── dam-tree.ts     Countries → dams (the Local panel's search)
     │   ├── basin-tree.ts   Major basins → sub-basins, nested the way the rivers run
     │   ├── range-rules.ts  Which ranges each view allows, and how they're adjusted
     │   ├── range-slider.ts The two-handle date range slider
@@ -177,6 +202,47 @@ water-portal/
   of drawing them (the checklist says which): a fill, circles, 3D bars, and the scheme's discharge
   lines (Basin). Checking a map replaces the one drawn the
   same way; a previewed or pinned chart's map takes its place for the while.
+- **Map layers** (Local view, [src/local/local-maps.ts](src/local/local-maps.ts)): the same legend,
+  its checklist under groups: WaPOR's variables and GAEZ's cropland maps (drawn as a raster, one
+  at a time: checking another replaces it; a WaPOR variable's section holds the WaPOR legend, a
+  GAEZ map's its fixed colours and, for harvested area, a menu of the crops) and the vector maps
+  ([src/local/vector-maps.ts](src/local/vector-maps.ts); for now Infrastructure > Dams). A vector
+  map shows one attribute at a time, a menu under its title; an amount is drawn as circles or 3D
+  bars (the icons), a value or classes as circles of one size, coloured, the classes' swatches
+  switching them off. Its data are one JSON file of columns, loaded all at once the first time it's
+  shown (not vector tiles: ~14,000 points are 0.3 MB gzipped, and the legend's sizes, ranges and
+  classes are over all of them). Taken off the map, the raster stops loading, and the play button
+  only moves the range on. Only WaPOR's variables have time: without one on the map (GAEZ's maps,
+  the dams, nothing), the date range fades out and is gone until one is back.
+- **GAEZ v5** ([src/map/layers/gaez.ts](src/map/layers/gaez.ts)): read straight from FAO's bucket, as
+  WaPOR's. Irrigated cropland is LR-LCC's class LC12, the same raster as GAEZ's "share of irrigated
+  land" (LR-IRR: of the pixel, not of the cropland as its catalogue says); rain-fed is LC02 − LC12.
+  Harvested area (ha per pixel, RES06-HAR) is shown as % of the pixel's area, of the full-resolution
+  pixel (the overviews average it). The bucket sends CORS headers on GET but not HEAD, so the map only
+  reads with GET. A server that sends none (the GAEZ v4 bucket) is caught by
+  [src/panels/cors-check.ts](src/panels/cors-check.ts), with a warning bottom left.
+- **The Local panel follows the raster on the map**: its time series is of the WaPOR variable
+  checked in the legend; with no map with time (a GAEZ map, only the dams, or nothing) the card says
+  to check one, and nothing is read. GAEZ's crops have a card of their own, always there
+  ([src/local/crop-card.ts](src/local/crop-card.ts)): each crop's harvested area in 2020 in the 5′
+  pixel at the point (RES06-HAR), largest first, on the checked GAEZ map's supply (all, irrigated
+  or rain-fed; none checked: all). Like a dam card it drives the map: hovered, its GAEZ map shows
+  in the raster's place, without changing the series or the range (a bar hovered only shows its
+  value in the headline); a bar clicked checks that crop's harvested area in the legend, the card
+  pinned its map.
+- **A dam as the point** (Local view): a click on a dam's circle or bar selects the dam
+  (`feature` in [src/selection.ts](src/selection.ts)) at its own coordinates, not where the click
+  was, and the panel's title reads "point · dam"; the point opens the coordinates' fields, the dam's name a
+  search of the dams by country and name ([src/toolbar/dam-tree.ts](src/toolbar/dam-tree.ts)) (only
+  there once a dam is picked: without one the title opens just the fields), and
+  its × goes from the dam to its point, then to none. The dam cards
+  ([src/local/dam-card.ts](src/local/dam-card.ts)) are always there: one with the selected dam's
+  fields, then one per attribute of the Dams map, in the legend's order: capacity, area, height and
+  year as strips of how many dams have each value (the median dashed), purpose and location checked
+  as shares per class in the map's colours, the selected dam marked on each. Like a Country or
+  Basin card each drives the map: hovered, the dams show on top by its attribute; pinned, they're
+  checked in the legend with that attribute (selecting a dam pins the first card, the dams as
+  they are).
 - **A chart's maps** (`also` in [src/country/cards.ts](src/country/cards.ts) and
   [src/basin/stats-cards.ts](src/basin/stats-cards.ts)): most charts bring more maps along
   with their own, each drawn its own way, so the map shows the chart's variables together:
@@ -405,13 +471,13 @@ water-portal/
   best tilted (ctrl-drag). The tuning pane has sliders for their look too, a colour menu and **Copy
   settings**; the defaults are `RAIN` and `VAPOUR` in `effects-map.ts`.
 - **The Basin view's data** (PCP, AETI, and the water balance model's Q and ΔS) are files
-  precomputed by [fao-wapor-discharge](../../fao-wapor-discharge)'s
-  `python -m fao_wapor_discharge.portal --sub-basins public/data/sub-basins.json --out-dir public/data/model`
-  (about 15 min), which downloads all PCP and AETI from FAO's BigQuery proxy, runs the model
+  precomputed by `python scripts/build-model.py --sub-basins public/data/sub-basins.json --out-dir public/data/model`
+  (about 15 min, in a Python environment with [fao-wapor-discharge](../../fao-wapor-discharge)
+  installed), which downloads all PCP and AETI from FAO's BigQuery proxy, runs that model
   for every outlet network (as its pipeline does) and writes `latest.json` (the dekads
   covered), `subbasins.bin` (per sub-basin: PCP and AETI), `majors.bin` (per major basin: Q
   at its outlets, ΔS summed) and `major/<id>.bin` (per sub-basin: Q and ΔS), all over the
-  same dekads; the format is in `portal.py` and `src/basin/model.ts`. The app queries
+  same dekads; the format is in `scripts/build-model.py` and `src/basin/model.ts`. The app queries
   nothing itself (only the Country view's AQUASTAT data is read live). Meant to run
   after each new dekad (a scheduled job, not set up yet); a full run, not an append,
   since a new calendar year moves the model's warmup and changes earlier dekads. The

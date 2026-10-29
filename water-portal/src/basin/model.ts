@@ -2,7 +2,7 @@
  * The Basin view's data: WaPOR L1 precipitation (PCP) and actual evapotranspiration
  * (AETI), and the water balance model's discharge (Q) and storage change (ΔS) from them.
  *
- * All precomputed by fao_wapor_discharge.portal, which downloads the WaPOR zonal
+ * All precomputed by scripts/build-model.py, which downloads the WaPOR zonal
  * statistics, runs the model for every outlet network and writes, under MODEL_FILES
  * (see the README),
  *
@@ -12,7 +12,7 @@
  *   major/<id>.bin     per sub-basin of a major basin, Q and ΔS per dekad.
  *
  * Every series runs over the same dekads, those in latest.json. The .bin format: see
- * parseFile (and portal.py). Nothing is queried here: the files are all there is.
+ * parseFile (and scripts/build-model.py). Nothing is queried here: the files are all there is.
  *
  * The water balance panel (switched off for now: MODEL_SHOWN in water-balance.ts) shows a
  * sub-basin and everything upstream of it: networkSeries, from the same files.
