@@ -65,7 +65,8 @@ water-portal/
 ├── vite.config.ts          Dev server / build settings (Vite)
 ├── public/                 Copied as-is into the site
 │   ├── data/               Country, major basin and sub-basin lists (name, ID, bounding
-│   │   │                   box; for sub-basins also their major basin, where they drain and area)
+│   │   │                   box; for sub-basins also their major basin, where they drain and area;
+│   │   │                   sub-basins.json is by column: { id: [...], name: [...], … })
 │   │   ├── rivers/         The river network per major basin (<id>.bin), for the water balance scheme
 │   │   ├── sub-basin-middles.json  A point inside each sub-basin, for its circle or bar
 │   │   └── model/          Precomputed Q and ΔS (not in git; see Notes: the water balance model)
@@ -79,11 +80,22 @@ water-portal/
 │   ├── build-dams.mjs      AQUASTAT's dams (with coordinates), a list per field → public/data/dams.json
 │   ├── dam-names.mjs       Mends the CSV's names that lost their accented letters ("Hirfanl?"), from AQUASTAT's regional Excel files and the words spelled right
 │   ├── build-model.py      PCP, AETI and the water balance model's Q and ΔS for the Basin view → public/data/model/
+│   └── lib.mjs             What the scripts share: the project folder, rounding, a checked fetch, writing JSON
 ├── data/                   Source data: downloaded boundaries (not committed) and
 │                           fao_sb_ids.json (sub-basin routes and areas, from fao-wapor-discharge)
 └── src/                    The application code
     ├── main.ts             Entry point: starts the map and the top bar, connects them
     ├── selection.ts        The current selection (point, country, basin)
+    ├── lib/                Small helpers used across the folders
+    │   ├── dom.ts          byId (an element by id, or an error naming it), reduceMotion
+    │   ├── html.ts         esc: text as HTML
+    │   ├── math.ts         clamp, lerp
+    │   ├── scale.ts        Round steps and ticks for chart axes
+    │   ├── csv.ts          Rows as a CSV file the browser saves
+    │   ├── memo.ts         A memoised promise that forgets a failure; keeping the last few entries of a map
+    │   ├── schedule.ts     perFrame: a draw once per animation frame
+    │   ├── drag.ts         A pointer drag, its listeners taken off at the end
+    │   └── popover.ts      What closes a popup: Escape, a press elsewhere, the focus leaving, a resize
     ├── map/
     │   ├── map.ts          MapLibre globe + deck.gl overlay; layer order, view, clicks
     │   ├── theme.ts        Map colours (light and dark)
@@ -100,13 +112,17 @@ water-portal/
     │       ├── borders.ts    Country borders (UN lines; disputed ones dashed)
     │       ├── basins.ts     SDG 6 major basins and sub-basins: areas + outlines (sub-basins only shade the hovered one and those upstream)
     │       ├── water.ts      Lakes (HydroLAKES) and rivers
-    │       ├── wapor.ts      WaPOR v3 ETIa for a range (Local view): one COG or a sum
+    │       ├── wapor-variables.ts  WaPOR v3's variables: the catalogue, units, colours, where the rasters are
+    │       ├── wapor-period.ts  A range as the rasters it's added up from, and whether they're published
+    │       ├── wapor-tiles.ts   The rasters and tiles read, decoded, kept and added up
+    │       ├── wapor.ts      The WaPOR raster on the map (Local view): the view's tiles and level, the layer, the values in view
     │       ├── gaez.ts       GAEZ v5's cropland and harvested area maps (Local view), drawn by wapor.ts's layer
     │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
     │       ├── wapor-shader.ts  GPU colour map for the WaPOR raster
     │       ├── basin-scheme.ts  The water balance scheme: discharge lines, mouth arrows, particles
     │       ├── river-particles.ts  Particles streaming down the rivers (river-flow-poc's wind map)
+    │       ├── effects-common.ts  What rain, vapour and haze share: the grid texture, GLSL, a uniform block from its types, the layer base
     │       ├── rain.ts       Rain falling as densely as a grid says (river-flow-poc's rain page)
     │       ├── vapour.ts     Vapour rising as densely as a grid says, transpiration and evaporation
     │       ├── haze.ts       A heat shimmer over the map, as strong as a grid says
@@ -120,6 +136,7 @@ water-portal/
     │   ├── dam-card.ts     The dam cards: the selected dam, and a card per attribute (all the dams, the selected one among them)
     │   ├── point-series.ts The series at the point (read from the COGs, or FAO's zonal statistics)
     │   ├── cog-pixel.ts    A lean reader of one pixel of a COG
+    │   ├── wapor-raster.ts The WaPOR raster on the map: its legend, the checks, the colour stretch, playback
     │   └── year-bars.ts    The same days every year, as bars
     ├── basin/              Basin view: the water balance of the selected sub-basin
     │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; scripts/build-model.py), and a network's series for the panel
