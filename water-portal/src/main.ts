@@ -9,7 +9,7 @@ import { NOTHING, selection, type SelectedFeature, type Selection, type Selectio
 import { initLocalMaps, type LocalMaps } from "./local/local-maps";
 import { initLocalPanel } from "./local/local-panel";
 import { initWaporRaster } from "./local/wapor-raster";
-import { damsData } from "./local/vector-maps";
+import { damsData, type Dams } from "./local/vector-maps";
 import { makeResizable } from "./panels/floating";
 import { makeFoldable } from "./panels/foldable";
 import { initLayersMenu } from "./panels/layers-menu";
@@ -25,6 +25,7 @@ import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-
 import { initRangePlayer } from "./toolbar/range-player";
 import { initToolbar, type Toolbar, type ToolbarState } from "./toolbar/toolbar";
 import { isCountryYear, type DayRange, type View } from "./toolbar/range-rules";
+import { readUrlState, upgradeMapHash, writeUrlState } from "./url-state";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/toolbar.css";
@@ -42,6 +43,8 @@ initSlowServerCheck();
 initCorsCheck();
 
 const dark = initThemeSwitch();
+upgradeMapHash();
+const opened = readUrlState(); // (applied once everything is wired up: see the end)
 
 // Hover: what's under the pointer (picked from the map as drawn: at once) is passed to
 // the panels, and the map outlines what a click there would select (see selectPoint):
@@ -215,6 +218,7 @@ const basinStats = initBasinStats({
   upstreamOf,
   setRange: (range) => toolbarApi?.setRange(range),
   onTimed: (has) => setTimed("basin", has),
+  onPicks: () => syncUrl(),
 });
 waterMap.onFlow((flow) => basinStats.flow(flow));
 // Country view: AQUASTAT statistics for the selected country (panel, map colours).
@@ -226,6 +230,7 @@ const countryPanel = initCountryPanel({
   canSelect: isCountryYear,
   onLatestYear: (year) => toolbarApi?.setCountryLastYear(year),
   setYear: (year) => toolbarApi?.setRange({ start: mk(year, 0, 0), end: mk(year, 0, 0) + 35 }),
+  onPicks: () => syncUrl(),
 });
 const picker = initPlacePicker({
   countries,
@@ -288,7 +293,34 @@ selection.subscribe((s) => {
   basinStats.setSelection(s);
   localPanel.setSelection(s);
   void refreshHover();
+  syncUrl();
 });
+
+// The URL follows the state (url-state.ts): written once per frame at most.
+let urlTimer = 0;
+function syncUrl() {
+  if (!toolbarApi) return;
+  cancelAnimationFrame(urlTimer);
+  urlTimer = requestAnimationFrame(() => {
+    const s = selection.get();
+    const { days } = toolbarApi!.state;
+    const panel = view === "country" ? countryPanel.picks() : view === "basin" ? basinStats.picks() : null;
+    writeUrlState({
+      view,
+      country: s.country?.m49,
+      region: s.region?.code,
+      basin: s.subBasin ? undefined : s.majorBasin?.id,
+      sub: s.subBasin?.id,
+      point: view === "local" ? (s.lngLat ?? undefined) : undefined,
+      dam: view === "local" && s.feature?.map === "dams" ? s.feature.index : undefined,
+      days,
+      topic: view === "country" ? countryPanel.picks().topic : undefined,
+      scope: view === "basin" && s.subBasin && basinStats.scope() === "catchment" ? "catchment" : undefined,
+      pin: panel?.pin ?? null,
+      maps: panel?.maps,
+    });
+  });
+}
 
 function loadList<T>(name: string): Promise<T[]> {
   return loadData<T[]>(name);
@@ -413,15 +445,20 @@ const localPanel = initLocalPanel({
   addMap: (id, attribute) => localMaps?.add(id, attribute),
 });
 // The dams, for the Local panel's search and card (loaded on opening the Local view).
-let damsLoading: Promise<void> | null = null;
+let damsLoading: Promise<Dams> | null = null;
 function loadDams() {
   damsLoading ??= damsData().then(
     (dams) => {
       picker.setDams(dams);
       localPanel.setDams(dams);
+      return dams;
     },
-    () => void (damsLoading = null),
+    (err: Error) => {
+      damsLoading = null;
+      throw err;
+    },
   );
+  damsLoading.catch(() => {});
 }
 
 // In Country and Basin, only the range moves on (range-player.ts).
@@ -464,6 +501,7 @@ function onToolbarChange({ view: newView, range, days }: ToolbarState) {
   localMaps?.setView(view);
   if (view === "local") loadDams();
   waporRange = days;
+  syncUrl();
   if (rangePlaying) return raster.showPixelArea();
   rangePlayer.stop();
   raster.show(view === "local" ? days : null);
@@ -473,6 +511,37 @@ selection.set(NOTHING);
 toolbarApi = initToolbar(onToolbarChange, () => (raster.playable() ? raster.togglePlay() : rangePlayer.toggle()));
 onToolbarChange(toolbarApi.state);
 toolbarApi.setTimeless(!(timed.local && timed.basin));
+
+// What the URL opened with (url-state.ts): the view and range, then the selection (by
+// name, as the pickers do, without flying: the map's place is the URL's), the panel's
+// topic or scope, its pin and maps.
+function openUrlState() {
+  if (opened.view) toolbarApi!.setView(opened.view);
+  if (opened.days) toolbarApi!.setDays(opened.days);
+  const country = opened.country !== undefined ? countries.find((c) => c.m49 === opened.country) : undefined;
+  const region = opened.region !== undefined ? countryInfo.regions.find((r) => r.code === opened.region) : undefined;
+  const sub = opened.sub !== undefined ? subBasins.find((b) => b.id === opened.sub) : undefined;
+  const major = basins.find((b) => b.id === (sub ? sub.majorBasin : opened.basin));
+  if (country) selection.set({ ...NOTHING, source: "country", country: { m49: country.m49, name: country.name } });
+  else if (region) selection.set({ ...NOTHING, source: "country", region: { code: region.code, name: region.name } });
+  else if (major) {
+    selection.set({ ...NOTHING, source: "basin", majorBasin: { id: major.id, name: major.name }, subBasin: sub ? { id: sub.id, name: sub.name } : null });
+  }
+  if (opened.scope === "catchment") basinStats.setScope("catchment");
+  if (opened.view === "country") countryPanel.setPicks({ topic: opened.topic, pin: opened.pin, maps: opened.maps });
+  if (opened.view === "basin") basinStats.setPicks({ pin: opened.pin, maps: opened.maps });
+  // The point (and its dam, once the dams are loaded): everything it lies in is looked up.
+  if (opened.view === "local" && opened.point) {
+    const point = opened.point;
+    if (opened.dam === undefined) return void selectPoint(point, "coordinates");
+    const dam = opened.dam;
+    loadDams();
+    void damsLoading?.then((dams) => {
+      if (dam < dams.count && selection.get().lngLat === null) void selectPoint([dams.lon[dam], dams.lat[dam]], "coordinates", { map: "dams", index: dam, name: dams.name[dam] || "Unnamed dam" });
+    });
+  }
+}
+openUrlState();
 // The Basin view's range ends at the latest dekad of the model output. Without the
 // output (not built yet, or unreachable) it isn't limited; Q and ΔS then say so.
 loadModelFiles().then(

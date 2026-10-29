@@ -232,6 +232,11 @@
         <!-- Basin statistics: charts that each drive the map (src/basin/basin-stats.ts). -->
         <section class="bs-section" id="bs-section" hidden>
           <h3 class="bs-heading" id="bs-heading"></h3>
+          <!-- With a sub-basin selected: its statistics alone, or with everything upstream of it. -->
+          <div class="wb-vars cp-topics bs-scope" id="bs-scope" role="tablist" aria-label="Statistics of" hidden>
+            <button role="tab" data-scope="sub" aria-selected="true">The sub-basin</button>
+            <button role="tab" data-scope="catchment" aria-selected="false">With everything upstream</button>
+          </div>
           <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
           <p class="wb-message" id="bs-message" hidden></p>
           <div class="wb-stats cp-stats" id="bs-stats"></div>

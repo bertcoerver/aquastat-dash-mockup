@@ -34,7 +34,7 @@ import type { DekadRange, View } from "../toolbar/range-rules";
 import { TOPICS, type Card, type Ctx, type MapClass, type MapSpec, type Region, type Tile, type TopicDef } from "./cards";
 import { WORLD, latestYear, loadTopic, periodLabel, type Topic } from "./data";
 import type { Driver } from "../panels/map-drivers";
-import { initPanelCore, type PanelLayer } from "../panels/stat-panel";
+import { initPanelCore, type PanelLayer, type PanelPicks } from "../panels/stat-panel";
 import { slideSelection } from "../panels/segmented";
 import { SHAPE_NOTES, SHAPES, initShapePicks, shapeOptions, shapeSizes, switchShape, type MapShapes, type Shape } from "../panels/shape-switch";
 import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } from "../panels/shape-style";
@@ -62,10 +62,16 @@ interface Options {
   canSelect: (year: number) => boolean;
   /** AQUASTAT's latest year, each time a topic's data are loaded. */
   onLatestYear: (year: number) => void;
+  /** The pin or the maps checked changed (for the URL). */
+  onPicks?: () => void;
 }
 
 export interface CountryPanel {
   setView(view: View): void;
+  /** The topic shown, its pin and the maps checked (for the URL). */
+  picks(): PanelPicks & { topic: Topic };
+  /** …as the URL has them. */
+  setPicks(picks: Partial<PanelPicks> & { topic?: string }): void;
   setRange(range: DekadRange): void;
   setSelection(selection: Selection): void;
   /** The country under the pointer on the map (null: none). */
@@ -96,7 +102,7 @@ const classIndex = (classes: MapClass[], v: number) => {
   return i < 0 ? classes.length - 1 : i;
 };
 
-export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, onLatestYear }: Options): CountryPanel {
+export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, onLatestYear, onPicks }: Options): CountryPanel {
   const regionOf = new Map(Object.entries(info.countries).map(([m49, c]) => [Number(m49), c.region]));
   const centerOf = new Map(Object.entries(info.countries).map(([m49, c]) => [Number(m49), c.center]));
   const regions: Region[] = info.regions.map((r) => ({
@@ -175,6 +181,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const area = areaOf(d);
       if (area !== null && area !== WORLD) flyToArea(area);
     },
+    onPicks,
     onChange: drawMap,
     onX: setYear,
     onCsv: download,
@@ -701,6 +708,13 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     setView(view) {
       state.view = view;
       if (view === "country") load();
+      render();
+    },
+    picks: () => ({ topic: state.topic, ...core.snapshot() }),
+    setPicks({ topic, pin = null, maps }) {
+      if (topic && TOPICS.some((t) => t.id === topic)) state.topic = topic as Topic;
+      core.restore({ pin, maps });
+      load();
       render();
     },
     setRange(range) {

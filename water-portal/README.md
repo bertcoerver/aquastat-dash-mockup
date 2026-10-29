@@ -17,7 +17,8 @@ was checked; hovering one shows its details, and clicking one (or, a dam picked,
 in the Local panel's title) selects it, at its own coordinates: the panel's dam cards then show it among all
 the dams, a card per attribute. In the Basin view, a panel
 built like the Country view's has three topics (rain and evaporation, water left, discharge), each
-with number tiles and charts about the selected sub-basin, major basin or the World: the highest
+with number tiles and charts about the selected sub-basin (alone, or with everything upstream of
+it: a switch under the heading), major basin or the World: the highest
 and lowest major basins (with the selected sub-basin on top and the World below) against the
 average of the same days in the other years, the same days every year (click a year to select it), and the selected
 basin's sub-basins. Precipitation and evapotranspiration come from WaPOR; discharge and storage
@@ -87,6 +88,7 @@ water-portal/
 └── src/                    The application code
     ├── main.ts             Entry point: starts the map and the top bar, connects them
     ├── selection.ts        The current selection (point, country, basin)
+    ├── url-state.ts        The state in the URL's hash: the view, the selection, the range, the panel's pin and maps
     ├── lib/                Small helpers used across the folders
     │   ├── dom.ts          byId (an element by id, or an error naming it), reduceMotion
     │   ├── html.ts         esc: text as HTML
@@ -522,7 +524,11 @@ water-portal/
   (`src/panels/crash-warning.ts`), the last with a button to reload.
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
-- The URL keeps the map position (`#zoom/lat/lon`), so a view can be shared as a link.
+- **The URL keeps the state** (`src/url-state.ts`), so a view can be shared as a link: the
+  map's place and zoom (`map=zoom/lat/lon`, MapLibre's), the view, what is selected (a
+  country or region, a basin or sub-basin, the Local view's point and dam), the date
+  range, and the view's panel: its topic or scope, the chart pinned and the maps checked.
+  Written as the state changes, read once on load.
 
 Data: FAO M49 boundaries (`boundaries:m49_geom` on FAO's GeoServer); FAO SDG 6 major
 basins and sub-basins; HydroLAKES v1.0; rivers from HydroSHEDS; FAO WaPOR v3. Boundaries do not

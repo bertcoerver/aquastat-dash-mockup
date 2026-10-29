@@ -51,6 +51,8 @@ export function flash(el: HTMLElement) {
 
 export interface Toolbar {
   state: ToolbarState;
+  /** Switch the view (as its tab does): the range is adjusted to fit it. */
+  setView(view: View): void;
   /** Set the range from elsewhere (the Basin view's time series); it must fit the view. */
   setRange(range: DekadRange): void;
   /** The same in days (playback in the Local view). */
@@ -142,16 +144,17 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     }
   }
 
+  /** Switch to `view`, its range adjusted to fit (a tab clicked, or the URL on load). */
+  function setView(view: View) {
+    if (view === state.view) return;
+    state.view = view;
+    renderTabs();
+    const prev = state.range;
+    const next = enterView(view, prev);
+    update(next, { start: next.start !== prev.start, end: next.end !== prev.end });
+  }
   for (const tab of document.querySelectorAll<HTMLButtonElement>(".tab")) {
-    tab.addEventListener("click", () => {
-      const view = tab.dataset.view as View;
-      if (view === state.view) return;
-      state.view = view;
-      renderTabs();
-      const prev = state.range;
-      const next = enterView(view, prev);
-      update(next, { start: next.start !== prev.start, end: next.end !== prev.end });
-    });
+    tab.addEventListener("click", () => setView(tab.dataset.view as View));
   }
 
   /** After `view`'s limits changed: keep its range within them. */
@@ -172,6 +175,7 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     get state() {
       return current();
     },
+    setView,
     setRange: (range) => setDays(daysOfDekads(range)),
     setDays,
     setPlayback({ status, bufferedTo }) {

@@ -57,6 +57,8 @@ interface Options<Ctx, Spec extends { id: string; title: string }> {
   listed?(ctx: Ctx, option: MapOption<Spec>, on: string[]): boolean;
   /** A chart pinned, or unpinned: fly to its area, say. */
   onPin?(d: Driver | null): void;
+  /** The pin or the picks changed (for the URL). */
+  onPicks?(): void;
   /** The maps on the map changed: draw them again (the drivers are marked here). */
   onChange(): void;
   onX?(x: number, d: Driver | null): void;
@@ -97,6 +99,16 @@ export interface PanelCore<Ctx, Spec> {
   switched(match: (spec: Spec) => boolean): void;
   /** Mark the drivers in the panel: the one the map follows, the previewed and the pinned. */
   markAll(): void;
+  /** The scope's pin and picks, for the URL (`maps`: undefined when nothing was picked). */
+  snapshot(): PanelPicks;
+  /** The scope's pin and picks from the URL (not drawn: the panel draws next). */
+  restore(picks: PanelPicks): void;
+}
+
+/** A pinned chart (its tile or card, and the row or series) and the maps checked, as the URL keeps them. */
+export interface PanelPicks {
+  pin: Driver | null;
+  maps: string[] | undefined;
 }
 
 export function initPanelCore<Ctx, Spec extends { id: string; title: string }>({
@@ -113,6 +125,7 @@ export function initPanelCore<Ctx, Spec extends { id: string; title: string }>({
   shapesOf,
   listed,
   onPin,
+  onPicks,
   onChange,
   onX,
   onCsv,
@@ -139,6 +152,7 @@ export function initPanelCore<Ctx, Spec extends { id: string; title: string }>({
       else pins.delete(scope());
       dropped.delete(scope());
       onPin?.(d);
+      onPicks?.();
     },
     onChange() {
       onChange();
@@ -203,6 +217,7 @@ export function initPanelCore<Ctx, Spec extends { id: string; title: string }>({
     drivers.clearPreview();
     onChange();
     markAll();
+    onPicks?.();
   }
 
   function checklist() {
@@ -243,6 +258,7 @@ export function initPanelCore<Ctx, Spec extends { id: string; title: string }>({
     const ids = (chosen.get(scope()) ?? []).filter((id) => shown.has(specOf(id).title));
     const moved = ids.find((id) => match(specOf(id)));
     chosen.set(scope(), moved ? [...ids.filter((id) => id !== moved), moved] : ids);
+    onPicks?.();
   }
 
   function markAll() {
@@ -255,9 +271,21 @@ export function initPanelCore<Ctx, Spec extends { id: string; title: string }>({
     forgetPin(at = scope()) {
       pins.delete(at);
       dropped.delete(at);
+      onPicks?.();
     },
     chosen: () => chosen.get(scope()),
-    setChosen: (ids) => chosen.set(scope(), ids),
+    setChosen(ids) {
+      chosen.set(scope(), ids);
+      onPicks?.();
+    },
+    snapshot: () => ({ pin: pinned(), maps: chosen.get(scope()) }),
+    restore({ pin, maps }) {
+      if (pin) pins.set(scope(), pin);
+      else pins.delete(scope());
+      dropped.delete(scope());
+      if (maps) chosen.set(scope(), maps);
+      else chosen.delete(scope());
+    },
     parseId,
     optionId,
     leadDriver,

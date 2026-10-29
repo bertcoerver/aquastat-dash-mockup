@@ -817,6 +817,10 @@
 }
 
 /* --- Basin statistics (cards: country.css) ------------------------------------------- */
+/* The scope switch (the sub-basin alone, or with everything upstream), under the heading. */
+.bs-scope {
+  margin: -4px 0 8px;
+}
 .bs-section {
   margin-top: 18px;
   padding-top: 12px;

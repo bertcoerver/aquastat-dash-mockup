@@ -28,13 +28,13 @@
  * span (panels/ramp-menu.ts).
  */
 import type { Flow, WaterMap } from "../map/map";
-import { flyTo, type Extent } from "../map/fly-to";
+import { flyTo, unionBox, type Extent } from "../map/fly-to";
 import type { Place } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
 import { cssRgb as css, mixColor, type Color } from "../map/theme";
 import { unlessLoading } from "../panels/load-bar";
 import type { Driver } from "../panels/map-drivers";
-import { initPanelCore, type PanelLayer } from "../panels/stat-panel";
+import { initPanelCore, type PanelLayer, type PanelPicks } from "../panels/stat-panel";
 import { initLayerLegend, type LegendKey, type LegendLayer, type SizesKey } from "../panels/legend";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Selection } from "../selection";
@@ -69,7 +69,8 @@ import {
   type TopicDef,
   type TranspirationStatus,
 } from "./stats-cards";
-import { loadSeries, monthlyStats, periodStats, windowRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
+import { loadSeries, monthlyStats, periodStats, windowRates, withinKey, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
+import { slideSelection } from "../panels/segmented";
 import { fmt, rampScale, type ColorScale } from "./variables";
 import { showMapTip, type MapTipRow } from "../panels/map-tip";
 import { esc } from "../lib/html";
@@ -87,10 +88,19 @@ interface Options {
   setRange(range: DekadRange): void;
   /** Whether a map on screen has time (none: the range changes nothing on the map). */
   onTimed(timed: boolean): void;
+  /** The pin or the maps checked changed (for the URL). */
+  onPicks?(): void;
 }
 
 export interface BasinStats {
   setView(view: View): void;
+  /** With a sub-basin selected, what the statistics are of: it alone, or with everything upstream of it (its catchment). */
+  setScope(scope: BasinScope): void;
+  scope(): BasinScope;
+  /** The pin and the maps checked (for the URL). */
+  picks(): PanelPicks;
+  /** …as the URL has them. */
+  setPicks(picks: Partial<PanelPicks>): void;
   setRange(range: DekadRange): void;
   setSelection(selection: Selection): void;
   /** What is under the pointer on the map (null: nothing). */
@@ -120,10 +130,12 @@ type Layer = PanelLayer<BasinMapSpec>;
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; series: WaporSeries };
 
+export type BasinScope = "sub" | "catchment";
+
 /** The first dekad of the WaPOR record. */
 const FIRST_DK = mk(WAPOR_MIN_YEAR, 0, 0);
 
-export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRange, onTimed }: Options): BasinStats {
+export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRange, onTimed, onPicks }: Options): BasinStats {
   const majorNames = new Map(majorBasins.map((b) => [b.id, b.name]));
   const subNames = new Map(subBasins.map((b) => [b.id, b.name]));
   const subCount = new Map<number, number>();
@@ -155,7 +167,24 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     transpiration: new Map<string, TranspirationStatus>(),
     /** A range playing (the legend locked): rasters aren't loaded for every step. */
     playing: false,
+    /** With a sub-basin selected: its statistics alone, or with everything upstream of it. */
+    scope: "sub" as BasinScope,
   };
+  // The scope switch, under the heading (shown with a sub-basin selected).
+  const scopeEl = $("bs-scope");
+  slideSelection(scopeEl);
+  scopeEl.addEventListener("click", (e) => {
+    const button = (e.target as Element).closest<HTMLElement>("[data-scope]");
+    if (!button || button.dataset.scope === state.scope) return;
+    state.scope = button.dataset.scope as BasinScope;
+    core.drivers.clearPreview();
+    render();
+  });
+  /** The selected sub-basin with everything upstream of it within its major basin (the scope asked for; null: not asked, or none selected). */
+  function catchmentOf(major: { id: number } | null, sub: { id: number } | null): Set<number> | null {
+    if (state.scope !== "catchment" || !major || !sub) return null;
+    return new Set([sub.id, ...[...upstreamOf(sub.id)].filter((id) => subsById.get(id)?.majorBasin === major.id)]);
+  }
   const section = $("bs-section");
   const cardsEl = $("bs-cards");
   const tilesEl = $("bs-stats");
@@ -344,6 +373,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     // the other years) as the measure's map (picked in its unit menu).
     listed: (ctx, { id, spec }, on) => on.includes(id) || !!(spec.units && (!spec.against || ctx.against.has(spec.measure))),
     onPin: (d) => d && flyToRow(d.sub),
+    onPicks,
     onChange: drawMap,
     // A step on a chart: what its card says it is (a month, a dekad), else a year on a
     // chart of the same days every year (the index of its range).
@@ -492,10 +522,13 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     const major = state.selection?.majorBasin ?? null;
     const sub = major && state.selection?.subBasin ? state.selection.subBasin : null;
     $("wb-subtitle").textContent = subtitle(major, sub);
-    const within = withinOf({ major, sub });
-    const withinKey = within ? `${within.kind}${within.id}` : "all";
+    const catchment = catchmentOf(major, sub);
+    const within = withinOf({ major, sub, catchment });
+    const scopeKey = withinKey(within);
+    scopeEl.hidden = !sub;
+    for (const b of scopeEl.querySelectorAll<HTMLElement>("[data-scope]")) b.setAttribute("aria-selected", String(b.dataset.scope === state.scope));
     $("bs-heading").textContent = sub
-      ? `${subNames.get(sub.id) ?? sub.name}: basin statistics`
+      ? `${subNames.get(sub.id) ?? sub.name}${catchment ? " and upstream" : ""}: basin statistics`
       : major ? `${majorNames.get(major.id) ?? major.name}: basin statistics` : "Basins of the world";
     const range = state.range;
     const stats = status.kind === "ready" && range ? periodFor(`${range.start}-${range.end}`, () => periodStats(status.series, range)) : null;
@@ -522,11 +555,11 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
       windows.ranges.length < 2 ? null : windowRates(series, windows.ranges),
     );
     const monthly = topic.cards.some((c) => c.id === "monthly")
-      ? monthlyFor(`${covered.start}-${covered.end}:${withinKey}`, () => monthlyStats(series, covered, within))
+      ? monthlyFor(`${covered.start}-${covered.end}:${scopeKey}`, () => monthlyStats(series, covered, within))
       : null;
     // Every month of the record, for the chart of them.
     const record = { start: series.first, end: series.first + series.dekads - 1 };
-    const regime = regimeFor(withinKey, () => monthlyStats(series, record, within));
+    const regime = regimeFor(scopeKey, () => monthlyStats(series, record, within));
     // The model's output.
     const majorFlux: FluxStatus = fluxes("majors", loadMajorFluxes);
     const subFlux: FluxStatus | null = major ? fluxes(String(major.id), () => loadSubBasinFluxes(major.id)) : null;
@@ -542,6 +575,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
       monthly,
       major: major && { id: major.id, name: majorNames.get(major.id) ?? major.name },
       sub: sub && { id: sub.id, name: subNames.get(sub.id) ?? sub.name },
+      catchment,
       majors: majorIds,
       majorName: (id) => majorNames.get(id) ?? String(id),
       subName: (id) => subNames.get(id) ?? String(id),
@@ -629,10 +663,13 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     const area = parseArea(sub);
     if (!area || area.kind === "world") return;
     const box = (boxes: Map<number, Extent["box"]>, id: number): Extent[] => (boxes.has(id) ? [{ box: boxes.get(id)! }] : []);
-    const own = area.kind === "sub" ? box(subBoxes, area.id) : box(majorBoxes, area.id);
+    const own =
+      area.kind === "sub" ? box(subBoxes, area.id)
+      : area.kind === "catchment" ? [{ box: unionBox([area.id, ...(current?.ctx.catchment ?? [])].flatMap((id) => box(subBoxes, id).map((e) => e.box))) }]
+      : box(majorBoxes, area.id);
     const sel = state.selection?.majorBasin?.id;
     // A sub-basin is one of the selected basin's: fly to it alone.
-    const inOwn = area.kind === "sub" || sel === area.id;
+    const inOwn = area.kind !== "major" || sel === area.id;
     flyTo(map, own, sel === undefined || inOwn ? null : box(majorBoxes, sel)[0] ?? null);
   }
 
@@ -744,6 +781,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
       const majorOf = (id: number) => (spec.level === "major" ? id : ctx.stats.sub.get(id)?.majorBasin ?? NaN);
       const shown = (id: number) => {
         if (picked?.kind === "major") return majorOf(id) === picked.id;
+        if (picked?.kind === "catchment" && spec.level === "sub") return id === picked.id || !!ctx.catchment?.has(id);
         return !spec.listed || spec.listed.has(id);
       };
       return { ids, values, scale, shown };
@@ -797,7 +835,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     }
     // Small circles on top of big ones.
     symbols.sort((a, b) => b.radius - a.radius);
-    const outlined = picked?.kind === "sub" ? [picked.id] : [];
+    const outlined = picked?.kind === "sub" || picked?.kind === "catchment" ? [picked.id] : [];
     const statKey =
       `${fill?.id ?? ""}:${layers.filter((l) => l.slot !== "fill").map((l) => `${l.spec.id}:${l.slot}:${Object.values(styleOf(l.spec)).join("/")}:${waiting.has(l.slot)}`).join()}:${state.stretch}:` +
       `${legend.lockKey()}:${fill?.status ? "" : fill?.period ?? ctx.period}:${sub ?? ""}:${outlined.join()}`;
@@ -935,6 +973,17 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
     unlockLegend() {
       state.playing = false;
       legend.unlock();
+      render();
+    },
+    setScope(scope) {
+      if (scope === state.scope) return;
+      state.scope = scope;
+      render();
+    },
+    scope: () => state.scope,
+    picks: () => core.snapshot(),
+    setPicks({ pin = null, maps }) {
+      core.restore({ pin, maps });
       render();
     },
     setView(view) {

@@ -12,7 +12,8 @@ const warnings = [];
 
 /** `vite preview` on PORT, once it answers. */
 async function serve() {
-  const server = spawn("npx", ["vite", "preview", "--port", String(PORT), "--strictPort"], { stdio: "ignore" });
+  // (Vite itself, not through npx: killing npx would leave the server running.)
+  const server = spawn(process.execPath, ["node_modules/vite/bin/vite.js", "preview", "--port", String(PORT), "--strictPort"], { stdio: "ignore" });
   for (let i = 0; i < 100; i++) {
     try {
       await fetch(base, { method: "HEAD" });
@@ -117,6 +118,10 @@ try {
     await page.waitForTimeout(300);
     await page.mouse.click(650, 420);
     await page.waitForTimeout(2500);
+  });
+  await step("the URL keeps the state", async () => {
+    const hash = await page.evaluate(() => window.location.hash);
+    if (!/^#map=[\d.-]+\/[\d.-]+\/[\d.-]+&view=local&.*days=\d{4}-\d\d-\d\d\.\.\d{4}-\d\d-\d\d/.test(hash)) throw new Error(`unexpected hash ${hash}`);
   });
   await step("play and pause", async () => {
     await page.click("#play-button");

@@ -124,12 +124,18 @@ export function periodStats(s: WaporSeries, range: DekadRange): PeriodStats {
   return { covered, days, sub };
 }
 
-/** What to average over: a major basin's sub-basins, or one sub-basin (null: all of them). */
-export type Within = { kind: "major" | "sub"; id: number } | null;
+/**
+ * What to average over: a major basin's sub-basins, one sub-basin, or a set of them (a
+ * sub-basin with everything upstream of it; `key` names the set); null: all of them.
+ */
+export type Within = { kind: "major" | "sub"; id: number } | { kind: "set"; key: string; ids: Set<number> } | null;
+
+/** The name of what is averaged over, for cache keys. */
+export const withinKey = (within: Within) => (!within ? "all" : within.kind === "set" ? within.key : `${within.kind}${within.id}`);
 
 /** Whether sub-basin `row` is in `within`. */
 const inside = (s: WaporSeries, row: number, within: Within) =>
-  !within || (within.kind === "major" ? s.majorBasins[row] : s.ids[row]) === within.id;
+  !within || (within.kind === "set" ? within.ids.has(s.ids[row]) : (within.kind === "major" ? s.majorBasins[row] : s.ids[row]) === within.id);
 
 /** The rows (sub-basins) in `within`: all of them, or a basin's, or the one. */
 function rowsWithin(s: WaporSeries, within: Within): number[] {
@@ -191,7 +197,7 @@ const KEPT_RATES = 64;
 
 /** Per dekad of `range` (by dekad number), mean mm/day of PCP and AETI, area-weighted over all sub-basins or those `within`. */
 export function dekadRates(s: WaporSeries, range: DekadRange, within: Within): DekadRates {
-  const key = `${range.start}-${range.end}:${within ? `${within.kind}${within.id}` : ""}`;
+  const key = `${range.start}-${range.end}:${withinKey(within)}`;
   let kept = dekadRatesOf.get(s);
   if (!kept) dekadRatesOf.set(s, (kept = new Map()));
   let rates = kept.get(key);

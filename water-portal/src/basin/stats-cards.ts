@@ -96,6 +96,8 @@ export interface BasinCtx {
   major: { id: number; name: string } | null;
   /** The selected sub-basin (one of the major basin's). */
   sub: { id: number; name: string } | null;
+  /** The statistics' scope with a sub-basin selected: it with everything upstream of it (within the major basin): their ids; null: the sub-basin alone. */
+  catchment: Set<number> | null;
   /** Every major basin. */
   majors: number[];
   majorName(id: number): string;
@@ -204,20 +206,22 @@ const againstUnit = (c: BasinCtx, m: MeasureKey) => (MEASURES[m].anomaly === "re
 
 // --- Values per area -----------------------------------------------------------------------
 
-/** What a value is of: a sub-basin, a major basin, or the World. */
-export type Area = { kind: "sub" | "major"; id: number } | { kind: "world" };
-const areaKey = (a: Area) => (a.kind === "world" ? "world" : `${a.kind}:${a.id}`);
+/** What a value is of: a sub-basin, a sub-basin with everything upstream of it (a catchment), a major basin, or the World. */
+export type Area = { kind: "sub"; id: number } | { kind: "catchment"; id: number } | { kind: "major"; id: number } | { kind: "world" };
+export const areaKey = (a: Area) => (a.kind === "world" ? "world" : `${a.kind}:${a.id}`);
 export function parseArea(sub: string | null): Area | null {
   if (sub === "world") return { kind: "world" };
   const [kind, id] = sub?.split(":") ?? [];
-  return kind === "sub" || kind === "major" ? { kind, id: Number(id) } : null;
+  return kind === "sub" || kind === "catchment" || kind === "major" ? { kind, id: Number(id) } : null;
 }
-/** The area the tiles and single-area charts are about: the selected sub-basin or basin, or the World. */
-const focus = (c: BasinCtx): Area => (c.sub ? { kind: "sub", id: c.sub.id } : c.major ? { kind: "major", id: c.major.id } : { kind: "world" });
-const areaName = (c: BasinCtx, a: Area) => (a.kind === "world" ? "World" : a.kind === "major" ? c.majorName(a.id) : c.subName(a.id));
+/** The area the tiles and single-area charts are about: the selected sub-basin (with everything upstream, if asked) or basin, or the World. */
+const focus = (c: BasinCtx): Area =>
+  c.sub ? { kind: c.catchment ? "catchment" : "sub", id: c.sub.id } : c.major ? { kind: "major", id: c.major.id } : { kind: "world" };
+const areaName = (c: BasinCtx, a: Area) =>
+  a.kind === "world" ? "World" : a.kind === "major" ? c.majorName(a.id) : a.kind === "catchment" ? `${c.subName(a.id)} and upstream` : c.subName(a.id);
 /** The focus's sub-basins, for the series per dekad or month. */
-export const withinOf = (c: Pick<BasinCtx, "major" | "sub">): Within =>
-  c.sub ? { kind: "sub", id: c.sub.id } : c.major ? { kind: "major", id: c.major.id } : null;
+export const withinOf = (c: Pick<BasinCtx, "major" | "sub" | "catchment">): Within =>
+  c.sub && c.catchment ? { kind: "set", key: `catchment${c.sub.id}`, ids: c.catchment } : c.sub ? { kind: "sub", id: c.sub.id } : c.major ? { kind: "major", id: c.major.id } : null;
 
 /** PCP and AETI of some sub-basins: their area (km²) and volumes per day (km² × mm/day). */
 interface Sums {
@@ -259,12 +263,22 @@ function majorSums(c: BasinCtx, w: number): Map<number, Sums> {
 }
 
 function sumsOf(c: BasinCtx, a: Area, w: number): Sums {
-  if (a.kind === "sub") {
-    const s = c.stats.sub.get(a.id);
-    const [p, e] = rates(c, a.id, w);
+  const one = (id: number): Sums => {
+    const s = c.stats.sub.get(id);
+    const [p, e] = rates(c, id, w);
     return s && Number.isFinite(p) && Number.isFinite(e) ? { area: s.area, p: p * s.area, e: e * s.area } : { area: 0, p: 0, e: 0 };
-  }
+  };
+  if (a.kind === "sub") return one(a.id);
   const total = { area: 0, p: 0, e: 0 };
+  if (a.kind === "catchment") {
+    for (const id of c.catchment ?? [a.id]) {
+      const s = one(id);
+      total.area += s.area;
+      total.p += s.p;
+      total.e += s.e;
+    }
+    return total;
+  }
   for (const [major, s] of majorSums(c, w)) {
     if (a.kind === "major" && major !== a.id) continue;
     total.area += s.area;
@@ -325,9 +339,26 @@ function summedFlux(c: BasinCtx, v: Flux): { s: Float64Array; first: number } | 
   return { s, first: dekads[0] };
 }
 
+/** A catchment's flux per dekad: the discharge out of its sub-basin (what's upstream flows through it), the storage change summed over it (null: not loaded). */
+function catchmentFlux(c: BasinCtx, id: number, v: Flux): { s: Float64Array; first: number } | null {
+  if (v === "Q") return fluxSeriesOf(c, { kind: "sub", id }, v);
+  const status = c.flux.sub;
+  if (status?.kind !== "ready") return null;
+  const { dekads, series } = status.result;
+  const s = new Float64Array(dekads.length).fill(NaN);
+  for (const sub of c.catchment ?? [id]) {
+    const values = series.get(sub)?.[v];
+    if (!values) continue;
+    for (let i = 0; i < s.length; i++) if (Number.isFinite(values[i])) s[i] = (Number.isFinite(s[i]) ? s[i] : 0) + values[i];
+  }
+  return { s, first: dekads[0] };
+}
+
 /** An area's flux per dekad (null: not loaded). */
 function areaFlux(c: BasinCtx, a: Area, v: Flux) {
-  return a.kind === "world" ? summedFlux(c, v) : fluxSeriesOf(c, a, v);
+  if (a.kind === "world") return summedFlux(c, v);
+  if (a.kind === "catchment") return catchmentFlux(c, a.id, v);
+  return fluxSeriesOf(c, a, v);
 }
 
 /** A measure's value for an area over range `w` of c.windows (the period itself by default), in units `u` (the legend's by default). */
@@ -650,7 +681,7 @@ function rankCard(m: MeasureKey, order: "top" | "ends", title: string, note = ""
     rankRows(c.majors.map((id) => ({ id, v: valueOf(c, m, { kind: "major", id }), values: values(c, { kind: "major", id }) })), n, c.majorName, "major", c.sub ? null : c.major?.id ?? null, order === "ends", c.major?.id ?? null);
   const rows = (c: BasinCtx): BarRow[] => {
     const r = ranked(c);
-    if (c.sub) r.unshift({ sub: `sub:${c.sub.id}`, label: c.sub.name, values: values(c, { kind: "sub", id: c.sub.id }), emphasis: true });
+    if (c.sub) r.unshift({ sub: areaKey(focus(c)), label: areaName(c, focus(c)), values: values(c, focus(c)), emphasis: true });
     if (!extensive(c, m)) r.push({ sub: "world", label: "World", values: values(c, { kind: "world" }) });
     return r;
   };
@@ -659,7 +690,7 @@ function rankCard(m: MeasureKey, order: "top" | "ends", title: string, note = ""
     title: (c) => `${title}, ${c.period}`,
     caption: (c) => {
       const status = othersStatus(c, m);
-      return `${note}Out of all major basins${c.sub ? `, with ${c.sub.name} on top` : ""}. ` +
+      return `${note}Out of all major basins${c.sub ? `, with ${areaName(c, focus(c))} on top` : ""}. ` +
         (status === LOADING ? "" : status ? `${status} ` : `Against the average of the same days in ${others(c).length} other years (${othersLabel(c)}). `) +
         "The map shows only the basins named; hover one to pick it out.";
     },
@@ -895,7 +926,7 @@ function closureOf(c: BasinCtx, a: Area) {
 /** The rows of a chart of a few areas: the selected sub-basin and its major basin, the largest other major basins, the World. */
 function areaRows(c: BasinCtx, values: (a: Area) => number[], n = 8): BarRow[] {
   const rows: BarRow[] = [];
-  if (c.sub) rows.push({ sub: `sub:${c.sub.id}`, label: c.sub.name, values: values({ kind: "sub", id: c.sub.id }), emphasis: true });
+  if (c.sub) rows.push({ sub: areaKey(focus(c)), label: areaName(c, focus(c)), values: values(focus(c)), emphasis: true });
   if (c.major) rows.push({ sub: `major:${c.major.id}`, label: c.major.name, values: values({ kind: "major", id: c.major.id }), emphasis: !c.sub });
   const area = (id: number) => sumsOf(c, { kind: "major", id }, c.windows.current).area;
   const largest = c.majors.filter((id) => id !== c.major?.id).sort((a, b) => area(b) - area(a)).slice(0, n);
@@ -910,7 +941,7 @@ const closureCard: BasinCard = {
   title: (c) => `Where the water left goes, ${c.period}`,
   caption: (c) =>
     "What's left of the rain (PCP − AETI) should leave as discharge or be stored (the model's ΔS); the rest is what the data and the model don't account for (water from other basins, irrigation from aquifers, errors). " +
-    `${c.sub ? `${c.sub.name}, its major basin, ` : c.major ? `${c.major.name}, ` : ""}the largest major basins and the World. Hover a row to pick out its basins.`,
+    `${c.sub ? `${areaName(c, focus(c))}, its major basin, ` : c.major ? `${c.major.name}, ` : ""}the largest major basins and the World. Hover a row to pick out its basins.`,
   render(c) {
     const message = fluxMessage(c, "Q");
     if (message) return empty(message);

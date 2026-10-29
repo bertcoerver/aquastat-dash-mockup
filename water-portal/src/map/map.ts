@@ -251,7 +251,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     },
     center: [20, 15],
     zoom: 1.6,
-    hash: true,
+    // (As a parameter among the page's others: see url-state.ts.)
+    hash: "map",
     attributionControl: {
       compact: true,
       customAttribution: "FAO M49 &amp; SDG 6 basins · HydroLAKES · HydroSHEDS",
