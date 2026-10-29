@@ -83,18 +83,10 @@ export interface WaterMap {
    */
   onFlow(listener: (flow: Flow | null) => void): void;
   /**
-   * Basin view: fill sub-basins with their own colours (the water balance model's
-   * values), instead of the selected fill (null: none). `key`
-   * names the set of colours: the map only repaints when it changes.
-   */
-  setSubBasinFills(fills: { key: string; colors: Map<number, Color> } | null): void;
-  /** Basin view: draw a thick outline around these sub-basins. */
-  setOutlinedSubBasins(ids: number[]): void;
-  /**
    * Basin view: a statistics map (basin-stats.ts): fill the major basins or the
    * sub-basins with their own colours, and outline some sub-basins. It takes over from
-   * the model's values and the selected fill (the selected sub-basin
-   * is outlined instead). `key` names the set, as above (null: none).
+   * the selected fill (the selected sub-basin is outlined instead). `key` names the set
+   * of colours: the map only repaints when it changes (null: none).
    */
   setBasinStatFills(fills: BasinStatFills | null): void;
   /**
@@ -207,8 +199,6 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     waporRamp: DEFAULT_RAMP,
     gaez: null as { sum: RasterSum; ramp: WaporRamp } | null,
     hovered: null as Hovered | null,
-    valueFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
-    outlined: [] as number[],
     countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     symbols: { country: null, basin: null, local: null } as Record<StatView, { key: string; items: CountrySymbol[] } | null>,
     /** The Local view's symbols by id (the picked point's circle is looked up at every frame). */
@@ -357,13 +347,13 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       selectedColor: theme.selected,
       fills: faded(fades.major, stats?.level === "major" && !flow ? stats : undefined, fillTiming),
     });
-    // Sub-basins are only drawn to fill the selected one, to show the water balance
-    // model's values or a statistics map, or up- and downstream.
-    const values = flow ? undefined : stats ? (stats.level === "sub" ? stats : undefined) : state.valueFills;
+    // Sub-basins are only drawn to fill the selected one, to show a statistics map, or
+    // up- and downstream.
+    const values = !flow && stats?.level === "sub" ? stats : undefined;
     const sub = subBasinsLayers({
       fill: [0, 0, 0, 0],
       border: theme.basinBorder,
-      visible: basins && (flow || Boolean(stats ? values : values || state.selection.subBasin)),
+      visible: basins && (flow || Boolean(stats ? values : state.selection.subBasin)),
       // (in the Basin view, only with up- and downstream picked out)
       outlined: basins ? flow : state.visible.subBasins,
       outlineWidth: basins ? 0.9 : 0.6,
@@ -374,9 +364,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     // (Under the pointer: an outline thinner than the selected one's.)
     const scheme = basins ? state.scheme : null;
     const effects = basins ? state.effects : null;
-    const outlined = stats
-      ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])]
-      : state.outlined;
+    const outlined = stats ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])] : [];
     return [
       ...countriesLayer({
         color: theme.land,
@@ -783,16 +771,6 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     },
     onFlow(listener) {
       flowListeners.push(listener);
-    },
-    setSubBasinFills(fills) {
-      if (fills?.key === state.valueFills?.key) return;
-      state.valueFills = fills ?? undefined;
-      render();
-    },
-    setOutlinedSubBasins(ids) {
-      if (ids.join() === state.outlined.join()) return;
-      state.outlined = ids;
-      render();
     },
     setBasinStatFills(fills) {
       if (fills?.key === state.basinStats?.key) return;

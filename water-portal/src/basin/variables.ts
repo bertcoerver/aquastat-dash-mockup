@@ -1,6 +1,6 @@
 /*
- * How each model variable is labelled and coloured: on the map, in the legend, in the
- * charts and the Sankey diagram.
+ * How each model variable is labelled and coloured: on the map, in the legend and in the
+ * charts.
  *
  * Map colours run over the 1st–99th percentile of the sub-basins' values (or as picked
  * in the legend's ramp menu: panels/ramp-menu.ts), so one extreme sub-basin doesn't
@@ -20,7 +20,7 @@ interface VariableStyle {
   /** Colour ramp, low to high (ColorBrewer). */
   ramp: string[];
   scale: "linear" | "log" | "diverging";
-  /** The variable's colour in charts and the Sankey diagram. */
+  /** The variable's colour in charts. */
   color: string;
 }
 
@@ -68,11 +68,6 @@ export interface ColorScale {
   ticks: { value: number; at: number }[];
   /** The values at the ends of the ramp ([0, 0]: no values). */
   domain: [number, number];
-}
-
-/** A colour scale fitted to `values` (the sub-basins' period means). */
-export function colorScale(variable: Variable, values: number[]): ColorScale {
-  return rampScale(STYLES[variable], values);
 }
 
 /**

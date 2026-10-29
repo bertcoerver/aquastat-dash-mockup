@@ -1,6 +1,5 @@
 import { initBasinStats } from "./basin/basin-stats";
 import { loadModelFiles } from "./basin/model";
-import { initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
 import { unionBox, type Box } from "./map/fly-to";
 import { createMap } from "./map/map";
@@ -52,13 +51,11 @@ function showHover(lngLat: LngLat | null, place: Place | null) {
   hovered = lngLat && place && { lngLat, place };
   if (!hovered) {
     setHovered(null);
-    waterBalance.hover(null);
     countryPanel.hover(null);
     basinStats.hover(null);
     return;
   }
   const { country, majorBasin, subBasin } = hovered.place;
-  waterBalance.hover(view === "basin" ? (subBasin?.id ?? null) : null);
   countryPanel.hover(view === "country" ? (country?.m49 ?? null) : null);
   basinStats.hover(view === "basin" ? hovered.place : null);
   const inSelected = !!majorBasin && majorBasin.id === selection.get().majorBasin?.id;
@@ -206,20 +203,13 @@ const upstreamOf = upstreamFinder(subBasins);
 const downstreamOf = downstreamFinder(subBasins);
 /** The box around a sub-basin and everything upstream of it. */
 const catchmentBox = (id: number) => unionBox([id, ...upstreamOf(id)].map((sub) => boxes!.sub.get(sub)).filter((b): b is Box => !!b));
-// Basin view: the water balance model for the selected sub-basin (map colours, panel).
 let toolbarApi: Toolbar | null = null;
-const waterBalance = initWaterBalance({
-  map: waterMap,
-  subBasins,
-  upstreamOf,
-  setRange: (range) => toolbarApi?.setRange(range),
-});
-// Basin view: statistics charts below the model, each with its map.
+// Basin view: statistics charts in the panel, each with its map.
 const basinStats = initBasinStats({
   map: waterMap,
   majorBasins: basins,
   subBasins,
-  setMapOverride: (override) => waterBalance.setMapOverride(override),
+  upstreamOf,
   setRange: (range) => toolbarApi?.setRange(range),
   onTimed: (has) => setTimed("basin", has),
 });
@@ -291,7 +281,6 @@ selection.subscribe((s) => {
     subBasin: s.subBasin?.id ?? null,
   });
   picker.show(s);
-  waterBalance.setSelection(s);
   countryPanel.setSelection(s);
   basinStats.setSelection(s);
   localPanel.setSelection(s);
@@ -463,8 +452,6 @@ function onToolbarChange({ view: newView, range, days }: ToolbarState) {
   setView(view);
   layersMenu.setView(view);
   picker.setView(view);
-  waterBalance.setView(view);
-  waterBalance.setRange(range);
   countryPanel.setView(view);
   countryPanel.setRange(range);
   basinStats.setView(view);

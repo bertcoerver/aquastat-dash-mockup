@@ -13,13 +13,8 @@
  *
  * Every series runs over the same dekads, those in latest.json. The .bin format: see
  * parseFile (and scripts/build-model.py). Nothing is queried here: the files are all there is.
- *
- * The water balance panel (switched off for now: MODEL_SHOWN in water-balance.ts) shows a
- * sub-basin and everything upstream of it: networkSeries, from the same files.
  */
 import { MIN_YEAR } from "../toolbar/dekads";
-import type { DekadRange } from "../toolbar/range-rules";
-import type { SubBasin } from "../map/sub-basin-network";
 import { memoized } from "../lib/memo";
 
 /** Where the precomputed files are (a directory URL, ending in /). */
@@ -27,21 +22,6 @@ const MODEL_FILES: string = import.meta.env.VITE_MODEL_FILES ?? `${import.meta.e
 const FORMAT_VERSION = 2; // of the files
 
 export type Variable = "PCP" | "AETI" | "Q" | "dS";
-export const VARIABLES: Variable[] = ["PCP", "AETI", "Q", "dS"];
-
-/** Per sub-basin, one value per dekad of `dekads`: PCP, AETI in mm/day; Q, ΔS in m³/s. */
-export type Series = Record<Variable, Float64Array>;
-
-export interface ModelSeries {
-  /** Dekad indices (see dekads.ts) with model output, ascending. */
-  dekads: number[];
-  series: Map<number, Series>;
-}
-
-export interface NetworkResult extends ModelSeries {
-  /** The sub-basin the network drains to (the one that was selected). */
-  outlet: number;
-}
 
 /** Q and ΔS (m³/s) per dekad, of the precomputed files. */
 export type Flux = "Q" | "dS";
@@ -57,9 +37,6 @@ export interface ModelFiles {
   last: number;
   updated: string;
 }
-
-/** Period means per sub-basin (PCP, AETI in mm/day; Q, ΔS in m³/s). */
-export type Means = Map<number, Record<Variable, number>>;
 
 /** A .bin file: per id (a sub-basin or major basin), some values and some series. */
 export interface DataFile {
@@ -78,7 +55,6 @@ export interface DataFile {
 let latest: Promise<ModelFiles> | null = null;
 const files = new Map<string, Promise<DataFile>>();
 const fluxes = new Map<string, Promise<FluxSeries>>();
-const networks = new Map<number, Promise<NetworkResult>>();
 
 /** latest.json: the dekads with output. Always asked for afresh, not from the cache. */
 export function loadModelFiles(): Promise<ModelFiles> {
@@ -159,74 +135,10 @@ function loadFluxes(path: string): Promise<FluxSeries> {
   );
 }
 
-/**
- * All four variables for `outlet` and the sub-basins upstream of it (`upstream`, not
- * including `outlet`), over the dekads with the outlet's Q. The network can reach into
- * other major basins: their files are loaded too.
- */
-export function networkSeries(outlet: SubBasin, upstream: SubBasin[]): Promise<NetworkResult> {
-  let result = networks.get(outlet.id);
-  if (!result) {
-    const network = [outlet, ...upstream];
-    const majors = [...new Set(network.map((b) => b.majorBasin))];
-    result = Promise.all([loadFile("subbasins.bin"), ...majors.map((m) => loadFile(`major/${m}.bin`))]).then(([wapor, ...flux]) => {
-      const rows = (file: DataFile) => new Map([...file.ids].map((id, row) => [id, row]));
-      const waporRows = rows(wapor);
-      const fluxRows = flux.map(rows);
-      const empty = () => new Float64Array(wapor.dekads).fill(NaN);
-      const all = new Map<number, Series>();
-      for (const b of network) {
-        const w = waporRows.get(b.id);
-        const f = fluxRows.findIndex((r) => r.has(b.id));
-        const fr = f < 0 ? null : fluxRows[f].get(b.id)!;
-        all.set(b.id, {
-          PCP: w === undefined ? empty() : rowOf(wapor, "PCP", w),
-          AETI: w === undefined ? empty() : rowOf(wapor, "AETI", w),
-          Q: fr === null ? empty() : rowOf(flux[f], "Q", fr),
-          dS: fr === null ? empty() : rowOf(flux[f], "dS", fr),
-        });
-      }
-      // The dekads the model has output for (its network's common date range).
-      const q = all.get(outlet.id)!.Q;
-      const from = q.findIndex(Number.isFinite);
-      const to = from < 0 ? 0 : q.findLastIndex(Number.isFinite) + 1;
-      const dekads = Array.from({ length: Math.max(0, to - from) }, (_, i) => wapor.first + from + i);
-      const series = new Map<number, Series>();
-      for (const [id, s] of all) {
-        series.set(id, { PCP: s.PCP.slice(from, to), AETI: s.AETI.slice(from, to), Q: s.Q.slice(from, to), dS: s.dS.slice(from, to) });
-      }
-      return { outlet: outlet.id, dekads, series };
-    });
-    result.catch(() => networks.delete(outlet.id));
-    networks.set(outlet.id, result);
-  }
-  return result;
-}
-
 /** The dekad of an ISO date (yyyy-mm-dd). */
 function isoDekad(iso: string) {
   const [y, m, d] = iso.split("-").map(Number);
   return (y - MIN_YEAR) * 36 + (m - 1) * 3 + (d <= 10 ? 0 : d <= 20 ? 1 : 2);
-}
-
-/** The part of `range` that has model output, or null if none of it has. */
-export function coveredRange({ dekads }: { dekads: number[] }, range: DekadRange): DekadRange | null {
-  if (!dekads.length) return null;
-  const start = Math.max(range.start, dekads[0]);
-  const end = Math.min(range.end, dekads[dekads.length - 1]);
-  return start <= end ? { start, end } : null;
-}
-
-/** Mean of each variable per sub-basin over the dekads in `range` (inclusive). */
-export function periodMeans({ dekads, series }: ModelSeries, range: DekadRange): Means {
-  const from = dekads.findIndex((dk) => dk >= range.start);
-  let to = dekads.findIndex((dk) => dk > range.end);
-  if (to < 0) to = dekads.length;
-  const means: Means = new Map();
-  for (const [id, s] of series) {
-    means.set(id, { PCP: mean(s.PCP, from, to), AETI: mean(s.AETI, from, to), Q: mean(s.Q, from, to), dS: mean(s.dS, from, to) });
-  }
-  return means;
 }
 
 /** Mean of the finite values in values[from..to). */

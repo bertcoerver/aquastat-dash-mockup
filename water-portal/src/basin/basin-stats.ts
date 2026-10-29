@@ -1,5 +1,5 @@
 /*
- * Basin view: the statistics in the water balance panel, after the Country panel
+ * Basin view: the statistics in the Basin panel, after the Country panel
  * (country/country-panel.ts): the topics' number tiles and chart cards
  * (stats-cards.ts), all in one column, about the selected sub-basin or major basin or,
  * with none selected, the World. All over the top bar's date range, compared with the same days in the other
@@ -10,9 +10,8 @@
  * first tile. Many bring more maps along (stats-cards.ts, `also`), each drawn its own
  * way, as the card asks (as rain, along the rivers…) unless the legend switched it:
  * they take the places of the maps checked in the legend while shown. Hovering a month
- * or dekad on a chart of them maps that month or dekad; clicking it selects it. Unless a sub-basin is selected and the water balance model is
- * shown (water-balance.ts, MODEL_SHOWN): then it shows the model's, which this hands
- * the map back to. Within a card, hovering a row picks out its basins on the map (a
+ * or dekad on a chart of them maps that month or dekad; clicking it selects it.
+ * Within a card, hovering a row picks out its basins on the map (a
  * major basin, a sub-basin outlined), hovering a series in a legend maps that
  * series, and clicking a year on a chart of the same days every year selects that year.
  * Hovering a basin on the map shows its values (panels/map-tip.ts), each in its colour there. A switch in a map's legend section draws
@@ -43,7 +42,6 @@ import { WAPOR_MIN_YEAR, fmtEnd, fmtStart, mk } from "../toolbar/dekads";
 import { basinLastDekad, daysOfDekads, type DekadRange, type View } from "../toolbar/range-rules";
 import { loadTranspiration } from "./basin-grids";
 import { loadMajorFluxes, loadSubBasinFluxes, type FluxSeries } from "./model";
-import { MODEL_SHOWN } from "./water-balance";
 import { initSchemeMap } from "./scheme-map";
 import { initEffectsMap } from "./effects-map";
 import { loadMiddles } from "./rivers";
@@ -84,8 +82,8 @@ interface Options {
   map: WaterMap;
   majorBasins: MajorBasin[];
   subBasins: SubBasin[];
-  /** The water balance panel: it shows the model's map unless a chart takes over. */
-  setMapOverride(override: boolean): void;
+  /** The sub-basins upstream of one (for the panel's subtitle). */
+  upstreamOf(id: number): Set<number>;
   /** Select a range in the top bar (from clicking a year on a chart). */
   setRange(range: DekadRange): void;
   /** Whether a map on screen has time (none: the range changes nothing on the map). */
@@ -131,9 +129,11 @@ type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message:
 /** The first dekad of the WaPOR record. */
 const FIRST_DK = mk(WAPOR_MIN_YEAR, 0, 0);
 
-export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, setRange, onTimed }: Options): BasinStats {
+export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRange, onTimed }: Options): BasinStats {
   const majorNames = new Map(majorBasins.map((b) => [b.id, b.name]));
   const subNames = new Map(subBasins.map((b) => [b.id, b.name]));
+  const subCount = new Map<number, number>();
+  for (const b of subBasins) subCount.set(b.majorBasin, (subCount.get(b.majorBasin) ?? 0) + 1);
   const majorIds = majorBasins.map((b) => b.id);
   const majorBoxes = new Map(majorBasins.map((b) => [b.id, b.bbox]));
   const subBoxes = new Map(subBasins.map((b) => [b.id, b.bbox]));
@@ -302,25 +302,14 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     const lead = pin && isDriver(pin) ? leadLayers(ctx, pin) : [];
     const dropped = state.dropped.get(scope()) ?? new Set<string>();
     const own = lead.find((l) => optionId(ctx, l.spec) === id);
-    if (own && followsModel() && pin?.id === id) {
-      // A map picked over the model's, unchecked: the model's again.
-      state.chosen.set(scope(), toggled(current.layers.map((l) => optionId(ctx, l.spec)), id));
-      state.pinned.delete(scope());
-      state.dropped.delete(scope());
-    } else if (own) {
+    if (own) {
       // One of the pinned chart's maps.
       if (!dropped.delete(own.spec.title)) dropped.add(own.spec.title);
     } else {
       const titles = new Set(lead.map((l) => l.spec.title));
       const ids = toggled(current.layers.filter((l) => !titles.has(l.spec.title)).map((l) => optionId(ctx, l.spec)), id);
       state.chosen.set(scope(), ids);
-      if (!pin) {
-        // With a sub-basin selected the map defaults to the model's, so a pick is a pin.
-        if (followsModel() && ids.includes(id)) {
-          state.pinned.set(scope(), { id, sub: null });
-          state.dropped.delete(scope());
-        }
-      } else if (ids.includes(id)) {
+      if (pin && ids.includes(id)) {
         // Checked in a slot the pinned chart's maps use, it takes that slot.
         const slot = layerOf(ctx, { id, sub: null }).slot;
         for (const l of lead) if (l.slot === slot) dropped.add(l.spec.title);
@@ -558,8 +547,17 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
   // --- Rendering -------------------------------------------------------------------------------
   const render = perFrame(draw);
 
+  /** Under the panel's title: the selected basin's sub-basins, or those upstream of the selected sub-basin. */
+  function subtitle(major: { id: number } | null, sub: { id: number } | null) {
+    const plural = (n: number) => `${n} sub-basin${n === 1 ? "" : "s"}`;
+    if (!sub) return major ? plural(subCount.get(major.id) ?? 0) : "";
+    const upstream = upstreamOf(sub.id).size;
+    return upstream ? `${plural(upstream)} upstream` : "No sub-basins upstream";
+  }
+
   function draw() {
     const shown = state.view === "basin";
+    pane.hidden = !shown;
     section.hidden = !shown;
     const message = $("bs-message");
     if (!shown) return clear();
@@ -567,6 +565,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     const status = state.status;
     const major = state.selection?.majorBasin ?? null;
     const sub = major && state.selection?.subBasin ? state.selection.subBasin : null;
+    $("wb-subtitle").textContent = subtitle(major, sub);
     const within = withinOf({ major, sub });
     const withinKey = within ? `${within.kind}${within.id}` : "all";
     $("bs-heading").textContent = sub
@@ -720,12 +719,6 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     effectsMap.draw(null, null, []);
     map.setSymbols("basin", null);
     map.setBars("basin", null);
-    setMapOverride(false);
-  }
-
-  /** Whether the map defaults to the water balance model's. */
-  function followsModel() {
-    return MODEL_SHOWN && !!state.selection?.subBasin;
   }
 
   /** A map's tile or card, and which of the maps it brings along it is ("<driver>~<index>"; null: its own). */
@@ -752,11 +745,10 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
 
   /**
    * The maps on the map: those checked in the legend (else the first tile's), with the
-   * previewed or pinned one in its slot. None while the map is the model's.
+   * previewed or pinned one in its slot.
    */
   function shownLayers(ctx: BasinCtx): Layer[] {
     const lead = leadDriver();
-    if (!lead && followsModel()) return [];
     const kept = state.chosen.get(scope());
     const chosen = (kept ?? []).filter((id) => isDriver({ id, sub: null }));
     // (The first tile's only alone: under a chart's map, it would show when that one changes
@@ -828,14 +820,13 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     const layers = shownLayers(ctx);
     current.layers = layers;
     if (!layers.length) {
-      // (The model's map has no legend; all unchecked, it has only the checklist.)
-      legend.show(followsModel() ? null : []);
+      // (All unchecked: the legend has only the checklist.)
+      legend.show([]);
       map.setBasinStatFills(null);
       schemeMap.draw(null, []);
       effectsMap.draw(null, null, []);
       map.setSymbols("basin", null);
       map.setBars("basin", null);
-      setMapOverride(false);
       tellTimed();
       return;
     }
@@ -930,7 +921,6 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     map.setBasinStatFills({ level: fill?.level ?? "major", key: statKey, colors, outlined });
     map.setSymbols("basin", symbols.length ? { key: `${statKey}:${!!at}`, items: symbols } : null);
     map.setBars("basin", bars.length ? { key: `${statKey}:${!!at}`, items: bars } : null);
-    setMapOverride(true);
 
     // Without values (the model's output, still loading), no key: only the status.
     legend.show(

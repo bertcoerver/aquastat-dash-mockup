@@ -17,8 +17,7 @@
 }
 
 /* --- Map tooltip --------------------------------------------------------------------- */
-.wb-tooltip,
-.sk-tip {
+.wb-tooltip {
   position: fixed;
   z-index: 20;
   pointer-events: none;
@@ -759,8 +758,7 @@
   gap: 5px;
 }
 .wb-overview svg,
-.wb-zoom svg,
-.wb-sankey svg {
+.wb-zoom svg {
   display: block;
 }
 .ts-frame {
@@ -818,71 +816,12 @@
   stroke-width: 3px;
 }
 
-/* --- Sankey ------------------------------------------------------------------------- */
-.wb-sankey {
-  position: relative;
-}
-.sk-tip {
-  position: absolute;
-}
-.sk-band {
-  opacity: 0;
-  pointer-events: none;
-}
-.sk-band.shown {
-  opacity: 0.7;
-  pointer-events: auto;
-}
-.sankey.sk-hovering .sk-band {
-  opacity: 0;
-  pointer-events: none;
-}
-.sankey.sk-hovering .sk-band.on {
-  opacity: 0.8;
-  pointer-events: auto;
-}
-.sk-node {
-  fill: var(--muted);
-}
-.sk-basin.outlet .sk-node,
-.sk-basin.on .sk-node {
-  fill: var(--ink);
-}
-.sankey.sk-hovering .sk-basin:not(.on) .sk-node {
-  opacity: 0.45;
-}
-.sk-hit {
-  fill: transparent;
-}
-.sk-res.up {
-  fill: #4caf50;
-}
-.sk-res.down {
-  fill: #f44336;
-}
-.sk-label {
-  font: 500 11px var(--sans);
-  fill: var(--ink);
-  paint-order: stroke;
-  stroke: var(--surface);
-  stroke-width: 3px;
-}
-.sk-axis {
-  font: 400 10px var(--mono);
-  fill: var(--muted);
-}
-.sk-id {
-  font: 400 10px var(--mono);
-  color: var(--muted);
-}
-
 /* --- Basin statistics (cards: country.css) ------------------------------------------- */
 .bs-section {
   margin-top: 18px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
 }
-.wb-message[hidden] + #wb-results[hidden] + .bs-section,
 #wb-body > .bs-section:first-child {
   margin-top: 0;
   padding-top: 0;

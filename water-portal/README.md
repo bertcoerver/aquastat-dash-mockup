@@ -22,10 +22,7 @@ and lowest major basins (with the selected sub-basin on top and the World below)
 average of the same days in the other years, the same days every year (click a year to select it), and the selected
 basin's sub-basins. Precipitation and evapotranspiration come from WaPOR; discharge and storage
 change from FAO's water balance model (precomputed; per major basin, or per sub-basin of the
-selected one). Each tile and chart has its map, and the range ends at the model's latest dekad. The model's own panel (a sub-basin and
-everything upstream of it, with its time series and a Sankey diagram) is in the code but switched
-off for now (`MODEL_SHOWN` in
-`src/basin/water-balance.ts`); until then, picking a sub-basin, by name or on the map, selects
+selected one). Each tile and chart has its map, and the range ends at the model's latest dekad. Picking a sub-basin, by name or on the map, selects
 its major basin. In the Country view, a panel
 shows FAO AQUASTAT statistics for the selected country (or the World) in four topics (SDG 6.4,
 water resources, water use, irrigation): number tiles and charts, each with a map that goes with
@@ -138,11 +135,10 @@ water-portal/
     │   ├── cog-pixel.ts    A lean reader of one pixel of a COG
     │   ├── wapor-raster.ts The WaPOR raster on the map: its legend, the checks, the colour stretch, playback
     │   └── year-bars.ts    The same days every year, as bars
-    ├── basin/              Basin view: the water balance of the selected sub-basin
-    │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; scripts/build-model.py), and a network's series for the panel
+    ├── basin/              Basin view: statistics about the selected basin, each with its map
+    │   ├── model.ts        Loads the precomputed files (PCP, AETI, Q, ΔS; scripts/build-model.py)
     │   ├── variables.ts    PCP / AETI / Q / ΔS: labels, units, colour scales
     │   ├── timeseries.ts   Time series charts (drag to choose the period)
-    │   ├── sankey.ts       Sankey diagram of the network's water balance
     │   ├── stats-data.ts   PCP and AETI per sub-basin over the range, the same days in other years, and per month (summed from subbasins.bin)
     │   ├── stats-cards.ts  The statistics topics: tiles, charts and each one's map
     │   ├── rivers.ts       Loads a major basin's river network and the sub-basins' middles
@@ -150,8 +146,7 @@ water-portal/
     │   ├── scheme-map.ts   The scheme on the map: the legend's switch, key and simplify slider
     │   ├── basin-grids.ts  WaPOR's PCP, AETI and T over a range on a grid over a major basin, masked to it
     │   ├── effects-map.ts  Precipitation as rain, evapotranspiration as vapour: the legend's switch, key and sliders
-    │   ├── basin-stats.ts  Statistics in the panel: topics, preview / pin, map colours, legend, tooltip
-    │   └── water-balance.ts  Connects selection, date range, model, map and panel
+    │   └── basin-stats.ts  Statistics in the panel: topics, preview / pin, map colours, legend, tooltip
     ├── country/            Country view: AQUASTAT statistics and the maps that go with them
     │   ├── data.ts         Loads a topic's AQUASTAT variables in BigQuery; values per country and region
     │   ├── charts.ts       Bar, 100 % stacked bar, line and scatter charts (SVG; also the Basin view's)
@@ -505,12 +500,6 @@ water-portal/
   dekad in `latest.json` (hatched on the slider), so a failed or late update shows as a
   shorter range rather than gaps; without the files the range isn't limited and Q and ΔS
   say they couldn't be loaded.
-- **The water balance panel** (switched off for now) shows the selected sub-basin and
-  everything upstream of it, as in FAO's
-  [WaPOR Discharge](https://storage.googleapis.com/fao-wapor-accounter/wapor-discharge/main.html)
-  app, which this view replicates. It reads the same precomputed files as the maps
-  (`subbasins.bin`, and `major/<id>.bin` of each major basin the network reaches into), so it
-  shows the same numbers; a sub-basin's Q depends only on what is upstream of it.
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
 - The URL keeps the map position (`#zoom/lat/lon`), so a view can be shared as a link.
