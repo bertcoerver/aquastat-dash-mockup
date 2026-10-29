@@ -21,17 +21,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { addWords, damNameMender, excelNames } from "./dam-names.mjs";
+import { ROOT, fetchOk, writeJson } from "./lib.mjs";
 
-const ROOT = path.resolve(import.meta.dirname, "..");
 const SOURCE = "https://waterportal.review.fao.org/data/Dams/AQUASTAT_DAMS_corrected.csv";
 const OUT = path.join(ROOT, "public/data/dams.json");
 
 /** The purpose columns, in the order of their bits (src/local/vector-maps.ts names them). */
 const PURPOSES = ["IRRIG", "WATERSUPPL", "FLOODCONTR", "Hydroelect", "NAVIGAT", "Recreation", "Pollution_", "Livestock"];
 
-const res = await fetch(SOURCE);
-if (!res.ok) throw new Error(`${SOURCE}: ${res.status}`);
-const rows = parseCsv(await res.text());
+const rows = parseCsv(await (await fetchOk(SOURCE)).text());
 const header = rows[0];
 const col = (name) => {
   const i = header.indexOf(name);
@@ -80,7 +78,7 @@ for (const row of rows.slice(1)) {
 }
 
 const count = columns.lat.length;
-await fs.writeFile(OUT, JSON.stringify({ source: SOURCE, count, columns }));
+await writeJson(OUT, { source: SOURCE, count, columns });
 console.log(`${count} of ${rows.length - 1} dams (with coordinates) → ${path.relative(ROOT, OUT)}`);
 for (const [field, [ok, not]] of Object.entries(mendings)) console.log(`  ${field}: ${ok} mended, ${not} with letters still lost ("?")`);
 

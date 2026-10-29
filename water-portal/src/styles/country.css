@@ -14,16 +14,6 @@
   --c-base: #9ec5f4;
   --c-now: #256abf;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --c-1: #3987e5;
-    --c-2: #d95926;
-    --c-3: #199e70;
-    --c-4: #c98500;
-    --c-base: #256abf;
-    --c-now: #86b6ef;
-  }
-}
 :root[data-theme="dark"] {
   --c-1: #3987e5;
   --c-2: #d95926;
@@ -40,10 +30,6 @@
 .cp-topics button {
   padding: 6px 8px;
   white-space: nowrap; /* the panel's min-width (basin.css) keeps them on one line */
-}
-.cp-topics button[aria-selected="true"] {
-  color: var(--accent-ink);
-  background: var(--accent);
 }
 .cp-hint {
   margin: 0 0 10px;
@@ -77,12 +63,6 @@
 .cp-card.pinned {
   box-shadow: inset 3px 0 0 var(--accent);
   background: color-mix(in srgb, var(--accent-soft) 45%, var(--surface));
-}
-.cp-card:focus-visible,
-.cp-stats button:focus-visible,
-.cp-topics button:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 .cp-card h3 {
   display: flex;

@@ -4,6 +4,18 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Water Portal</title>
+    <!-- The theme before the stylesheets apply (no flash of the wrong one): the saved
+      choice, else the system's (src/panels/theme-switch.ts keeps it up to date). -->
+    <script>
+      (function () {
+        var dark = matchMedia("(prefers-color-scheme: dark)").matches;
+        try {
+          var t = localStorage.getItem("water-portal:theme");
+          if (t === "light" || t === "dark") dark = t === "dark";
+        } catch (e) {}
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
     <link rel="icon" href="data:," />
     <!-- The lists the page starts with (src/main.ts): fetched alongside the script, not after it has run. -->
     <link rel="preload" href="%BASE_URL%data/sub-basins.json" as="fetch" crossorigin />

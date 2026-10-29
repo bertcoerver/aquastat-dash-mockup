@@ -11,21 +11,9 @@
   background: var(--ground);
 }
 .wb-vars button {
-  flex: 1;
   font: 500 12px/1 var(--sans);
-  color: var(--muted);
-  background: transparent;
-  border: 0;
   border-radius: 4px;
   padding: 6px 0;
-  cursor: pointer;
-}
-.wb-vars button:hover {
-  color: var(--ink);
-}
-.wb-vars button[aria-checked="true"] {
-  color: var(--accent-ink);
-  background: var(--accent);
 }
 
 /* --- Map tooltip --------------------------------------------------------------------- */
@@ -178,7 +166,8 @@
   bottom: auto;
   max-height: calc(100vh - 12px - var(--pane-bottom, calc(12px + env(safe-area-inset-bottom, 0px))));
 }
-.lp-section {
+/* (Over .cp-card's margin, country.css: the first card shown is flush with the body.) */
+#lp-body > .lp-section {
   margin-top: 0;
 }
 #lp-body > section:not([hidden]) ~ section:not([hidden]) {
@@ -326,8 +315,7 @@
 /* The dam cards (dam-card.ts): the picked dam's fields, then a card per attribute: a
    strip of how many dams have each value, the median dashed and the dam marked, or the
    share in each class, in the map's colours. */
-#lp-body > section:not([hidden]) ~ .lp-dams,
-.lp-dams > section + section {
+#lp-body > section:not([hidden]) ~ .lp-dams {
   margin-top: 10px;
 }
 .dc-intro {
@@ -697,6 +685,7 @@
 }
 /* A small square button to unpin a card (only on the pinned one). */
 .cp-unpin {
+  display: none;
   font: 500 14px/1 var(--sans);
   color: var(--muted);
   background: transparent;
@@ -705,9 +694,6 @@
   padding: 1px 6px 3px;
   cursor: pointer;
 }
-.cp-unpin {
-  display: none;
-}
 .cp-card.pinned .cp-unpin {
   display: inline-block;
 }
@@ -715,21 +701,11 @@
   color: var(--ink);
   border-color: var(--accent);
 }
-.cp-unpin:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
 .wb-about {
   margin: 18px 0 0;
   font-size: 11px;
   line-height: 1.45;
   color: var(--muted);
-}
-.wb-stats button:focus-visible,
-.wb-vars button:focus-visible,
-.wb-csv:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* --- Time series ------------------------------------------------------------------- */
@@ -776,9 +752,6 @@
   margin-top: 4px;
   font-size: 11px;
   color: var(--muted);
-}
-.ts-key[hidden] {
-  display: none;
 }
 .ts-key-item {
   display: inline-flex;

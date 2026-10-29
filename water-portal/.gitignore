@@ -1,8 +1,2 @@
-node_modules/
-dist/
-.vite/
-
-# Source boundaries (~160 MB) and their derived lines; `npm run tiles` re-downloads them.
-data/*.geojson
-
-.DS_Store
+# (The rest is in the repository's .gitignore: node_modules, dist, tiles, model output, boundaries.)
+__pycache__/

@@ -24,8 +24,8 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ROOT, writeJson } from "./lib.mjs";
 
-const ROOT = path.resolve(import.meta.dirname, "..");
 const [input = path.join(ROOT, "../river-flow-poc/public/data/rivers.bin")] = process.argv.slice(2);
 const OUT = path.join(ROOT, "public/data/rivers");
 
@@ -115,5 +115,5 @@ console.log(
 // --- Middles ----------------------------------------------------------------------------
 const nodes = JSON.parse(await fs.readFile(path.join(ROOT, "../river-flow-poc/public/data/nodes.json"), "utf8"));
 const middles = Object.fromEntries(Object.entries(nodes).map(([id, n]) => [id, n.slice(0, 2)]));
-await fs.writeFile(path.join(ROOT, "public/data/sub-basin-middles.json"), JSON.stringify(middles));
+await writeJson(path.join(ROOT, "public/data/sub-basin-middles.json"), middles);
 console.log(`${Object.keys(middles).length} sub-basin middles → public/data/sub-basin-middles.json`);

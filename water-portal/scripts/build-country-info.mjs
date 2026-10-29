@@ -16,8 +16,7 @@
  */
 import fs from "node:fs/promises";
 import path from "node:path";
-
-const ROOT = path.resolve(import.meta.dirname, "..");
+import { ROOT, fetchOk, round3 as round, writeJson } from "./lib.mjs";
 const UNSD = "https://unstats.un.org/unsd/methodology/m49/overview/";
 
 export const REGIONS = [
@@ -35,7 +34,7 @@ export const REGIONS = [
 const SUB_REGIONS = new Set([202, 15, 145, 143, 34, 30, 35, 419]);
 
 // --- Regions: UNSD's table (HTML), one row per country ---------------------------
-const html = await (await fetch(UNSD)).text();
+const html = await (await fetchOk(UNSD)).text();
 const table = html.slice(html.indexOf('id = "downloadTableEN"'), html.indexOf("</table>", html.indexOf('id = "downloadTableEN"')));
 const text = (cell) => cell.replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").trim();
 const rows = [...table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)].map((r) =>
@@ -77,7 +76,7 @@ for (const [m49, center] of centerOf) {
   if (regionOf.has(m49)) countries[m49] = { region: regionOf.get(m49), center };
 }
 const out = path.join(ROOT, "public/data/country-info.json");
-await fs.writeFile(out, JSON.stringify({ regions: REGIONS, countries }));
+await writeJson(out, { regions: REGIONS, countries });
 console.log(`${Object.keys(countries).length} countries → ${path.relative(ROOT, out)}`);
 
 /** Planar centroid and signed area of a ring (lon/lat: good enough for one country). */
@@ -97,6 +96,3 @@ function ringCentroid(ring) {
   return { area: area / 2, x: x / (3 * area), y: y / (3 * area) };
 }
 
-function round(v) {
-  return Math.round(v * 1000) / 1000;
-}

@@ -4,6 +4,13 @@
   box-sizing: border-box;
 }
 
+/* The focus ring, wherever the keyboard puts the focus (a control's own rule can move it). */
+:where(button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* (Everywhere, over any display: a rule per hidden element isn't needed.) */
 [hidden] {
   display: none !important;
 }
@@ -58,4 +65,25 @@ body {
   .segmented.sliding > * {
     transition: none;
   }
+}
+
+/* The view tabs (toolbar.css) and the panels' variable and topic switches (basin.css): a
+   row of plain buttons, the chosen one on the accent colour. */
+.tab,
+.wb-vars button {
+  flex: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.tab:hover,
+.wb-vars button:hover {
+  color: var(--ink);
+}
+.tab[aria-selected="true"],
+.wb-vars button[aria-checked="true"],
+.wb-vars button[aria-selected="true"] {
+  color: var(--accent-ink);
+  background: var(--accent);
 }

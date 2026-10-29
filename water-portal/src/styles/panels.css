@@ -61,9 +61,6 @@
   font: 500 12px/1.3 var(--sans);
   cursor: help;
 }
-.corner-warning[hidden] {
-  display: none;
-}
 
 /* Layers button and menu: among the map's controls (main.ts puts it there). */
 .layers-menu {
@@ -127,9 +124,4 @@
 .layers-panel input {
   accent-color: var(--accent);
   margin: 0;
-}
-.layers-button:focus-visible,
-.layers-panel input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }

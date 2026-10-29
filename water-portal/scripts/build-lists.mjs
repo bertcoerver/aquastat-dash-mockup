@@ -13,8 +13,8 @@ import { parse } from "@loaders.gl/core";
 import { MVTLoader } from "@loaders.gl/mvt";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { ROOT, round3, writeJson } from "./lib.mjs";
 
-const ROOT = path.resolve(import.meta.dirname, "..");
 const OUT = path.join(ROOT, "public/data");
 // Zoom 5: detailed enough that tippecanoe keeps even small basins, few enough tiles.
 const ZOOM = Number(process.env.ZOOM ?? 5);
@@ -92,8 +92,7 @@ for (const set of SETS) {
     .filter((item) => item.points.length > 0)
     .map(({ entry, points }) => ({ ...entry, bbox: bbox(points) }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  await fs.mkdir(OUT, { recursive: true });
-  await fs.writeFile(path.join(OUT, set.out), JSON.stringify(set.columns ? byColumn(list) : list));
+  await writeJson(path.join(OUT, set.out), set.columns ? byColumn(list) : list);
   console.log(`${set.out}: ${list.length} entries`);
 }
 
@@ -122,7 +121,7 @@ function bbox(points) {
     w360 = Math.min(w360, l360);
     e360 = Math.max(e360, l360);
   }
-  const r = (v) => Math.round(v * 1000) / 1000;
+  const r = round3;
   const wrap = (v) => (v > 180 ? v - 360 : v);
   return e360 - w360 < e - w ? [r(wrap(w360)), r(south), r(wrap(e360)), r(north)] : [r(w), r(south), r(e), r(north)];
 }

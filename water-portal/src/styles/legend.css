@@ -15,9 +15,6 @@
   backdrop-filter: blur(12px) saturate(1.2);
   font: 400 12px/1.4 var(--sans);
 }
-.legend[hidden] {
-  display: none;
-}
 .legend-title {
   position: relative;
   font-weight: 600;
@@ -64,12 +61,18 @@
 .title-menu-list:focus {
   outline: none;
 }
-.legend-title small {
+/* Small capitals in grey: the source lines, the sliders' heads, the tooltip's source. */
+.legend-title small,
+.legend-quality-head,
+.legend-layer-note,
+.mt-source {
   display: block;
   font: 500 10px/1.4 var(--sans);
   color: var(--muted);
   letter-spacing: 0.06em;
   text-transform: uppercase;
+}
+.legend-title small {
 }
 /* The pixel size, which lights up (.flash, toolbar.css) when zooming switches level. */
 #wapor-pixel {
@@ -137,10 +140,6 @@
   outline: 1px solid var(--muted);
   outline-offset: 2px;
 }
-.ramp-menu:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
 /* The unit: a quiet menu (title-menu), muted until hovered. */
 .legend-period .unit-menu {
   margin: 0 -4px 0 auto;
@@ -196,15 +195,7 @@
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
-.legend-quality[hidden] {
-  display: none;
-}
 .legend-quality-head {
-  display: block;
-  font: 500 10px/1.4 var(--sans);
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   cursor: help;
 }
 .legend-quality-input {
@@ -217,10 +208,6 @@
 .legend-quality-input:disabled {
   cursor: not-allowed;
   opacity: 0.4;
-}
-.legend-quality-input:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 .legend-quality-ends {
   display: flex;
@@ -262,9 +249,6 @@
 .legend-sizes > .scheme-key {
   margin-top: 0;
 }
-.scheme-key[hidden] {
-  display: none;
-}
 .scheme-key text {
   fill: var(--muted);
   font: 400 10px/1 var(--mono);
@@ -272,11 +256,6 @@
 
 /* --- Layers (panels/legend.ts): a section per layer on the map, under the checklist. --- */
 .legend-layer-note {
-  display: block;
-  font: 500 10px/1.4 var(--sans);
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 .legend-layer-note:empty {
   display: none;
@@ -357,15 +336,12 @@
 }
 .legend-remove:focus-visible,
 .legend-move:focus-visible {
-  outline: 2px solid var(--accent);
+  outline-offset: 0;
 }
 .legend-layer .legend-quality {
   margin-top: 6px;
 }
 .wapor-legend[hidden],
-.legend-attribute[hidden] {
-  display: none;
-}
 /* A vector map's attribute (local/local-maps.ts): a menu of its others, under its title. */
 .legend-attribute {
   margin-top: 1px;
@@ -494,9 +470,6 @@
   align-items: flex-start;
   gap: 6px;
 }
-.legend-key[hidden] {
-  display: none;
-}
 .legend-key-body {
   flex: 1;
   min-width: 0;
@@ -521,9 +494,6 @@
   background: var(--surface);
   box-shadow: 0 6px 24px rgb(0 0 0 / 0.18);
   font: 400 12px/1.4 var(--sans);
-}
-.tuning-pane[hidden] {
-  display: none;
 }
 .tuning-pane-head {
   position: sticky;
@@ -616,9 +586,6 @@
     width 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
     opacity 0.4s ease;
 }
-.map-tip-dock[hidden] {
-  display: none;
-}
 .map-tip-dock.mt-empty {
   width: 30px;
 }
@@ -667,10 +634,6 @@
   width: 0;
   flex: 1 1 0;
   overflow: hidden;
-  font: 500 10px/1.4 var(--sans);
-  color: var(--muted);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   text-overflow: ellipsis;
 }
 .mt-squares {
@@ -751,7 +714,7 @@ button.mt-key:hover {
   color: color-mix(in srgb, var(--accent) 70%, var(--ink));
 }
 button.mt-key:focus-visible {
-  outline: 2px solid var(--accent);
+  outline-offset: 0;
   border-radius: 3px;
 }
 /* Released: the zone that pins it (map-tip.ts), where the empty box would be, as big,
@@ -777,9 +740,6 @@ button.mt-key:focus-visible {
   box-shadow: none;
 }
 .map-tip-dock.mt-empty::before {
-  display: none;
-}
-.map-tip-zone[hidden] {
   display: none;
 }
 @media (prefers-reduced-motion: reduce) {

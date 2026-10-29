@@ -25,24 +25,7 @@
   --ctrl-hover: rgb(0 0 0 / 5%);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-    --ground: #0d161b;
-    --surface: #142128;
-    --ink: #e3ecef;
-    --muted: #93a6ae;
-    --line: #25363f;
-    --accent: #4db1d3;
-    --accent-ink: #0d161b;
-    --accent-soft: #163341;
-    --snap: #e6a94c;
-    --snap-soft: #3a2a12;
-    --ctrl-icon-filter: invert(1) hue-rotate(180deg);
-    --ctrl-hover: rgb(255 255 255 / 8%);
-  }
-}
-
+/* (data-theme is always set, light or dark: index.html resolves the system setting.) */
 :root[data-theme="dark"] {
   color-scheme: dark;
   --ground: #0d161b;
