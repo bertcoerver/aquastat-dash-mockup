@@ -104,8 +104,9 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMa
     if (pin === previewing) return;
     const apply = () => {
       previewing = pin;
-      if (pin) previewMap(mapOf(pin).id, mapOf(pin).attribute);
-      else previewMap(null);
+      if (!pin) return previewMap(null);
+      const { id, attribute } = mapOf(pin);
+      previewMap(id, attribute);
     };
     if (pin && previewing) apply();
     else hoverTimer = window.setTimeout(apply, 120);
@@ -157,7 +158,6 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMa
   const state = {
     view: "country" as View,
     lngLat: null as LngLat | null,
-    feature: null as Selection["feature"],
     variable,
     days: null as DayRange | null,
     units: { per: "day", pixel: false } as WaporUnits,
@@ -322,6 +322,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMa
 
   return {
     setView(view) {
+      if (view === state.view) return; // (told at every change of the range too)
       state.view = view;
       sync();
       syncCrops();
@@ -330,7 +331,6 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMa
       state.lngLat = selection.lngLat;
       const { feature } = selection;
       const dam = feature?.map === "dams" ? feature.index : null;
-      state.feature = feature;
       damCards.setSelected(dam);
       sync();
       syncCrops();

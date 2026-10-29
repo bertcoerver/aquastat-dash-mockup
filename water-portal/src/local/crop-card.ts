@@ -59,7 +59,9 @@ export function initCropCard(el: HTMLElement, onHover: (shown: CropMap | null) =
   const chart = $(".cc-chart");
   const caption = $(".cc-caption");
 
-  const cache = new Map<string, Promise<Harvest>>();
+  /** Reads by supply and point; one given up on (the point moved on) is read again if asked for. */
+  const cache = new Map<string, { harvest: Promise<Harvest>; signal: AbortSignal; done: boolean }>();
+  let loading: AbortController | null = null;
   let gaez: GaezMap = HARVESTED;
   let checked = false;
   let on = false;
@@ -70,36 +72,45 @@ export function initCropCard(el: HTMLElement, onHover: (shown: CropMap | null) =
   let loadingKey = "";
   let hover: string | null = null;
 
-  function read(supply: GaezSupply, at: LngLat): Promise<Harvest> {
+  function read(supply: GaezSupply, at: LngLat, signal: AbortSignal): Promise<Harvest> {
     const key = `${supply} ${at}`;
     let known = cache.get(key);
-    if (!known) {
+    if (!known || (known.signal.aborted && !known.done)) {
       // (1000 ha a pixel; none: no crop there.)
-      const ha = (code: string) => cogPixel(gaezHarvestUrl(supply, code), at).then((v) => (v === null ? 0 : v * 1000));
+      const ha = (code: string) => cogPixel(gaezHarvestUrl(supply, code), at, signal).then((v) => (v === null ? 0 : v * 1000));
+      const task = `local-crops:${key}`;
       let done = 0;
       const crops = Promise.all(
         CROPS.map(async ({ code, label }) => {
           const value = await ha(code);
-          setProgress("local-crops", ++done / CROPS.length);
+          setProgress(task, ++done / CROPS.length);
           return { code, label, ha: value };
         }),
       );
-      known = Promise.all([crops, ha("ALL")]).then(([crops, all]) => ({ crops, all, area: pixelArea([GAEZ_HARVEST_PIXEL, GAEZ_HARVEST_PIXEL], at[1]) }));
-      known.catch(() => cache.delete(key)).finally(() => setProgress("local-crops", null));
+      const harvest = Promise.all([crops, ha("ALL")]).then(([crops, all]) => ({ crops, all, area: pixelArea([GAEZ_HARVEST_PIXEL, GAEZ_HARVEST_PIXEL], at[1]) }));
+      const entry = (known = { harvest, signal, done: false as boolean });
+      harvest
+        .then(
+          () => (entry.done = true),
+          () => cache.get(key) === entry && cache.delete(key),
+        )
+        .finally(() => setProgress(task, null));
       cache.set(key, known);
     }
-    return known;
+    return known.harvest;
   }
 
   function sync() {
     const key = on && lngLat ? `${gaez.supply} ${lngLat}` : "";
     if (key === loadingKey) return render();
     loadingKey = key;
+    loading?.abort(); // (the reads for the last point, if still going)
     harvest = null;
     error = "";
     render();
     if (!key || !lngLat) return;
-    read(gaez.supply, lngLat).then(
+    const controller = (loading = new AbortController());
+    read(gaez.supply, lngLat, controller.signal).then(
       (next) => {
         if (loadingKey !== key) return;
         harvest = next;
@@ -182,7 +193,11 @@ export function initCropCard(el: HTMLElement, onHover: (shown: CropMap | null) =
 
   return {
     set(nextChecked, nextCrop, nextLngLat, nextOn) {
-      gaez = nextChecked ?? HARVESTED;
+      const next = nextChecked ?? HARVESTED;
+      const same = next === gaez && Boolean(nextChecked) === checked && nextCrop === crop && nextOn === on &&
+        (nextLngLat === lngLat || (!!nextLngLat && !!lngLat && nextLngLat[0] === lngLat[0] && nextLngLat[1] === lngLat[1]));
+      if (same) return;
+      gaez = next;
       checked = Boolean(nextChecked);
       crop = nextCrop;
       lngLat = nextLngLat;

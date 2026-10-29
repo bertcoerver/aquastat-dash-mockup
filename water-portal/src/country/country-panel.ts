@@ -398,7 +398,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       showMapTip(tooltip, null);
       current = null;
       map.setCountryFills(null);
-      map.setCountrySymbols(null);
+      map.setSymbols("country", null);
       map.setBars("country", null);
       return;
     }
@@ -419,7 +419,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       cardsEl.innerHTML = "";
       legend.show(null);
       map.setCountryFills(null);
-      map.setCountrySymbols(null);
+      map.setSymbols("country", null);
       map.setBars("country", null);
       current = null;
       return;
@@ -641,7 +641,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       if (center) symbols.push({ id: `picked:${m49}`, position: center, radius: 12, fill: [0, 0, 0, 0], line: theme.marker });
     }
     map.setCountryFills({ key, colors: fills });
-    map.setCountrySymbols(symbols.length ? { key: `${key}:${symbols.length}`, items: symbols } : null);
+    map.setSymbols("country", symbols.length ? { key: `${key}:${symbols.length}`, items: symbols } : null);
     map.setBars("country", bars.length ? { key, items: bars } : null);
 
     const latest = latestYear();

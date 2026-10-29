@@ -174,8 +174,14 @@ function mix<T extends object>(out: T, from: T, to: T, t: number) {
     const y = b[k];
     if (x === y) o[k] = y;
     else if (typeof x === "number" && typeof y === "number") o[k] = x + (y - x) * t;
-    else if (isNumbers(x) && isNumbers(y) && x.length === y.length) o[k] = y.map((v, i) => x[i] + (v - x[i]) * t);
-    else o[k] = y;
+    else if (isNumbers(x) && isNumbers(y) && x.length === y.length) {
+      // (Into the array of the last frame, once there is one of its own: not a new one
+      // per colour per item per frame.)
+      const was = o[k];
+      const out = Array.isArray(was) && was !== x && was !== y ? (was as number[]) : new Array<number>(y.length);
+      for (let i = 0; i < y.length; i++) out[i] = x[i] + (y[i] - x[i]) * t;
+      o[k] = out;
+    } else o[k] = y;
   }
 }
 

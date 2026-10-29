@@ -97,8 +97,16 @@ export function initWaporPlayer({
     timer: number;
   } | null = null;
 
+  // (Told only when something changed: several loaders report after each tile.)
+  let reported = "";
+  function tell(state: PlaybackState) {
+    const key = `${state.status}:${state.bufferedTo}:${state.loading}`;
+    if (key === reported) return;
+    reported = key;
+    onState(state);
+  }
   function report() {
-    if (!run) return onState({ status: "stopped", bufferedTo: null, loading: null });
+    if (!run) return tell({ status: "stopped", bufferedTo: null, loading: null });
     let last: Frame | null = null;
     let ahead = 0;
     for (const frame of run.frames.slice(0, run.end)) {
@@ -108,7 +116,7 @@ export function initWaporPlayer({
     }
     const wanted = Math.min(run.status === "buffering" ? settings.startAhead : SLOW_BELOW, run.end);
     const loading = ahead < wanted ? ahead / wanted : null;
-    onState({ status: run.status, bufferedTo: last && last.range.end + 1, loading });
+    tell({ status: run.status, bufferedTo: last && last.range.end + 1, loading });
   }
 
   /** Frame `i` ahead, made when first needed; null past the current dekad. */
@@ -180,7 +188,7 @@ export function initWaporPlayer({
       return stop();
     }
     const ahead = Math.min(settings.startAhead, end);
-    const ready = frames.slice(0, ahead).length === ahead && frames.slice(0, ahead).every((f) => f.buffered);
+    const ready = frames.length >= ahead && frames.slice(0, ahead).every((f) => f.buffered);
     if (run.status === "buffering" && ready) {
       run.status = "playing";
       tick();

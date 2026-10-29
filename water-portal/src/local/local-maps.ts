@@ -387,12 +387,12 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
     map.setGaez(gaez && sum && openGaez(sum) === "open" ? { sum, ramp: gaez.ramp } : null);
     if (!shown) {
       legend.show(null);
-      map.setLocalSymbols(null);
+      map.setSymbols("local", null);
       map.setBars("local", null);
-      showMapTip(tooltip, null);
+      showTip(null);
       return;
     }
-    const symbols: CountrySymbol[] = [];
+    const symbolLists: CountrySymbol[][] = [];
     const bars: Bar[] = [];
     const sections: LegendLayer[] = [];
     let key = "";
@@ -427,13 +427,16 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
         section.status = state.failed.has(m.id) ? `Couldn't load the ${m.title.toLowerCase()}: ${state.failed.get(m.id)}` : "Loading…";
         continue;
       }
-      const drawn = drawVector(m, attribute, data, l.slot as Exclude<Slot, "raster">, symbols, bars);
+      const drawn = drawVector(m, attribute, data, l.slot as Exclude<Slot, "raster">);
       Object.assign(section, drawn.section);
+      tiles.set(m.id, drawn.tile);
+      if (drawn.symbols.length) symbolLists.push(drawn.symbols);
+      bars.push(...drawn.bars);
       key += `${drawn.key};`;
     }
-    // Small circles on top of big ones.
-    symbols.sort((a, b) => b.radius - a.radius);
-    map.setLocalSymbols(symbols.length ? { key: `${key}:${symbols.length}`, items: symbols } : null);
+    // Small circles on top of big ones (a map's are sorted so already).
+    const symbols = symbolLists.length === 1 ? symbolLists[0] : symbolLists.flat().sort((a, b) => b.radius - a.radius);
+    map.setSymbols("local", symbols.length ? { key: `${key}:${symbols.length}`, items: symbols } : null);
     map.setBars("local", bars.length ? { key, items: bars } : null);
     legend.show(sections);
   }
@@ -454,14 +457,43 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
     return "opening";
   }
 
-  /** A vector map's circles or bars, for its attribute, and its section's key and note. */
-  function drawVector(m: VectorMap, a: VectorAttribute<PointData>, d: PointData, slot: "circles" | "bars", symbols: CountrySymbol[], bars: Bar[]) {
+  /** A vector map's circles or bars, for its attribute, its points' tooltips, and its section's key and note. */
+  interface DrawnVector {
+    key: string;
+    symbols: CountrySymbol[];
+    bars: Bar[];
+    tile: (i: number) => MapTipRow;
+    section: Partial<LegendLayer>;
+  }
+  /**
+   * The last few maps drawn, by key: a redraw that changes nothing about a map (a card
+   * hovered, say) doesn't build its thousands of points again.
+   */
+  const drawnVectors = new Map<string, DrawnVector>();
+  function drawVector(m: VectorMap, a: VectorAttribute<PointData>, d: PointData, slot: "circles" | "bars"): DrawnVector {
     const off = state.hiddenClasses.get(m.id) ?? new Set<number>();
+    const style = styleOf(m);
+    const key = `${m.id}:${a.id}:${slot}:${style.full}:${[...off].sort().join(",")}:${legend.lockKey()}`;
+    let drawn = drawnVectors.get(key);
+    if (!drawn) {
+      const symbols: CountrySymbol[] = [];
+      const bars: Bar[] = [];
+      const { tile, section } = buildVector(m, a, d, slot, off, style, symbols, bars);
+      // Small circles on top of big ones.
+      symbols.sort((x, y) => y.radius - x.radius);
+      drawn = { key, symbols, bars, tile, section };
+      drawnVectors.set(key, drawn);
+      for (const old of drawnVectors.keys()) {
+        if (drawnVectors.size <= 6) break;
+        drawnVectors.delete(old);
+      }
+    }
+    return drawn;
+  }
+  function buildVector(m: VectorMap, a: VectorAttribute<PointData>, d: PointData, slot: "circles" | "bars", off: Set<number>, style: ShapeStyle, symbols: CountrySymbol[], bars: Bar[]) {
     const position = (i: number): [number, number] => [d.lon[i], d.lat[i]];
     // (How many are drawn, and what to know about the attribute, under the key.)
     const status = (shown: number) => [`${shown.toLocaleString("en-US")} of ${d.count.toLocaleString("en-US")} ${m.title.toLowerCase()} shown.`, a.note && `${a.note}.`].filter(Boolean).join(" ");
-    const style = styleOf(m);
-    const key = `${m.id}:${a.id}:${slot}:${style.full}:${[...off].sort().join(",")}:${legend.lockKey()}`;
 
     if (a.kind === "amount") {
       // Circles (area) or bars (height) by the value, the style's at full size (locked: as
@@ -477,13 +509,14 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
         else bars.push({ id, position: position(i), height: size.height(v), color: AMOUNT_COLOR });
       });
       const sizes: SizesKey = sizeKey(slot, size, () => css(AMOUNT_COLOR, slot === "circles" ? 0.7 : 1), false);
-      tiles.set(m.id, (i) => ({ color: css(AMOUNT_COLOR), value: values[i].toLocaleString("en-US"), unit: a.unit, label: a.label }));
-      return { key, section: { unit: a.unit, sizes, status: status(shown) } };
+      const tile = (i: number): MapTipRow => ({ color: css(AMOUNT_COLOR), value: values[i].toLocaleString("en-US"), unit: a.unit, label: a.label });
+      return { tile, section: { unit: a.unit, sizes, status: status(shown) } };
     }
 
     // One size, coloured by the value or the class.
     let colorOf: (i: number) => Color | null;
     let legendKey: LegendKey;
+    let tile: (i: number) => MapTipRow;
     if (a.kind === "value") {
       const values = Array.from({ length: d.count }, (_, i) => a.value(d, i) ?? Number.NaN);
       let scale = rampScale({ ramp: a.ramp, scale: "linear" }, values);
@@ -492,7 +525,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
       colorOf = (i) => scale.color(values[i]);
       // (A year, as it is: 1960, not 1,960.)
       legendKey = { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, format: a.unit ? undefined : (v) => String(Math.round(v)) };
-      tiles.set(m.id, (i) => ({ color: css(colorOf(i) ?? AMOUNT_COLOR), value: a.unit ? values[i].toLocaleString("en-US") : String(values[i]), unit: a.unit, label: a.label }));
+      tile = (i) => ({ color: css(colorOf(i) ?? AMOUNT_COLOR), value: a.unit ? values[i].toLocaleString("en-US") : String(values[i]), unit: a.unit, label: a.label });
     } else {
       const classes = Array.from({ length: d.count }, (_, i) => a.classOf(d, i));
       const present = new Set(classes);
@@ -502,7 +535,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
         kind: "classes",
         items: a.classes.map((k, i) => ({ label: k.label, background: k.color, state: !present.has(i) ? "absent" : off.has(i) ? "off" : "on" })),
       };
-      tiles.set(m.id, (i) => ({ color: a.classes[classes[i]].color, value: a.classes[classes[i]].label, unit: "", label: a.label }));
+      tile = (i) => ({ color: a.classes[classes[i]].color, value: a.classes[classes[i]].label, unit: "", label: a.label });
     }
     let shown = 0;
     for (let i = 0; i < d.count; i++) {
@@ -511,12 +544,20 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
       shown++;
       symbols.push({ id: `${m.id}:${i}`, position: position(i), radius: POINT_R, fill: [c[0], c[1], c[2], 230], line: [c[0] * 0.55, c[1] * 0.55, c[2] * 0.55, 240] });
     }
-    return { key, section: { unit: a.kind === "value" ? a.unit : "", key: legendKey, status: status(shown) } };
+    return { tile, section: { unit: a.kind === "value" ? a.unit : "", key: legendKey, status: status(shown) } };
   }
 
   // The point under the pointer: its name, where it is, its map's tile, and the raster's
   // pixel's there (at the point); else the raster's pixel's under the pointer.
   const tooltip = $("lp-tooltip");
+  // (The same tooltip as shown, on the same point or pixel, isn't written again on every move.)
+  let tipShown = "";
+  function showTip(tip: MapTip | null) {
+    const key = tip ? JSON.stringify(tip) : "";
+    if (key === tipShown && !tooltip.hidden === !!tip) return;
+    tipShown = key;
+    showMapTip(tooltip, tip);
+  }
   function hover(id: string | null, x: number, y: number, lngLat: LngLat | null) {
     const [mapId, index] = id?.split(":") ?? [];
     const i = Number(index);
@@ -528,7 +569,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
       const under = rasterAt([data.lon[i], data.lat[i]]);
       tip = { title: m.name(data, i), source: m.where(data, i) || m.title, rows: [tile(i), ...(under?.rows ?? [])] };
     } else if (state.view === "local" && lngLat) tip = rasterAt(lngLat);
-    showMapTip(tooltip, tip);
+    showTip(tip);
     tooltip.style.left = `${x + 14}px`;
     tooltip.style.top = `${y + 14}px`;
   }
@@ -556,7 +597,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
     },
     hover,
     preview(id, attribute) {
-      const next = id && (id.startsWith("gaez:") ? id : vectorId(VECTOR_MAPS.find((m) => m.id === id)!));
+      const next = id && (id.startsWith("gaez:") ? id : `vector:${id}`);
       const nextAttribute = (next && attribute) || null;
       if (next === state.preview && nextAttribute === state.previewAttribute) return;
       state.preview = next;

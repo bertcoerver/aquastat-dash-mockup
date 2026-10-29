@@ -107,12 +107,12 @@ export interface WaterMap {
    * set of colours: the map only repaints when it changes.
    */
   setCountryFills(fills: { key: string; colors: Map<number, Color> } | null): void;
-  /** Country view: circles on countries (proportional symbols, rings), by `key` as above. */
-  setCountrySymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
-  /** Basin view: circles on basins (a statistics map drawn as circles), by `key` as above. */
-  setBasinSymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
-  /** Local view: circles on points (a vector map's, local/local-maps.ts), by `key` as above. */
-  setLocalSymbols(symbols: { key: string; items: CountrySymbol[] } | null): void;
+  /**
+   * A view's circles (proportional symbols, rings): on countries (Country view), basins
+   * (Basin view) or the points of a vector map (Local view, local/local-maps.ts; picked
+   * for their tooltips), by `key` as above.
+   */
+  setSymbols(view: StatView, symbols: { key: string; items: CountrySymbol[] } | null): void;
   /**
    * 3D bars on the areas or points (a statistics map drawn as bars), by `key` as above.
    * While a view's bars are shown, the map is tilted, to see them stand.
@@ -207,9 +207,9 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     valueFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
     outlined: [] as number[],
     countryFills: undefined as { key: string; colors: Map<number, Color> } | undefined,
-    countrySymbols: null as { key: string; items: CountrySymbol[] } | null,
-    basinSymbols: null as { key: string; items: CountrySymbol[] } | null,
-    localSymbols: null as { key: string; items: CountrySymbol[] } | null,
+    symbols: { country: null, basin: null, local: null } as Record<StatView, { key: string; items: CountrySymbol[] } | null>,
+    /** The Local view's symbols by id (the picked point's circle is looked up at every frame). */
+    localById: new Map<string, CountrySymbol>(),
     bars: { country: null, basin: null, local: null } as Record<StatView, { key: string; items: Bar[] } | null>,
     order: { country: [], basin: [], local: [] } as Record<StatView, string[]>,
     basinStats: null as BasinStatFills | null,
@@ -444,25 +444,30 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 
   // Only the circles on the near side of the globe: they are drawn without a depth
   // test (like everything here), so the far side's would show through.
-  let symbolsKey = "";
   const shownSymbols = () => symbolTweens[state.view as StatView]?.get() ?? null;
   /** The picked point's circle's radius (px; one of a bar's, or not drawn: a point's), null: none picked, or it's being dragged off. */
   function featureRadius() {
     const feature = state.selection.feature;
     if (state.view !== "local" || !feature || state.dragged) return null;
-    return state.localSymbols?.items.find((s) => s.id === feature.id)?.radius ?? 4;
+    return state.localById.get(feature.id)?.radius ?? 4;
   }
 
+  /**
+   * The same array as long as the same circles are kept (deck.gl takes a new one for new
+   * data: every attribute of every circle again), re-keyed by them (the key says what to
+   * recompute: while easing, the items change in place).
+   */
+  let visible: { key: string; items: CountrySymbol[] } | null = null;
   function visibleSymbols() {
     const symbols = shownSymbols();
-    if (!symbols) return null;
+    if (!symbols) return (visible = null);
     const { lng, lat } = map.getCenter();
-    const zoom = map.getZoom();
-    const near = symbols.items.filter((s) => facing(s.position, [lng, lat]) > 0.15 - Math.min(0.15, zoom * 0.03));
-    // Re-key by the circles kept, so deck.gl redraws only when that changes.
+    const cut = 0.15 - Math.min(0.15, map.getZoom() * 0.03);
+    const near = symbols.items.filter((s) => facing(s.position, [lng, lat]) > cut);
+    const kept = visible !== null && near.length === visible.items.length && near.every((s, i) => s === visible!.items[i]);
     const key = `${symbols.key}:${near.length}:${near[0]?.position ?? ""}`;
-    symbolsKey = key;
-    return { key, items: near };
+    if (!kept || key !== visible!.key) visible = { key, items: kept ? visible!.items : near };
+    return visible;
   }
   map.on("move", () => {
     // The bars keep their height in pixels: drawn again as the zoom changes.
@@ -472,9 +477,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       return render();
     }
     if (!shownSymbols()) return;
-    const before = symbolsKey;
-    visibleSymbols();
-    if (symbolsKey !== before) render();
+    const before = visible?.items;
+    if (visibleSymbols()?.items !== before) render();
   });
 
   const shownBars = () => barTweens[state.view as StatView]?.get() ?? null;
@@ -649,7 +653,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     const atL2 = waporShownLevel(period) === "L2";
     const layer = (p: WaporPeriod, id: string, hidden: boolean, onViewportLoad?: () => void) => {
       if (!waporOpened(p)) {
-        openWapor(p).then(render, () => {});
+        openThenRender(p);
         return null;
       }
       return waporLayer({ id, period: p, ramp: state.waporRamp, maxGap: state.waporMaxGap, onLoad: entry.onLoad, hidden, opacity, onViewportLoad });
@@ -670,12 +674,22 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       : null;
     return [l1, l2];
   }
+  // Opens a period's rasters and draws again once they are: once, however many times the
+  // map is drawn meanwhile (each draw would add a redraw to the one opening).
+  const opening = new WeakSet<object>();
+  function openThenRender(sum: RasterSum) {
+    if (opening.has(sum)) return;
+    opening.add(sum);
+    openWapor(sum)
+      .then(render, () => {})
+      .finally(() => opening.delete(sum));
+  }
   /** The GAEZ map, once its rasters are open (as WaPOR's: the layer would open them again). */
   function gaezLayer() {
     const gaez = state.gaez;
     if (!gaez) return null;
     if (!waporOpened(gaez.sum)) {
-      openWapor(gaez.sum).then(() => state.gaez === gaez && render(), () => {});
+      openThenRender(gaez.sum);
       return null;
     }
     return waporLayer({ id: `gaez ${gaez.sum.key}`, period: gaez.sum, ramp: gaez.ramp });
@@ -801,22 +815,11 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       state.countryFills = fills ?? undefined;
       render();
     },
-    setCountrySymbols(symbols) {
-      if (symbols?.key === state.countrySymbols?.key) return;
-      state.countrySymbols = symbols;
-      symbolTweens.country.set(symbols);
-      render();
-    },
-    setBasinSymbols(symbols) {
-      if (symbols?.key === state.basinSymbols?.key) return;
-      state.basinSymbols = symbols;
-      symbolTweens.basin.set(symbols);
-      render();
-    },
-    setLocalSymbols(symbols) {
-      if (symbols?.key === state.localSymbols?.key) return;
-      state.localSymbols = symbols;
-      symbolTweens.local.set(symbols);
+    setSymbols(view, symbols) {
+      if (symbols?.key === state.symbols[view]?.key) return;
+      state.symbols[view] = symbols;
+      if (view === "local") state.localById = new Map(symbols?.items.map((s) => [s.id, s]));
+      symbolTweens[view].set(symbols);
       render();
     },
     setPlayback(stepMs) {

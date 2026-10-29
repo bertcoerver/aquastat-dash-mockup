@@ -721,7 +721,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     map.setBasinStatFills(null);
     schemeMap.draw(null, []);
     effectsMap.draw(null, null, []);
-    map.setBasinSymbols(null);
+    map.setSymbols("basin", null);
     map.setBars("basin", null);
     setMapOverride(false);
   }
@@ -836,7 +836,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       map.setBasinStatFills(null);
       schemeMap.draw(null, []);
       effectsMap.draw(null, null, []);
-      map.setBasinSymbols(null);
+      map.setSymbols("basin", null);
       map.setBars("basin", null);
       setMapOverride(false);
       tellTimed();
@@ -932,7 +932,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       `${fill?.id ?? ""}:${layers.filter((l) => l.slot !== "fill").map((l) => `${l.spec.id}:${l.slot}:${Object.values(styleOf(l.spec)).join("/")}:${waiting.has(l.slot)}`).join()}:${state.stretch}:` +
       `${legend.lockKey()}:${fill?.status ? "" : fill?.period ?? ctx.period}:${sub ?? ""}:${outlined.join()}`;
     map.setBasinStatFills({ level: fill?.level ?? "major", key: statKey, colors, outlined });
-    map.setBasinSymbols(symbols.length ? { key: `${statKey}:${!!at}`, items: symbols } : null);
+    map.setSymbols("basin", symbols.length ? { key: `${statKey}:${!!at}`, items: symbols } : null);
     map.setBars("basin", bars.length ? { key: `${statKey}:${!!at}`, items: bars } : null);
     setMapOverride(true);
 

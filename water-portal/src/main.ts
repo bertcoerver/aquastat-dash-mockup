@@ -92,13 +92,19 @@ function showHover(lngLat: LngLat | null, place: Place | null) {
     view === "country" && country ? { country: country.m49 }
     : view !== "basin" || !majorBasin ? null
     : inSelected && subBasin
-      ? { sub: subBasin.id, flow, upstream: flow ? upstreamOf(subBasin.id) : NONE, downstream: flow ? downstreamOf(subBasin.id) : NONE }
+      ? { sub: subBasin.id, flow, ...(flow ? flowOf(subBasin.id) : { upstream: NONE, downstream: NONE }) }
     : { major: majorBasin.id },
   );
 }
 
 /** The selected sub-basin and everything upstream of it (empty: none selected). */
 const NONE = new Set<number>();
+/** What's up- and downstream of a sub-basin, kept for the one hovered (walked once, not at every move). */
+let flowCache = { id: -1, upstream: NONE, downstream: NONE };
+function flowOf(id: number) {
+  if (flowCache.id !== id) flowCache = { id, upstream: upstreamOf(id), downstream: downstreamOf(id) };
+  return flowCache;
+}
 let catchment = { id: null as number | null, ids: NONE };
 function selectedCatchment() {
   const id = selection.get().subBasin?.id ?? null;
