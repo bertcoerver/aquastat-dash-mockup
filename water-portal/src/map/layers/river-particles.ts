@@ -22,6 +22,7 @@ import { Layer, project32, type DefaultProps, type LayerContext, type UpdatePara
 import type { Buffer, Framebuffer, Texture } from "@luma.gl/core";
 import { Model } from "@luma.gl/engine";
 import type { ShaderModule } from "@luma.gl/shadertools";
+import { OVERWRITE, PREMULTIPLIED, uniformBlock } from "./effects-common";
 
 /** The rivers the particles follow (basin/rivers.ts's RiverNetwork is one). */
 export interface ParticleNetwork {
@@ -62,19 +63,7 @@ export type RiverParticlesLayerProps = {
 
 // --- Shaders -----------------------------------------------------------------------
 
-type FieldProps = { widthScale: number; minWidth: number; disc: number; viewportSize: [number, number] };
-const fieldUniforms = {
-  name: "riverField",
-  vs: `\
-layout(std140) uniform riverFieldUniforms {
-  float widthScale;
-  float minWidth;
-  float disc;
-  vec2 viewportSize;
-} riverField;
-`,
-  uniformTypes: { widthScale: "f32", minWidth: "f32", disc: "f32", viewportSize: "vec2<f32>" },
-} as const satisfies ShaderModule<FieldProps>;
+const fieldUniforms = uniformBlock("riverField", { widthScale: "f32", minWidth: "f32", disc: "f32", viewportSize: "vec2<f32>" }, ["vs"]);
 
 // Each segment is an instance, drawn twice: a quad from its start to its end vertex, as
 // wide as its arc (disc 0), and a disc on its start vertex (disc 1) to round corners.
@@ -160,22 +149,7 @@ void main() {
   gl_Position = vec4(p, 0.0, 1.0);
 }`;
 
-type UpdateProps = { size: [number, number]; speed: number; drop: number; seed: number; alive: number; hold: number; reset: number };
-const updateUniforms = {
-  name: "particleUpdate",
-  fs: `\
-layout(std140) uniform particleUpdateUniforms {
-  vec2 size;
-  float speed;
-  float drop;
-  float seed;
-  float alive;
-  float hold;
-  float reset;
-} particleUpdate;
-`,
-  uniformTypes: { size: "vec2<f32>", speed: "f32", drop: "f32", seed: "f32", alive: "f32", hold: "f32", reset: "f32" },
-} as const satisfies ShaderModule<UpdateProps>;
+const updateUniforms = uniformBlock("particleUpdate", { size: "vec2<f32>", speed: "f32", drop: "f32", seed: "f32", alive: "f32", hold: "f32", reset: "f32" }, ["fs"]);
 
 // One texel per particle: (x, y) in field pixels, z: 1 alive, w: its place across the
 // river, which it steers back to.
@@ -228,17 +202,7 @@ void main() {
   state = s;
 }`;
 
-type DotProps = { size: [number, number]; pointSize: number };
-const dotUniforms = {
-  name: "particleDots",
-  vs: `\
-layout(std140) uniform particleDotsUniforms {
-  vec2 size;
-  float pointSize;
-} particleDots;
-`,
-  uniformTypes: { size: "vec2<f32>", pointSize: "f32" },
-} as const satisfies ShaderModule<DotProps>;
+const dotUniforms = uniformBlock("particleDots", { size: "vec2<f32>", pointSize: "f32" }, ["vs"]);
 
 const DOT_VS = `\
 #version 300 es
@@ -263,16 +227,7 @@ void main() {
   fragColor = vec4(vColor * a, a); // premultiplied
 }`;
 
-type FadeProps = { fade: number };
-const fadeUniforms = {
-  name: "trailFade",
-  fs: `\
-layout(std140) uniform trailFadeUniforms {
-  float fade;
-} trailFade;
-`,
-  uniformTypes: { fade: "f32" },
-} as const satisfies ShaderModule<FadeProps>;
+const fadeUniforms = uniformBlock("trailFade", { fade: "f32" }, ["fs"]);
 
 // The previous trails, faded (premultiplied; the small subtraction lets 8-bit values
 // reach 0 instead of leaving ghosts).
@@ -296,21 +251,8 @@ void main() {
   fragColor = texture(uTex, vUv);
 }`;
 
-// deck.gl leaves blending on: passes that compute (field, update, fade) must turn it off,
-// or they blend into what they replace.
-const OVERWRITE = { blend: false, depthCompare: "always", depthWriteEnabled: false } as const;
-
-const PREMULTIPLIED = {
-  blend: true,
-  blendColorOperation: "add",
-  blendColorSrcFactor: "one",
-  blendColorDstFactor: "one-minus-src-alpha",
-  blendAlphaOperation: "add",
-  blendAlphaSrcFactor: "one",
-  blendAlphaDstFactor: "one-minus-src-alpha",
-  depthCompare: "always",
-  depthWriteEnabled: false,
-} as const;
+// (deck.gl leaves blending on: passes that compute (field, update, fade) draw with
+// OVERWRITE, or they'd blend into what they replace.)
 
 // --- Layer -------------------------------------------------------------------------
 

@@ -15,11 +15,9 @@
  * plants) with that chance and coloured `transpirationColor`, otherwise evaporation
  * (from soil, water and wet leaves) and coloured `evaporationColor`.
  */
-import { Layer, project32, type DefaultProps, type LayerContext, type UpdateParameters } from "@deck.gl/core";
-import type { RenderPass, Texture } from "@luma.gl/core";
-import { Model } from "@luma.gl/engine";
-import type { ShaderModule } from "@luma.gl/shadertools";
-import { FACING_GLSL, MERCATOR_GLSL, PREMULTIPLIED, RANDOM_GLSL, clock, gridTexture, viewRegion, type EffectGrid } from "./rain";
+import type { DefaultProps } from "@deck.gl/core";
+import type { RenderPass } from "@luma.gl/core";
+import { FACING_GLSL, GRID_GLSL, GridEffectLayer, MERCATOR_GLSL, PREMULTIPLIED, RANDOM_GLSL, SCREEN_GLSL, clock, uniformBlock, unit, type EffectGrid } from "./effects-common";
 
 export type VapourLayerProps = {
   /** Two channels: the amount, and transpiration's share of it. */
@@ -49,45 +47,9 @@ const TRAIL = 0.03;
 
 // --- Shaders -----------------------------------------------------------------------
 
-type VapourProps = {
-  region: [number, number, number, number];
-  gridBounds: [number, number, number, number];
-  near: [number, number];
-  viewportSize: [number, number];
-  time: number;
-  period: number;
-  heightM: number;
-  size: [number, number];
-  sway: number;
-  wind: [number, number];
-  reference: number;
-  gamma: number;
-  transpirationColor: [number, number, number];
-  evaporationColor: [number, number, number];
-  opacity: number;
-};
-const vapourUniforms = {
-  name: "vapour",
-  vs: `\
-layout(std140) uniform vapourUniforms {
-  vec4 region;
-  vec4 gridBounds;
-  vec2 near;
-  vec2 viewportSize;
-  float time;
-  float period;
-  float heightM;
-  vec2 size;
-  float sway;
-  vec2 wind;
-  float reference;
-  float gamma;
-  vec3 transpirationColor;
-  vec3 evaporationColor;
-  float opacity;
-} vapour;
-`,
-  uniformTypes: {
+const vapourUniforms = uniformBlock(
+  "vapour",
+  {
     region: "vec4<f32>",
     gridBounds: "vec4<f32>",
     near: "vec2<f32>",
@@ -104,7 +66,8 @@ layout(std140) uniform vapourUniforms {
     evaporationColor: "vec3<f32>",
     opacity: "f32",
   },
-} as const satisfies ShaderModule<VapourProps>;
+  ["vs"],
+);
 
 const VAPOUR_VS = `\
 #version 300 es
@@ -119,10 +82,9 @@ const float VAPOUR_PI = 3.141592653589793;
 ${RANDOM_GLSL}
 ${FACING_GLSL}
 ${MERCATOR_GLSL}
+${GRID_GLSL}
+${SCREEN_GLSL}
 
-vec2 toScreen(vec4 clip) {
-  return clip.xy / clip.w * 0.5 * vapour.viewportSize;
-}
 // Share of the height reached (0–1) at a moment of the rise (0–1).
 float riseAt(float progress) {
   return 1.0 - (1.0 - progress) * (1.0 - progress);
@@ -137,9 +99,8 @@ float swayAt(float progress, float rise, float phase) {
 
 // The amount (0–255) and transpiration's share (0–1) at a point.
 vec2 vapourAtPoint(vec2 lngLat) {
-  vec4 b = vapour.gridBounds;
-  vec2 uv = vec2((lngLat.x - b.x) / (b.z - b.x), (b.w - lngLat.y) / (b.w - b.y));
-  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) return vec2(0.0);
+  vec2 uv = gridUv(vapour.gridBounds, lngLat);
+  if (!inGrid(uv)) return vec2(0.0);
   vec2 v = texture(uGrid, uv).rg;
   return vec2(v.x * 255.0, v.y);
 }
@@ -173,11 +134,11 @@ void main() {
   float phase = random(key, 6u) * 2.0 * VAPOUR_PI;
   float rise = riseAt(progress);
   vec4 clip = project_position_to_clipspace(puffAt(lngLat, drift, rise), vec3(0.0), vec3(0.0));
-  vec2 head = toScreen(clip) + vec2(swayAt(progress, rise, phase), 0.0);
+  vec2 head = toScreen(clip, vapour.viewportSize) + vec2(swayAt(progress, rise, phase), 0.0);
   // Its trail: where it was a moment ago (long while it's quick, gone once it hangs).
   float before = max(progress - ${TRAIL}, 0.0);
   vec4 clipBefore = project_position_to_clipspace(puffAt(lngLat, drift, riseAt(before)), vec3(0.0), vec3(0.0));
-  vec2 tail = toScreen(clipBefore) + vec2(swayAt(before, riseAt(before), phase), 0.0);
+  vec2 tail = toScreen(clipBefore, vapour.viewportSize) + vec2(swayAt(before, riseAt(before), phase), 0.0);
 
   // A quad on the screen around the head and its trail.
   vec2 d = tail - head;
@@ -215,11 +176,6 @@ void main() {
 
 // --- Layer -------------------------------------------------------------------------
 
-type State = {
-  model: Model;
-  texture: Texture | null;
-};
-
 const defaultProps: DefaultProps<VapourLayerProps> = {
   count: 300000,
   period: 3,
@@ -234,56 +190,27 @@ const defaultProps: DefaultProps<VapourLayerProps> = {
   opacity: 0.4,
 };
 
-export class VapourLayer extends Layer<VapourLayerProps> {
+export class VapourLayer extends GridEffectLayer<VapourLayerProps> {
   static layerName = "VapourLayer";
   static defaultProps = defaultProps;
-  declare state: State;
 
-  initializeState(context: LayerContext) {
-    const model = new Model(context.device, {
-      ...this.getShaders({ vs: VAPOUR_VS, fs: VAPOUR_FS, modules: [project32, vapourUniforms] }),
-      id: `${this.props.id}-puffs`,
-      topology: "triangle-strip",
-      vertexCount: 4,
-      instanceCount: 0,
-      parameters: PREMULTIPLIED,
-    });
-    this.setState({ model, texture: null });
-  }
-
-  getModels() {
-    return this.state.model ? [this.state.model] : [];
-  }
-
-  updateState({ props, oldProps }: UpdateParameters<this>) {
-    if (props.grid !== oldProps.grid || !this.state.texture) {
-      this.state.texture?.destroy();
-      this.setState({ texture: gridTexture(this.context.device, props.grid) });
-    }
-  }
-
-  finalizeState(context: LayerContext) {
-    super.finalizeState(context);
-    this.state.model?.destroy();
-    this.state.texture?.destroy();
+  protected shaders() {
+    return { vs: VAPOUR_VS, fs: VAPOUR_FS, modules: [vapourUniforms], topology: "triangle-strip" as const, vertexCount: 4, instanceCount: 0, parameters: PREMULTIPLIED };
   }
 
   draw({ renderPass }: { renderPass: RenderPass }) {
     const s = this.state;
     const p = this.props;
-    const viewport = this.context.viewport;
-    const region = viewRegion(viewport, p.grid.bounds);
-    if (!region || !s.texture) return;
-    const dpr = this.context.device.getDefaultCanvasContext().cssToDeviceRatio();
-    const metresPerPixel = viewport.metersPerPixel;
-    const rgb = ([r, g, b]: [number, number, number]): [number, number, number] => [r / 255, g / 255, b / 255];
+    const f = this.frame();
+    if (!f) return;
+    const { viewport, region, dpr, metresPerPixel } = f;
     // The ground at the bottom of the view, nearest the camera (on the globe zoomed out,
     // off it: then the middle of the view).
     const bottom = viewport.unproject([viewport.width / 2, viewport.height]);
     const middle = viewport.unproject([viewport.width / 2, viewport.height / 2]);
     const near = (bottom.every(Number.isFinite) ? bottom : middle).slice(0, 2) as [number, number];
 
-    s.model.setBindings({ uGrid: s.texture });
+    s.model.setBindings({ uGrid: s.texture! });
     s.model.shaderInputs.setProps({
       vapour: {
         region,
@@ -298,8 +225,8 @@ export class VapourLayer extends Layer<VapourLayerProps> {
         wind: p.wind,
         reference: p.reference,
         gamma: p.gamma,
-        transpirationColor: rgb(p.transpirationColor),
-        evaporationColor: rgb(p.evaporationColor),
+        transpirationColor: unit(p.transpirationColor),
+        evaporationColor: unit(p.evaporationColor),
         opacity: p.opacity,
       },
     });

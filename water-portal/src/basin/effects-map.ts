@@ -18,7 +18,7 @@
  * drawn (RAIN_TUNING, VAPOUR_TUNING).
  */
 import type { BasinEffects, EffectGround } from "../map/layers/basin-effects";
-import type { EffectGrid } from "../map/layers/rain";
+import type { EffectGrid } from "../map/layers/effects-common";
 import type { WaterMap } from "../map/map";
 import type { Color } from "../map/theme";
 import type { LegendKey } from "../panels/legend";

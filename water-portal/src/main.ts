@@ -2,29 +2,21 @@ import { initBasinStats } from "./basin/basin-stats";
 import { loadModelFiles } from "./basin/model";
 import { initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
-import { waporPeriod, waporStyleRamp, type WaporPeriod } from "./map/layers/wapor-period";
-import { onWaporTile } from "./map/layers/wapor-tiles";
-import { WAPOR_UNITS, WAPOR_VARIABLES, pixelArea, unitFactor, waporPixel, waporUnit, type WaporLevel, type WaporUnits } from "./map/layers/wapor-variables";
-import { checkedWaporPeriod, onWaporLevel, waporShownLevel, waporValueAt, waporViewRange, type CheckedWaporPeriod } from "./map/layers/wapor";
-import type { WaporRamp } from "./map/layers/wapor-shader";
 import { unionBox, type Box } from "./map/fly-to";
 import { createMap } from "./map/map";
 import { placeAt, type LngLat, type Place } from "./map/places";
 import { downstreamFinder, upstreamFinder, type SubBasin } from "./map/sub-basin-network";
 import { NOTHING, selection, type SelectedFeature, type Selection, type SelectionSource } from "./selection";
-import { initLocalMaps, rasterTip, type LocalMaps } from "./local/local-maps";
+import { initLocalMaps, type LocalMaps } from "./local/local-maps";
 import { initLocalPanel } from "./local/local-panel";
+import { initWaporRaster } from "./local/wapor-raster";
 import { damsData } from "./local/vector-maps";
-import { setPointSeriesYield, waporPixelArea } from "./local/point-series";
-import { initWaporLegend } from "./map/wapor-legend";
-import { initWaporPlayer, type PlaybackStatus } from "./map/wapor-player";
 import { makeResizable } from "./panels/floating";
 import { makeFoldable } from "./panels/foldable";
-import type { RampChoice } from "./panels/ramp-menu";
 import { initLayersMenu } from "./panels/layers-menu";
 import { clearMapTip, initMapTips } from "./panels/map-tip";
-import { initLoadBar, setProgress } from "./panels/load-bar";
 import { initSlowServerCheck } from "./panels/slow-server";
+import { initLoadBar } from "./panels/load-bar";
 import { initCorsCheck } from "./panels/cors-check";
 import { cornerWarning } from "./panels/corner-warning";
 import { initThemeSwitch } from "./panels/theme-switch";
@@ -191,13 +183,7 @@ const waterMap = createMap(
     onSymbolHover: (id, x, y, lngLat) => localMaps?.hover(id, x, y, lngLat),
   },
 );
-const { map, setView, setLayerVisible, setWapor, setWaporMaxGap, setSelection, showBox, showPoint, setHovered } = waterMap;
-// The WaPOR raster's colours, as the map has them (for a pixel's tooltip).
-let waporRampShown: WaporRamp = WAPOR_VARIABLES[0].ramp;
-function setWaporRamp(ramp: WaporRamp) {
-  waporRampShown = ramp;
-  waterMap.setWaporRamp(ramp);
-}
+const { map, setView, setLayerVisible, setSelection, showBox, showPoint, setHovered } = waterMap;
 
 const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<Country>("countries"),
@@ -380,15 +366,8 @@ window.addEventListener("resize", fitRange);
 
 const layersMenu = initLayersMenu(setLayerVisible);
 
-/**
- * Local view: a WaPOR variable (picked in the legend) for the selected range, one
- * raster or a sum of them. Waits until the range stops changing (dragging the slider
- * passes many), then checks the rasters have been published before opening them. A
- * dekad comes with its NDVI quality raster when that has been published too, for the
- * quality slider in the legend.
- */
-let waporVariable = WAPOR_VARIABLES[0];
-let waporOn = true; // checked in the Local legend (it can be taken off the map)
+// Local view: a WaPOR variable (picked in the legend) for the selected range, on the map
+// (local/wapor-raster.ts, which owns its legend and playback).
 let localMaps: LocalMaps | null = null; // (after the map: its tooltips)
 // A map on screen has time (see onTimed): in the Local view, and in the Basin view.
 const timed = { local: true, basin: true };
@@ -399,91 +378,43 @@ function setTimed(view: "local" | "basin", has: boolean) {
   toolbarApi?.setTimeless(!any);
   fitRange(); // (the graph pane can reach down where it was)
 }
-let waporMaxGap: number | null = null;
-let waporStretch: RampChoice = 1;
-let waporUnits: WaporUnits = WAPOR_UNITS[0]; // (WaPOR's own colour map is the one for them)
-let waporLocked = false; // the legend's lock (while playing): the colour map stays as it is
-let stretchTimer = 0; // (before initWaporLegend, which calls onStretch)
-const waporLegend = initWaporLegend({
-  variable: waporVariable,
-  onMaxGap(maxGap) {
-    waporMaxGap = maxGap;
-    setWaporMaxGap(maxGap);
-    stretchWapor();
-  },
-  onStretch(cut) {
-    waporStretch = cut;
-    stretchWapor();
-  },
-  onVariable(variable) {
-    waporVariable = variable;
-    localPanel.setVariable(waporOn ? variable : null);
-    showPixelArea();
-    player.stop();
-    hideWapor(); // not the last variable's values in this one's colours
-    // Its own colours until its values in view are known.
-    setWaporRamp(variable.ramp);
-    waporLegend.ramp(variable.ramp);
-    showWapor(view === "local" ? waporRange : null);
-  },
-  onUnits(units) {
-    waporUnits = units;
-    localPanel.setUnits(units);
-    stretchWapor();
-  },
-  onLock(locked) {
-    waporLocked = locked;
-    stretchWapor();
-  },
+const raster = initWaporRaster({
+  map: waterMap,
+  getView: () => view,
+  onVariable: (variable) => localPanel.setVariable(variable),
+  onUnits: (units) => localPanel.setUnits(units),
+  setDays: (days) => toolbarApi!.setDays(days),
+  onPlayback: (state) => toolbarApi?.setPlayback(state),
+  lockLegend: () => localMaps?.lockLegend(),
+  unlockLegend: () => localMaps?.unlockLegend(),
 });
-waporLegend.ramp(waporVariable.ramp);
 // The Local legend: WaPOR's variables and the vector maps, a checklist (one raster at a time).
 localMaps = initLocalMaps({
   map: waterMap,
   wapor: $("wapor-legend"),
-  variable: waporVariable,
+  variable: raster.variable(),
   onWapor(variable, checked) {
-    waporOn = Boolean(variable);
     // The Local panel's series: of the variable checked, or none (no map with time; not
     // the one a card's preview takes off the map for the while).
     localPanel.setVariable(checked);
-    if (variable && variable !== waporVariable) return waporLegend.setVariable(variable);
-    player.stop();
-    showWapor(view === "local" ? waporRange : null);
+    raster.pick(variable);
   },
   onMapped: (ids) => localPanel.setMapped(ids),
   // The pixel under the pointer, in the legend's units (over a pixel: a full-resolution one's area there).
-  waporTip(lngLat) {
-    const period = waporOn ? waporShown : null;
-    const at = period && waporValueAt(period, lngLat, waporMaxGap);
-    if (!period || !at) return null;
-    const { variable } = period;
-    const k = unitFactor(variable, waporUnits, period.days, pixelArea(at.fullPixel, lngLat[1]));
-    return rasterTip(at, {
-      title: variable.label,
-      short: variable.short,
-      ramp: waporRampShown,
-      k,
-      unit: waporUnit(variable, waporUnits),
-      source: `WaPOR ${at.level}`,
-      pixel: waporPixel(variable, at.level),
-    });
-  },
+  waporTip: (lngLat) => raster.tip(lngLat),
   // Without time on the map (only GAEZ's maps, the dams), the range changes nothing.
   onGaez: (gaez, crop) => localPanel.setGaez(gaez, crop),
   onTimed: (has) => setTimed("local", has),
 });
 // Local view: the legend's variable at the selected point, over WaPOR's whole record.
 const localPanel = initLocalPanel({
-  variable: waporVariable,
+  variable: raster.variable(),
   setRange: (range) => toolbarApi?.setRange(range),
   setDays: (days) => toolbarApi?.setDays(days),
   // The chart's y axis title goes through the units, as the legend's menu.
   onUnits(units) {
-    waporUnits = units;
-    waporLegend.setUnits(units);
+    raster.setUnits(units);
     localPanel.setUnits(units);
-    stretchWapor();
   },
   // The dams' cards: hovered, the dams on the map by the card's attribute; pinned, checked in the legend so.
   previewMap: (id, attribute) => localMaps?.preview(id, attribute),
@@ -500,160 +431,17 @@ function loadDams() {
     () => void (damsLoading = null),
   );
 }
-let waporWanted: string | null = null; // the variable and range, as "AETI start-end" (days)
-let waporShown: WaporPeriod | null = null;
-let levelShown: WaporLevel = "L1"; // (of waporShown, in the legend)
-let waporTimer = 0;
-const waporKey = (range: DayRange) => `${waporVariable.id} ${range.start}-${range.end}`;
-function showWapor(shown: DayRange | null) {
-  const range = waporOn ? shown : null;
-  const wanted = range && waporKey(range);
-  const variable = waporVariable;
-  waporWanted = wanted;
-  clearTimeout(waporTimer);
-  // Before the checks, as if everything were published (always possible: the range
-  // doesn't go past the current dekad).
-  const draft = range && waporPeriod(variable, range);
-  waporLegend.show(draft, "checking");
-  waporLegend.quality(draft?.qualityUrl ? "checking" : null);
-  if (!range || !draft) return hideWapor();
-  waporTimer = window.setTimeout(async () => {
-    let checked: CheckedWaporPeriod | null = null;
-    let failed = false; // couldn't reach the bucket
-    try {
-      checked = await checkedWaporPeriod(variable, range);
-    } catch {
-      failed = true;
-    }
-    if (waporWanted !== wanted) return;
-    if (!checked) {
-      hideWapor();
-      waporLegend.quality(null);
-      return waporLegend.show(draft, failed ? "error" : "missing");
-    }
-    showCheckedWapor(checked, false);
-  }, 250);
-}
-
-/** Show a checked period; `seamless` (a playback frame): it's loaded already. */
-function showCheckedWapor({ period, quality }: CheckedWaporPeriod, seamless: boolean) {
-  const wanted = waporWanted;
-  waporLegend.show(period, seamless ? "ready" : "loading");
-  waporLegend.quality(quality);
-  waporShown = period;
-  setWapor(period, () => waporWanted === wanted && waporLegend.show(period, "ready"), seamless);
-  showWaporLevel();
-  stretchWapor();
-}
-
-/**
- * The colour map spans the values on screen (see the stretch button in the legend), or
- * is WaPOR's own for the period and units:
- * worked out again when the view moves, a tile loads, or the period, quality filter or
- * stretch changes, at most every so often. While playing it's kept, so frames compare,
- * and while the legend's lock is on.
- * Until there's a value in view, the last colour map stays.
- */
-function stretchWapor() {
-  clearTimeout(stretchTimer);
-  stretchTimer = window.setTimeout(() => {
-    if (!waporShown || playback !== "stopped" || waporLocked) return;
-    if (waporStretch === "wapor") {
-      const ramp = waporStyleRamp(waporShown, waporUnits.per);
-      if (ramp) {
-        setWaporRamp(ramp);
-        waporLegend.ramp(ramp);
-      }
-      return;
-    }
-    const range = waporViewRange(waporShown, waporMaxGap, waporStretch);
-    if (!range) return;
-    let lo = range[0];
-    let hi = Math.max(range[1], lo + 0.01);
-    // A signed variable's colours are centred on 0, as far either way.
-    if (waporShown.variable.signed) [lo, hi] = [-1, 1].map((s) => s * Math.max(-lo, hi, 0.01));
-    const ramp: WaporRamp = {
-      quantities: [0, 1, 2, 3, 4].map((i) => lo + ((hi - lo) * i) / 4),
-      colors: waporShown.variable.ramp.colors,
-    };
-    setWaporRamp(ramp);
-    waporLegend.ramp(ramp);
-  }, 150);
-}
-onWaporTile(stretchWapor);
-map.on("moveend", stretchWapor);
-
-// Values over a pixel in the legend: a pixel's area at the centre of the view (it
-// changes with latitude, and is L2's when zoomed in where it has it). Only the latest
-// lookup counts.
-let areaWanted = "";
-const shownLevel = () => (waporShown ? waporShownLevel(waporShown) : "L1");
-function showPixelArea() {
-  if (view !== "local") return;
-  const lat = map.getCenter().lat;
-  const level = shownLevel();
-  const wanted = (areaWanted = `${waporVariable.id} ${lat} ${level}`);
-  waporPixelArea(waporVariable, lat, level).then((area) => areaWanted === wanted && waporLegend.pixelArea(area, lat));
-}
-map.on("moveend", showPixelArea);
-
-// The legend's pixel size follows the level the map shows.
-function showWaporLevel() {
-  const level = shownLevel();
-  waporLegend.level(level);
-  if (level === levelShown) return;
-  levelShown = level;
-  showPixelArea();
-}
-// (The level changes while deck.gl picks tiles.)
-onWaporLevel(() => queueMicrotask(showWaporLevel));
-
-// Playback (Local): each frame sets the range on the toolbar, and its period, loaded
-// ahead, on the map. Any other change of range or view stops it.
-let waporRange: DayRange | null = null;
-let playing = false; // a frame is being shown
-let playback: PlaybackStatus = "stopped";
-const player = initWaporPlayer({
-  getRange: () => waporRange!,
-  getVariable: () => waporVariable,
-  show(range, checked, ms) {
-    playing = true;
-    toolbarApi!.setDays(range);
-    playing = false;
-    clearTimeout(waporTimer);
-    waporWanted = waporKey(range);
-    // (Its period fades in over the frame's time.)
-    waterMap.setPlayback(ms);
-    showCheckedWapor(checked, true);
-  },
-  onState(state) {
-    // (Locked as play is pressed: the colours of the range shown are the ones held, until it stops.)
-    if (playback === "stopped" && state.status !== "stopped") {
-      waporLegend.lock();
-      localMaps?.lockLegend();
-    }
-    if (state.status === "stopped") {
-      waporLegend.unlock();
-      localMaps?.unlockLegend();
-    }
-    playback = state.status;
-    if (playback === "stopped") stretchWapor();
-    toolbarApi?.setPlayback(state);
-    // The frames load first, and the load bar shows theirs (not the point's series').
-    setPointSeriesYield(playback !== "stopped");
-    setProgress("local-playback", state.loading, true);
-    if (playback === "stopped") waterMap.setPlayback(null);
-  },
-});
 
 // In Country and Basin, only the range moves on (range-player.ts).
+let waporRange: DayRange | null = null;
+let rangePlaying = false; // a step is being shown
 const rangePlayer = initRangePlayer({
   getView: () => view,
   getRange: () => waporRange!,
   show(range) {
-    playing = true;
+    rangePlaying = true;
     toolbarApi!.setDays(range);
-    playing = false;
+    rangePlaying = false;
   },
   onState(status, stepMs) {
     toolbarApi?.setPlayback({ status, bufferedTo: null, loading: null });
@@ -664,12 +452,6 @@ const rangePlayer = initRangePlayer({
     waterMap.setPlayback(stepMs);
   },
 });
-
-function hideWapor() {
-  setWapor(null);
-  waporShown = null;
-  showWaporLevel();
-}
 
 // The map follows the view tab, and in the Local view the date range.
 function onToolbarChange({ view: newView, range, days }: ToolbarState) {
@@ -691,17 +473,14 @@ function onToolbarChange({ view: newView, range, days }: ToolbarState) {
   localPanel.setRange(days);
   localMaps?.setView(view);
   if (view === "local") loadDams();
-  showPixelArea();
   waporRange = days;
-  if (!playing) {
-    player.stop();
-    rangePlayer.stop();
-    showWapor(view === "local" ? days : null);
-  }
+  if (rangePlaying) return raster.showPixelArea();
+  rangePlayer.stop();
+  raster.show(view === "local" ? days : null);
 }
 selection.set(NOTHING);
 // (In the Local view without a WaPOR raster on the map, only the range moves on.)
-toolbarApi = initToolbar(onToolbarChange, () => (view === "local" && waporOn ? player : rangePlayer).toggle());
+toolbarApi = initToolbar(onToolbarChange, () => (raster.playable() ? raster.togglePlay() : rangePlayer.toggle()));
 onToolbarChange(toolbarApi.state);
 toolbarApi.setTimeless(!(timed.local && timed.basin));
 // The Basin view's range ends at the latest dekad of the model output. Without the

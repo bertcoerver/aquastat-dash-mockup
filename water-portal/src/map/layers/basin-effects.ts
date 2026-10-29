@@ -1,7 +1,8 @@
 import { COORDINATE_SYSTEM } from "@deck.gl/core";
 import { BitmapLayer } from "@deck.gl/layers";
 import { HazeLayer, type HazeLayerProps } from "./haze";
-import { RainLayer, type EffectGrid, type RainLayerProps } from "./rain";
+import type { EffectGrid } from "./effects-common";
+import { RainLayer, type RainLayerProps } from "./rain";
 import { VapourLayer, type VapourLayerProps } from "./vapour";
 
 /** A grid drawn on the ground in its own colours, under an effect. */

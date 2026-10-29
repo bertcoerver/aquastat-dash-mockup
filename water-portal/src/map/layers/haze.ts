@@ -12,11 +12,10 @@
  * directly: luma.gl can't copy from the canvas it was handed. The part in view is a
  * mesh of cells, so it follows the globe's curve.
  */
-import { Layer, project32, type DefaultProps, type LayerContext, type UpdateParameters } from "@deck.gl/core";
+import type { DefaultProps, LayerContext } from "@deck.gl/core";
 import type { RenderPass, Texture } from "@luma.gl/core";
-import { Geometry, Model } from "@luma.gl/engine";
-import type { ShaderModule } from "@luma.gl/shadertools";
-import { MERCATOR_GLSL, clock, gridTexture, viewRegion, type EffectGrid } from "./rain";
+import { Geometry } from "@luma.gl/engine";
+import { GRID_GLSL, GridEffectLayer, MERCATOR_GLSL, OVERWRITE, clock, uniformBlock, type EffectGrid, type GridEffectState } from "./effects-common";
 
 export type HazeLayerProps = {
   grid: EffectGrid;
@@ -27,43 +26,16 @@ export type HazeLayerProps = {
   gamma: number;
 };
 
-type HazeProps = {
-  region: [number, number, number, number];
-  gridBounds: [number, number, number, number];
-  sceneSize: [number, number];
-  time: number;
-  strength: number;
-  dpr: number;
-  reference: number;
-  gamma: number;
-};
-const HAZE_BLOCK = `\
-layout(std140) uniform hazeUniforms {
-  vec4 region;
-  vec4 gridBounds;
-  vec2 sceneSize;
-  float time;
-  float strength;
-  float dpr;
-  float reference;
-  float gamma;
-} haze;
-`;
-const hazeUniforms = {
-  name: "haze",
-  vs: HAZE_BLOCK,
-  fs: HAZE_BLOCK,
-  uniformTypes: {
-    region: "vec4<f32>",
-    gridBounds: "vec4<f32>",
-    sceneSize: "vec2<f32>",
-    time: "f32",
-    strength: "f32",
-    dpr: "f32",
-    reference: "f32",
-    gamma: "f32",
-  },
-} as const satisfies ShaderModule<HazeProps>;
+const hazeUniforms = uniformBlock("haze", {
+  region: "vec4<f32>",
+  gridBounds: "vec4<f32>",
+  sceneSize: "vec2<f32>",
+  time: "f32",
+  strength: "f32",
+  dpr: "f32",
+  reference: "f32",
+  gamma: "f32",
+});
 
 const HAZE_VS = `\
 #version 300 es
@@ -93,6 +65,7 @@ in vec2 vMercator;
 in float vFacing;
 out vec4 fragColor;
 ${MERCATOR_GLSL}
+${GRID_GLSL}
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -107,10 +80,8 @@ float noise(vec2 p) {
 
 void main() {
   if (vFacing < 0.0) discard;
-  vec2 lngLat = mercatorToLngLat(vMercator);
-  vec4 b = haze.gridBounds;
-  vec2 uv = vec2((lngLat.x - b.x) / (b.z - b.x), (b.w - lngLat.y) / (b.w - b.y));
-  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+  vec2 uv = gridUv(haze.gridBounds, mercatorToLngLat(vMercator));
+  if (!inGrid(uv)) discard;
   float value = texture(uGrid, uv).r * 255.0;
   float amount = pow(clamp(value / haze.reference, 0.0, 1.0), haze.gamma);
   if (amount < 0.01) discard;
@@ -130,13 +101,6 @@ void main() {
   fragColor = scene;
 }`;
 
-const OPAQUE = {
-  blend: false,
-  depthCompare: "always",
-  depthWriteEnabled: false,
-  cullMode: "none",
-} as const;
-
 /** Cells of the mesh across and down. */
 const MESH = 48;
 
@@ -154,53 +118,36 @@ function meshCorners() {
   return out;
 }
 
-type State = {
-  model: Model;
-  texture: Texture | null;
-  /** The copy of the canvas. */
-  scene: Texture | null;
-};
-
 const defaultProps: DefaultProps<HazeLayerProps> = {
   strength: 2,
   reference: 128,
   gamma: 0.8,
 };
 
-export class HazeLayer extends Layer<HazeLayerProps> {
+export class HazeLayer extends GridEffectLayer<HazeLayerProps> {
   static layerName = "HazeLayer";
   static defaultProps = defaultProps;
-  declare state: State;
+  /** The copy of the canvas, besides the model and the grid's texture. */
+  declare state: GridEffectState & { scene: Texture | null };
+
+  protected shaders() {
+    return {
+      vs: HAZE_VS,
+      fs: HAZE_FS,
+      modules: [hazeUniforms],
+      geometry: new Geometry({ topology: "triangle-list", attributes: { corners: { size: 2, value: meshCorners() } } }),
+      parameters: OVERWRITE,
+    };
+  }
 
   initializeState(context: LayerContext) {
-    const model = new Model(context.device, {
-      ...this.getShaders({ vs: HAZE_VS, fs: HAZE_FS, modules: [project32, hazeUniforms] }),
-      id: `${this.props.id}-mesh`,
-      geometry: new Geometry({
-        topology: "triangle-list",
-        attributes: { corners: { size: 2, value: meshCorners() } },
-      }),
-      parameters: OPAQUE,
-    });
-    this.setState({ model, texture: null, scene: null });
-  }
-
-  getModels() {
-    return this.state.model ? [this.state.model] : [];
-  }
-
-  updateState({ props, oldProps }: UpdateParameters<this>) {
-    if (props.grid !== oldProps.grid || !this.state.texture) {
-      this.state.texture?.destroy();
-      this.setState({ texture: gridTexture(this.context.device, props.grid) });
-    }
+    super.initializeState(context);
+    this.setState({ scene: null });
   }
 
   finalizeState(context: LayerContext) {
     super.finalizeState(context);
-    this.state.model?.destroy();
     this.state.scene?.destroy();
-    this.state.texture?.destroy();
   }
 
   /** Copies the canvas drawn so far into the scene texture. */
@@ -229,24 +176,24 @@ export class HazeLayer extends Layer<HazeLayerProps> {
   draw({ renderPass }: { renderPass: RenderPass }) {
     const s = this.state;
     const p = this.props;
-    const region = viewRegion(this.context.viewport, p.grid.bounds);
-    if (!region || !s.texture || p.strength <= 0) return;
+    const f = this.frame();
+    if (!f || p.strength <= 0) return;
     const scene = this.copyScene();
 
-    s.model.setBindings({ uGrid: s.texture, uScene: scene });
+    s.model.setBindings({ uGrid: s.texture!, uScene: scene });
     s.model.shaderInputs.setProps({
       haze: {
-        region,
+        region: f.region,
         gridBounds: p.grid.bounds,
         sceneSize: [scene.width, scene.height],
         time: clock(),
         strength: p.strength,
-        dpr: this.context.device.getDefaultCanvasContext().cssToDeviceRatio(),
+        dpr: f.dpr,
         reference: p.reference,
         gamma: p.gamma,
       },
     });
-    s.model.setParameters(OPAQUE);
+    s.model.setParameters(OVERWRITE);
     s.model.draw(renderPass);
   }
 }
