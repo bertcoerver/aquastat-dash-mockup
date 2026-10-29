@@ -211,6 +211,8 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     shapeSizes: HTMLButtonElement;
     status: HTMLElement;
     layer: LegendLayer | null;
+    /** What the key shows, as last written (drawn again at every frame while playing). */
+    keyShown: string;
   }
 
   // The overlay's section: on top, without a × or arrows (it isn't a map to take off or move).
@@ -291,6 +293,7 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       shapeSizes: sizesButton,
       status: q(".legend-status"),
       layer: null,
+      keyShown: "",
     };
     parts.remove.addEventListener("click", () => parts.layer && onToggle(parts.layer.id));
     for (const button of el.querySelectorAll<HTMLButtonElement>(".legend-move")) {
@@ -437,9 +440,11 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       // Locked, there's nothing to pick either.
       p.rampMenu?.setEnabled(!key.fixed && !held);
       p.ramp.style.background = key.gradient;
-      p.ticks.innerHTML = ticksHtml(key.ticks, key.format);
+      const ticks = ticksHtml(key.ticks, key.format);
+      if (ticks !== p.keyShown) p.ticks.innerHTML = p.keyShown = ticks;
     } else if (key?.kind === "classes") {
-      p.classes.innerHTML = key.items.map((k, i) => classItem(i, k.label, k.background, k.state)).join("");
+      const classes = key.items.map((k, i) => classItem(i, k.label, k.background, k.state)).join("");
+      if (classes !== p.keyShown) p.classes.innerHTML = p.keyShown = classes;
     } else if (key) {
       drawSizes(p.sizes, key);
     }
@@ -457,9 +462,13 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
   }
 
   /** Three line widths, circles or bars side by side, each labelled with its value. */
+  const sizesShown = new WeakMap<SVGSVGElement, string>(); // (as last drawn: drawn again at every frame while playing)
   function drawSizes(svg: SVGSVGElement, key: Extract<LegendKey, { kind: "lines" | "circles" | "bars" }>) {
     // (The key's width, beside the unit.)
     const width = svg.closest(".legend-key-body")!.clientWidth || 220;
+    const shown = `${width}:${JSON.stringify(key)}`;
+    if (shown === sizesShown.get(svg)) return;
+    sizesShown.set(svg, shown);
     const step = width / key.items.length;
     const top = Math.max(...key.items.map((k) => Math.abs(k.value)));
     const biggest = Math.max(...key.items.map((k) => k.size));

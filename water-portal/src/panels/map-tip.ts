@@ -110,7 +110,7 @@ function setDock(content: string | null) {
   const from = animate ? box.getBoundingClientRect().width : 0;
   box.classList.toggle("mt-empty", content === null);
   body.innerHTML = content ?? "";
-  placeDock();
+  outlineRect = null;
   if (content !== null && !dockFull && animate) {
     // (Restarted: off, a reflow, on.)
     body.classList.remove("mt-enter");
@@ -146,6 +146,7 @@ const MIN_ROOM = 220;
  */
 function placeDock() {
   if (!dock) return;
+  outlineRect = null;
   const { pane } = dock;
   const r = pane.getBoundingClientRect();
   // (Its top and height without the sink of its fade, as offsets leave out transforms.)
@@ -178,6 +179,8 @@ let quietTimer = 0;
 
 /** The dashed outline shown: the empty pinned box, or the zone (null: neither). */
 const outline = () => (!dock ? null : docked ? (dockFull ? null : dock.box) : dock.zone);
+/** Where the outline is, measured once per placing (the pointer's distance to it is checked at every move). */
+let outlineRect: { el: HTMLElement; r: DOMRect } | null = null;
 
 /** Show the outline (or the full box) again, the outline fading away after a while. */
 function wake() {
@@ -246,7 +249,8 @@ export function initMapTips(pane: HTMLElement) {
   document.addEventListener("pointermove", (e) => {
     const el = outline();
     if (!el || el.hidden) return;
-    const r = el.getBoundingClientRect();
+    if (outlineRect?.el !== el) outlineRect = { el, r: el.getBoundingClientRect() };
+    const { r } = outlineRect;
     const dx = Math.max(r.left - e.clientX, 0, e.clientX - r.right);
     const dy = Math.max(r.top - e.clientY, 0, e.clientY - r.bottom);
     if (Math.hypot(dx, dy) < NEAR) wake();

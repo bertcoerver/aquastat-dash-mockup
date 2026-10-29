@@ -317,7 +317,18 @@ function rowsCsv(rows: BarRow[], columns: string[]) {
 }
 
 /** The countries with the highest (or lowest) values (a variable's, or worked out), as ranked bars. */
+/** Rankings by a variable, kept for the context: a card asks for its ranking for its caption, chart and map. */
+const rankings = new WeakMap<Ctx, Map<string, ReturnType<typeof rankOnce>>>();
 function ranking(ctx: Ctx, of: VarKey | ((m49: number) => number), n: number, order: "top" | "bottom", scale = 1) {
+  if (typeof of === "function") return rankOnce(ctx, of, n, order, scale);
+  const key = `${of}:${n}:${order}:${scale}`;
+  let byKey = rankings.get(ctx);
+  if (!byKey) rankings.set(ctx, (byKey = new Map()));
+  let ranked = byKey.get(key);
+  if (!ranked) byKey.set(key, (ranked = rankOnce(ctx, of, n, order, scale)));
+  return ranked;
+}
+function rankOnce(ctx: Ctx, of: VarKey | ((m49: number) => number), n: number, order: "top" | "bottom", scale: number) {
   const value = typeof of === "function" ? of : (m49: number) => meanAt(m49, of, ctx.period);
   const ranked = ctx.countries
     .map((m49) => ({ m49, v: value(m49) }))

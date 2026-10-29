@@ -131,22 +131,29 @@ export type Within = { kind: "major" | "sub"; id: number } | null;
 const inside = (s: WaporSeries, row: number, within: Within) =>
   !within || (within.kind === "major" ? s.majorBasins[row] : s.ids[row]) === within.id;
 
+/** The rows (sub-basins) in `within`: all of them, or a basin's, or the one. */
+function rowsWithin(s: WaporSeries, within: Within): number[] {
+  const rows: number[] = [];
+  for (let row = 0; row < s.ids.length; row++) if (inside(s, row, within)) rows.push(row);
+  return rows;
+}
+
 /** Monthly PCP and AETI over `range` for all sub-basins, or those `within`. */
 export function monthlyStats(s: WaporSeries, range: DekadRange, within: Within): Monthly {
   const { from, to } = span(s, range);
   const out: Monthly = { months: [], pcp: [], aeti: [] };
+  const rows = rowsWithin(s, within);
   for (let i = from; i < to; ) {
     const dk = s.first + i;
     const end = Math.min(to, i + 3 - (dk % 3)); // the rest of the month in the range
+    const days = daysIn(s, i, end);
     let area = 0;
     let p = 0;
     let e = 0;
-    for (let row = 0; row < s.ids.length; row++) {
-      if (!inside(s, row, within)) continue;
+    for (const row of rows) {
       const pr = rate(s, s.pcp, row, i, end);
       const er = rate(s, s.aeti, row, i, end);
       if (pr !== pr || er !== er) continue;
-      const days = daysIn(s, i, end);
       area += s.areas[row];
       p += pr * days * s.areas[row];
       e += er * days * s.areas[row];
@@ -177,17 +184,34 @@ export function windowRates(s: WaporSeries, ranges: DekadRange[]): WindowRates {
   return { sub };
 }
 
+type DekadRates = { pcp: Map<number, number>; aeti: Map<number, number> };
+/** The last rates worked out per series (a chart asks for the same windows at every draw). */
+const dekadRatesOf = new WeakMap<WaporSeries, Map<string, DekadRates>>();
+const KEPT_RATES = 64;
+
 /** Per dekad of `range` (by dekad number), mean mm/day of PCP and AETI, area-weighted over all sub-basins or those `within`. */
-export function dekadRates(s: WaporSeries, range: DekadRange, within: Within): { pcp: Map<number, number>; aeti: Map<number, number> } {
+export function dekadRates(s: WaporSeries, range: DekadRange, within: Within): DekadRates {
+  const key = `${range.start}-${range.end}:${within ? `${within.kind}${within.id}` : ""}`;
+  let kept = dekadRatesOf.get(s);
+  if (!kept) dekadRatesOf.set(s, (kept = new Map()));
+  let rates = kept.get(key);
+  if (rates) return rates;
+  rates = dekadRatesOnce(s, range, within);
+  kept.set(key, rates);
+  if (kept.size > KEPT_RATES) kept.delete(kept.keys().next().value!);
+  return rates;
+}
+function dekadRatesOnce(s: WaporSeries, range: DekadRange, within: Within): DekadRates {
   const { from, to } = span(s, range);
   const pcp = new Map<number, number>();
   const aeti = new Map<number, number>();
+  const rows = rowsWithin(s, within);
   for (let i = from; i < to; i++) {
     let area = 0;
     let p = 0;
     let e = 0;
-    for (let row = 0, j = i; row < s.ids.length; row++, j += s.dekads) {
-      if (!inside(s, row, within)) continue;
+    for (const row of rows) {
+      const j = i + row * s.dekads;
       const [pv, ev] = [s.pcp[j], s.aeti[j]];
       if (pv !== pv || ev !== ev) continue;
       area += s.areas[row];

@@ -432,7 +432,34 @@ export interface BasinMapSpec {
 
 /** The maps' level: the selected basin's sub-basins, or the major basins. */
 const levelOf = (c: BasinCtx): "major" | "sub" => (c.major ? "sub" : "major");
-const subBasinsOf = (c: BasinCtx, major: number) => [...c.stats.sub].filter(([, s]) => s.majorBasin === major).map(([id]) => id);
+/**
+ * A major basin's sub-basins in the period's statistics, what flows into each, and what
+ * is upstream of each (as asked for): kept per period, as every map of the basin asks.
+ */
+interface Topology {
+  ids: number[];
+  inflows: Map<number, number[]>;
+  upstream: Map<number, Set<number>>;
+}
+const topologies = new WeakMap<PeriodStats, Map<number, Topology>>();
+function topology(c: BasinCtx, major: number): Topology {
+  let byMajor = topologies.get(c.stats);
+  if (!byMajor) topologies.set(c.stats, (byMajor = new Map()));
+  let t = byMajor.get(major);
+  if (!t) {
+    const ids: number[] = [];
+    for (const [id, s] of c.stats.sub) if (s.majorBasin === major) ids.push(id);
+    const set = new Set(ids);
+    const inflows = new Map<number, number[]>();
+    for (const id of ids) {
+      const down = c.subs.get(id)?.downstream ?? -999;
+      if (set.has(down)) inflows.set(down, [...(inflows.get(down) ?? []), id]);
+    }
+    byMajor.set(major, (t = { ids, inflows, upstream: new Map() }));
+  }
+  return t;
+}
+const subBasinsOf = (c: BasinCtx, major: number) => topology(c, major).ids;
 
 /**
  * The sub-basins the maps colour: with a sub-basin selected, it and those upstream of
@@ -957,12 +984,8 @@ const droughtCard: BasinCard = {
 
 /** The selected basin's main river, source to mouth: from the outlet draining most, up the inflow draining most. */
 function mainStem(c: BasinCtx, major: number): number[] {
-  const ids = new Set(subBasinsOf(c, major));
-  const inflows = new Map<number, number[]>();
-  for (const id of ids) {
-    const down = c.subs.get(id)?.downstream ?? -999;
-    if (ids.has(down)) inflows.set(down, [...(inflows.get(down) ?? []), id]);
-  }
+  const { ids: idList, inflows } = topology(c, major);
+  const ids = new Set(idList);
   // Each sub-basin's area with all upstream of it (a few loops in the data: each counted once).
   const drained = new Map<number, number>();
   const drainedOf = (id: number, seen = new Set<number>()): number => {
@@ -1048,17 +1071,15 @@ const profileCard: BasinCard = {
 
 /** Per sub-basin of a major basin, all those upstream of it (kept per context). */
 function upstreamSets(c: BasinCtx, major: number) {
-  const ids = new Set(subBasinsOf(c, major));
-  const inflows = new Map<number, number[]>();
-  for (const id of ids) {
-    const down = c.subs.get(id)?.downstream ?? -999;
-    if (ids.has(down)) inflows.set(down, [...(inflows.get(down) ?? []), id]);
-  }
+  const { inflows, upstream } = topology(c, major);
   return (id: number) => {
-    const found = new Set<number>([id]);
+    let found = upstream.get(id);
+    if (found) return found;
+    found = new Set<number>([id]);
     const todo = [id];
     while (todo.length) for (const up of inflows.get(todo.pop()!) ?? []) if (!found.has(up)) found.add(up) && todo.push(up);
     found.delete(id);
+    upstream.set(id, found);
     return found;
   };
 }

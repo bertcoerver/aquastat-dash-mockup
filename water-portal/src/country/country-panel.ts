@@ -591,7 +591,8 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
       const pies = spec.style.kind === "pies" ? spec.style : null;
       const off = state.hiddenClasses.get(spec.id);
       const partsOf = (m49: number) => pies?.amounts(m49)?.map((v, i) => (off?.has(i) ? 0 : v)) ?? null;
-      const values = countries.map((m49) => (pies ? partsOf(m49)?.reduce((s, v) => s + v, 0) ?? NaN : Math.abs(spec.value(m49))));
+      const own = specValues(ctx, spec);
+      const values = countries.map((m49, i) => (pies ? partsOf(m49)?.reduce((s, v) => s + v, 0) ?? NaN : Math.abs(own[i])));
       const size = shapeSizes(values, style.full, (ref) => legend.hold(`${spec.title}:${spec.unit}:${slot}:${style.full}`, ref));
       // (A pie's swatch is a pie of its parts.)
       tipColors.set(slot, (m49) => {
@@ -676,6 +677,17 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
    * `present`: with a row picked, collects the classes its countries fall in (the others
    * show as absent in the legend).
    */
+  /** A map's values, one per country (as `countries` are), kept for the context: the maps are painted again at every hover. */
+  const valuesOf = new WeakMap<Ctx, Map<string, number[]>>();
+  function specValues(ctx: Ctx, spec: MapSpec): number[] {
+    let byMap = valuesOf.get(ctx);
+    if (!byMap) valuesOf.set(ctx, (byMap = new Map()));
+    let values = byMap.get(spec.id);
+    if (!values) byMap.set(spec.id, (values = countries.map((m49) => spec.value(m49))));
+    return values;
+  }
+  const countryIndex = new Map(countries.map((m49, i) => [m49, i]));
+
   function paint(spec: MapSpec, present: Set<number> | null, outside: (m49: number) => boolean) {
     const style = spec.style;
     const ctx = current!.ctx;
@@ -688,12 +700,16 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     // A value's colour (not for classes: their key stays, a menu of which are shown).
     let colorOf: ((v: number) => Color | null) | null = null;
     if (style.kind === "ramp") {
-      const values = countries.map((m49) => spec.value(m49));
+      const values = specValues(ctx, spec);
+      const valueOf = (m49: number) => {
+        const i = countryIndex.get(m49);
+        return i === undefined ? spec.value(m49) : values[i];
+      };
       let scale = rampScale(style, values, style.domain, state.stretch);
       // Locked, the colours keep their range (a fixed one stays anyway).
       const domain = style.domain || !scale.ticks.length ? scale.domain : legend.hold(`${spec.title}:${spec.unit}`, scale.domain);
       if (domain !== scale.domain) scale = rampScale(style, values, domain);
-      color = (m49) => scale.color(spec.value(m49));
+      color = (m49) => scale.color(valueOf(m49));
       colorOf = (v) => scale.color(v);
       // A fixed range (a share): nothing to pick.
       key = { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, fixed: !!style.domain };

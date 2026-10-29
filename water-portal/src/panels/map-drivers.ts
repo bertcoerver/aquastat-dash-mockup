@@ -47,19 +47,24 @@ const same = (a: Driver | null, b: Driver | null) => a?.id === b?.id && a?.sub =
 export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onChange, onX, onCsv, tooltip }: Options): Drivers {
   let preview: Driver | null = null;
   let timer = 0;
+  let pending = false; // a preview waits for its delay
 
   function setPreview(next: Driver | null, delay = 0) {
     clearTimeout(timer);
+    pending = false;
     // A pinned map stays put, except to show the pinned driver's own rows and series.
     const pin = pinned();
     if (pin && !(next?.sub && next.id === pin.id)) next = null;
     const apply = () => {
+      pending = false;
       if (same(next, preview)) return;
       preview = next;
       onChange();
     };
-    if (delay) timer = window.setTimeout(apply, delay);
-    else apply();
+    if (delay) {
+      pending = true;
+      timer = window.setTimeout(apply, delay);
+    } else apply();
   }
 
   function pin(driver: Driver) {
@@ -90,7 +95,7 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
     tooltip.hidden = true;
   });
   root.addEventListener("pointermove", (e) => {
-    if (!driverAt(e.target)) setPreview(null, HOVER_DELAY);
+    if (!driverAt(e.target) && (preview || pending)) setPreview(null, HOVER_DELAY);
     const tip = (e.target as Element).closest<HTMLElement>("[data-tip]")?.dataset.tip;
     showTip(tip ?? null, e);
   });
@@ -127,9 +132,15 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
     onChange();
   });
 
+  // (The same tooltip as shown, moved along, isn't written again: the panels share
+  // theirs with the map's, so what was written is checked by its first node.)
+  let tipWritten: { html: string; node: ChildNode | null } | null = null;
   function showTip(html: string | null, e: { clientX: number; clientY: number }) {
     if (!html) return void (tooltip.hidden = true);
-    tooltip.innerHTML = html;
+    if (html !== tipWritten?.html || tooltip.firstChild !== tipWritten.node) {
+      tooltip.innerHTML = html;
+      tipWritten = { html, node: tooltip.firstChild };
+    }
     tooltip.hidden = false;
     // Left of the pointer: the panels are on the right edge of the screen.
     const w = tooltip.offsetWidth;

@@ -89,11 +89,12 @@ function hbar(x0: number, y: number, len: number, h: number) {
 }
 
 let measure: CanvasRenderingContext2D | null = null;
+let labelFont = ""; // (the page's font stack, looked up once: it's asked for per row)
 /** The width of a row label in pixels, set in bold (as when its row is pinned). */
 function labelWidth(text: string) {
   measure ??= document.createElement("canvas").getContext("2d");
   if (!measure) return text.length * 6.5;
-  measure.font = `600 11px ${getComputedStyle(document.documentElement).getPropertyValue("--sans")}`;
+  measure.font = labelFont ||= `600 11px ${getComputedStyle(document.documentElement).getPropertyValue("--sans")}`;
   return measure.measureText(text).width;
 }
 

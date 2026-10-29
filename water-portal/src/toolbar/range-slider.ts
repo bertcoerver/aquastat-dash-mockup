@@ -118,12 +118,14 @@ export function initRangeSlider(
 
   // --- pointer ------------------------------------------------------------------
 
-  let drag: { grip: Grip | null; p: number; range: DayRange } | null = null;
+  let drag: { grip: Grip | null; p: number; range: DayRange; rect: DOMRect } | null = null;
 
-  const posAt = (clientX: number) => {
-    const r = track.getBoundingClientRect();
-    return { p: clamp((clientX - r.left) / r.width, 0, 1) * BOUNDARIES, pxPerDay: r.width / BOUNDARIES };
-  };
+  // (The track as it was when the drag began: it doesn't move during one, and measuring
+  // it at every move would lay the page out again after each one's changes.)
+  const posAt = (clientX: number, r = track.getBoundingClientRect()) => ({
+    p: clamp((clientX - r.left) / r.width, 0, 1) * BOUNDARIES,
+    pxPerDay: r.width / BOUNDARIES,
+  });
 
   /** What a press at `clientX` would grab (null: the start or end, by the first movement). */
   function gripAt(clientX: number) {
@@ -153,7 +155,7 @@ export function initRangeSlider(
     e.preventDefault(); // no text selection; focus is set below
     const { grip, p, range, onTrack } = gripAt(e.clientX);
 
-    drag = { grip, p, range };
+    drag = { grip, p, range, rect: track.getBoundingClientRect() };
     slider.setPointerCapture(e.pointerId);
     slider.classList.add("dragging");
     setHover(grip === "band" ? "move" : "resize");
@@ -170,7 +172,7 @@ export function initRangeSlider(
       setHover(grip === "band" ? "move" : onTrack ? null : "resize");
       return;
     }
-    const { p, pxPerDay } = posAt(e.clientX);
+    const { p, pxPerDay } = posAt(e.clientX, drag.rect);
     if (!drag.grip) {
       if (Math.abs(p - drag.p) * pxPerDay < 3) return;
       drag.grip = p < drag.p ? "start" : "end";

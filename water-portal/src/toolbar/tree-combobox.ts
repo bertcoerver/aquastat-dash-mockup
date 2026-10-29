@@ -64,8 +64,8 @@ export function initTreeCombobox<D>(
   const labelText = new Map(all.map((o) => [o, normalize(o.label)]));
   const hintText = new Map(all.map((o) => [o, normalize(o.hint ?? "")]));
   /** A term matches the name, or (a number of HINT_DIGITS or more: not the "2" of "Blue Nile 2") the hint. */
-  const matches = (o: TreeOption<D>, t: string) =>
-    labelText.get(o)!.includes(t) || (t.length >= HINT_DIGITS && /^\d+$/.test(t) && hintText.get(o)!.includes(t));
+  const matches = (o: TreeOption<D>, t: string, byHint: boolean) => labelText.get(o)!.includes(t) || (byHint && hintText.get(o)!.includes(t));
+  const numeric = (t: string) => t.length >= HINT_DIGITS && /^\d+$/.test(t);
 
   let value: TreeOption<D> | null = null;
   let terms: string[] = [];
@@ -85,7 +85,8 @@ export function initTreeCombobox<D>(
       for (let p = value?.parent; p; p = p.parent) opened.add(p);
       active = value;
     } else {
-      matched = new Set(all.filter((o) => terms.every((t) => matches(o, t))));
+      const byHint = terms.map(numeric);
+      matched = new Set(all.filter((o) => terms.every((t, i) => matches(o, t, byHint[i]))));
       kept = new Set();
       for (const option of matched) {
         keepBranch(option, kept);
@@ -157,7 +158,7 @@ export function initTreeCombobox<D>(
       if (option.children.length) toggle.textContent = "▸";
       const label = document.createElement("span");
       label.className = "tree-label";
-      label.append(marked(option.label, matched.has(option) ? terms : []));
+      label.append(marked(option.label, labelText.get(option)!, matched.has(option) ? terms : []));
       li.append(toggle, label);
       if (option.hint) {
         const hint = document.createElement("small");
@@ -173,7 +174,7 @@ export function initTreeCombobox<D>(
    * one that does ("India" in Southern Asia before Bassas da India), then other matches.
    */
   function rankTop(nodes: TreeOption<D>[]) {
-    const starts = (o: TreeOption<D>) => normalize(o.label).startsWith(terms[0]);
+    const starts = (o: TreeOption<D>) => labelText.get(o)!.startsWith(terms[0]);
     const holding = new Set<TreeOption<D>>();
     for (const o of matched) {
       if (!o.parent || !starts(o)) continue;
@@ -181,8 +182,8 @@ export function initTreeCombobox<D>(
       while (top.parent) top = top.parent;
       holding.add(top);
     }
-    const rank = (o: TreeOption<D>) => (starts(o) ? 0 : holding.has(o) ? 1 : matched.has(o) ? 2 : 3);
-    return [...nodes].sort((a, b) => rank(a) - rank(b));
+    const ranks = new Map(nodes.map((o) => [o, starts(o) ? 0 : holding.has(o) ? 1 : matched.has(o) ? 2 : 3]));
+    return [...nodes].sort((a, b) => ranks.get(a)! - ranks.get(b)!);
   }
 
   function close() {
@@ -299,10 +300,9 @@ function pathOf(option: TreeOption<unknown>) {
   return names.join(" › ");
 }
 
-/** The label with the searched-for parts in <mark>. */
-function marked(label: string, terms: string[]) {
+/** The label with the searched-for parts in <mark> (`text`: the label normalized, as searched). */
+function marked(label: string, text: string, terms: string[]) {
   const fragment = document.createDocumentFragment();
-  const text = normalize(label);
   // normalize() keeps one character per character for nearly all names; if not,
   // the positions wouldn't line up, so skip the marking.
   if (!terms.length || text.length !== label.length) {

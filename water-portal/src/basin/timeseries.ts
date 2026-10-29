@@ -175,7 +175,22 @@ export function initTimeseries(
   });
 
   // --- Zoomed: the selected period ----------------------------------------------
+  /** The zoomed chart as drawn (its scales and series), for the hover to draw into. */
+  let zoomed: {
+    from: number;
+    to: number;
+    series: Float64Array;
+    reference: Float64Array | number[] | null;
+    std: Float64Array | number[] | null;
+    x: (boundary: number) => number;
+    y: (v: number) => number;
+    at: (dk: number) => number;
+    w: number;
+    h: number;
+    hoverEl: SVGGElement;
+  } | null = null;
   function drawZoom() {
+    zoomed = null;
     yButton.hidden = !data?.range || !data.onYLabel;
     if (!data?.range) return void (plot.innerHTML = "");
     const { dekads, values, range, color, unit } = data;
@@ -233,24 +248,6 @@ export function initTimeseries(
         : "";
     const zero = lo < 0 ? `<line class="ts-zero" x1="${M.left}" x2="${w - M.right}" y1="${y(0)}" y2="${y(0)}"/>` : "";
 
-    let hover = "";
-    if (hoverIndex !== null && hoverIndex >= from && hoverIndex < to) {
-      const dk = dekads[hoverIndex];
-      const v = series[hoverIndex - from];
-      const hx = x(at(dk));
-      const label = `${daysIn ? `Up to ${fmtEnd(dk)}` : `${fmtStart(dk)} – ${fmtEnd(dk)}`}: ${fmt(v)} ${unit}`;
-      const right = hx > w / 2;
-      const tx = right ? hx - 6 : hx + 6;
-      // The average on a line of its own.
-      const sd = stats?.std[hoverIndex - from] ?? Number.NaN;
-      const average = reference
-        ? `<tspan x="${tx}" dy="14">average: ${fmt(reference[hoverIndex - from])}${Number.isFinite(sd) ? ` ± ${fmt(sd)}` : ""} ${unit}</tspan>`
-        : "";
-      hover = `<line class="ts-cursor" x1="${hx}" x2="${hx}" y1="${M.top}" y2="${h - M.bottom}"/>` +
-        (Number.isFinite(v) ? `<circle cx="${hx}" cy="${y(v)}" r="3.5" fill="${color}" class="ts-dot"/>` : "") +
-        `<text class="ts-readout" x="${tx}" y="${M.top + 10}" text-anchor="${right ? "end" : "start"}">${label}${average}</text>`;
-    }
-
     const yLabel = data.yLabel ?? unit;
     let yTitle = "";
     if (data.onYLabel) {
@@ -263,8 +260,35 @@ export function initTimeseries(
     plot.innerHTML = `<svg width="${w}" height="${h}" class="ts-zoom">
       ${yTitle}${yTicks}${zero}${spreadBand}${meanLine}
       <path d="${path(pts)}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/>
-      ${dots}${xTicks}${hover}
+      ${dots}${xTicks}<g class="ts-hover"></g>
     </svg>`;
+    zoomed = { from, to, series, reference, std: stats?.std ?? null, x, y, at, w, h, hoverEl: plot.querySelector<SVGGElement>(".ts-hover")! };
+    drawHover();
+  }
+
+  /** The hovered dekad's cursor and readout, into the chart as drawn (not the whole chart again at every move). */
+  function drawHover() {
+    if (!data?.range || !zoomed) return;
+    const { from, to, series, reference, std, x, y, at, w, h, hoverEl } = zoomed;
+    const { dekads, color, unit, daysIn } = data;
+    let hover = "";
+    if (hoverIndex !== null && hoverIndex >= from && hoverIndex < to) {
+      const dk = dekads[hoverIndex];
+      const v = series[hoverIndex - from];
+      const hx = x(at(dk));
+      const label = `${daysIn ? `Up to ${fmtEnd(dk)}` : `${fmtStart(dk)} – ${fmtEnd(dk)}`}: ${fmt(v)} ${unit}`;
+      const right = hx > w / 2;
+      const tx = right ? hx - 6 : hx + 6;
+      // The average on a line of its own.
+      const sd = std?.[hoverIndex - from] ?? Number.NaN;
+      const average = reference
+        ? `<tspan x="${tx}" dy="14">average: ${fmt(reference[hoverIndex - from])}${Number.isFinite(sd) ? ` ± ${fmt(sd)}` : ""} ${unit}</tspan>`
+        : "";
+      hover = `<line class="ts-cursor" x1="${hx}" x2="${hx}" y1="${M.top}" y2="${h - M.bottom}"/>` +
+        (Number.isFinite(v) ? `<circle cx="${hx}" cy="${y(v)}" r="3.5" fill="${color}" class="ts-dot"/>` : "") +
+        `<text class="ts-readout" x="${tx}" y="${M.top + 10}" text-anchor="${right ? "end" : "start"}">${label}${average}</text>`;
+    }
+    hoverEl.innerHTML = hover;
   }
 
   zoom.addEventListener("pointermove", (e) => {
@@ -272,15 +296,17 @@ export function initTimeseries(
     const w = zoom.clientWidth;
     const px = e.clientX - zoom.getBoundingClientRect().left;
     const dk = Math.floor(data.range.start + ((px - M.left) / (w - M.left - M.right)) * (data.range.end + 1 - data.range.start));
-    const i = data.dekads.indexOf(dk);
+    // (The dekads run on without gaps, so the first's number gives any one's index; if not, it's looked for.)
+    const guess = dk - data.dekads[0];
+    const i = guess >= 0 && guess < data.dekads.length && data.dekads[guess] === dk ? guess : data.dekads.indexOf(dk);
     const next = i < 0 ? null : i;
     if (next === hoverIndex) return;
     hoverIndex = next;
-    drawZoom();
+    drawHover();
   });
   zoom.addEventListener("pointerleave", () => {
     hoverIndex = null;
-    drawZoom();
+    drawHover();
   });
 
   new ResizeObserver(() => {

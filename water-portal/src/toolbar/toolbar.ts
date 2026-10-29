@@ -37,7 +37,13 @@ export interface ToolbarState {
 }
 
 /** Briefly highlight an element that the system (not the user) changed. */
+const flashed = new WeakMap<HTMLElement, number>();
 export function flash(el: HTMLElement) {
+  // (Not again within a moment: a drag flashes the other end at every move, and
+  // restarting the animation costs a layout.)
+  const now = performance.now();
+  if (now - (flashed.get(el) ?? -Infinity) < 100) return;
+  flashed.set(el, now);
   el.classList.remove("flash");
   void el.offsetWidth; // restart the animation
   el.classList.add("flash");
@@ -121,6 +127,10 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
     picker.render();
     lengthPicker.render();
     for (const [btn, n] of shifts) btn.disabled = !shiftYears(state.view, state.range, n);
+  }
+  // (Only as the view changes: setting the attribute, even to what it is, has the tabs'
+  // highlight measure them again.)
+  function renderTabs() {
     const slot = document.querySelector<HTMLElement>(`.tabs-slot[data-view="${state.view}"]`)!;
     if (tabs.parentElement !== slot) {
       const focused = tabs.contains(document.activeElement); // (moving it drops the focus)
@@ -137,6 +147,7 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
       const view = tab.dataset.view as View;
       if (view === state.view) return;
       state.view = view;
+      renderTabs();
       const prev = state.range;
       const next = enterView(view, prev);
       update(next, { start: next.start !== prev.start, end: next.end !== prev.end });
@@ -152,6 +163,7 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
   }
 
   render();
+  renderTabs();
   function setDays(days: DayRange) {
     if (days.start === state.range.start && days.end === state.range.end) return;
     update(days, {}); // the user chose it (elsewhere), so no highlight
