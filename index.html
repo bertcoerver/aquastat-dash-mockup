@@ -11,7 +11,7 @@
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
     />
-    <script type="module" crossorigin src="/aquastat-dash-mockup/assets/index-CCBmNoyE.js"></script>
+    <script type="module" crossorigin src="/aquastat-dash-mockup/assets/index-DebYYpiG.js"></script>
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/rolldown-runtime-XKyaHtl9.js">
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/array-utils-flat-BL8Cekj1.js">
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/get-attribute-from-layouts-Dd2gixpo.js">
@@ -21,7 +21,7 @@
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/webgpu-DhR-Xd8M.js">
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/preload-helper-x_aofTzv.js">
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/decode-kKOLXaTt.js">
-    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/index-D2qvzWxR.css">
+    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/index-XhbnjC66.css">
   </head>
   <body>
     <div id="map"></div>
@@ -67,6 +67,18 @@
         <label><input type="checkbox" data-layer="rivers" checked /> Rivers</label>
         <label><input type="checkbox" data-layer="lakes" checked /> Lakes</label>
         <label><input type="checkbox" data-layer="graticule" /> Graticule</label>
+        <!-- Outlines: a view's own are on and disabled (src/panels/layers-menu.ts). -->
+        <div class="layers-group">
+          <span class="layers-group-label">Outlines</span>
+          <label><input type="checkbox" data-layer="countries" checked /> Countries</label>
+          <label><input type="checkbox" data-layer="basins" /> Basins</label>
+          <label><input type="checkbox" data-layer="subBasins" /> Sub-basins</label>
+        </div>
+        <!-- Basin view only: what hovering a sub-basin picks out besides it. -->
+        <div class="layers-group" data-views="basin">
+          <label><input type="checkbox" data-layer="upstream" checked /> Upstream Basin</label>
+          <label><input type="checkbox" data-layer="downstream" checked /> Downstream Basin</label>
+        </div>
         <div class="layers-group" role="radiogroup" aria-label="Theme">
           <span class="layers-group-label">Theme</span>
           <label><input type="radio" name="theme" value="auto" /> Auto</label>
@@ -76,13 +88,22 @@
       </div>
     </div>
 
-    <aside class="legend" id="wapor-legend" hidden>
-      <!-- The variable shown; a menu of the others (src/panels/title-menu.ts). -->
+    <!-- Local view: the maps' layers, a checklist of WaPOR's variables and the vector maps
+      (src/local/local-maps.ts); a section per layer on the map is added after the title
+      (src/panels/legend.ts). -->
+    <aside class="legend" id="lp-legend" hidden>
       <div class="legend-title">
-        <button class="title-menu" id="wapor-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
-          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
-        <small id="wapor-source"></small>
+        <button class="title-menu" id="lp-maps" type="button" aria-haspopup="listbox" aria-expanded="false"
+          aria-label="Map layers"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
       </div>
+    </aside>
+
+    <div class="wb-tooltip" id="lp-tooltip" hidden></div>
+
+    <!-- The WaPOR raster's legend (src/map/wapor-legend.ts), moved into its section of the
+      Local legend, under its title (the variable). -->
+    <div class="wapor-legend" id="wapor-legend" hidden>
+      <small class="legend-layer-note" id="wapor-source"></small>
       <!-- The unit: a menu of per day, month, year or total, per m² or over a pixel (src/map/wapor-legend.ts). -->
       <div class="legend-period"><span id="wapor-period"></span><button class="title-menu unit-menu" id="wapor-unit"
           type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Unit"><span class="title-menu-label"></span><span
@@ -104,7 +125,7 @@
         <div class="legend-quality-value" id="wapor-quality-value"></div>
         <div class="legend-status" id="wapor-quality-status" role="status"></div>
       </div>
-    </aside>
+    </div>
 
     <!-- Basin view: the water balance of the selected sub-basin (src/basin/water-balance.ts). -->
     <aside class="legend wb-legend" id="wb-legend" hidden>
@@ -166,15 +187,17 @@
               <button class="tab" role="tab" data-view="local">Local</button>
             </nav>
           </div>
+          <!-- The selection's parent (a country's region, a sub-basin's major basin) selects it when clicked. -->
           <div class="wb-title" role="heading" aria-level="2">
+            <button class="title-parent" id="country-parent" type="button" hidden></button>
             <div class="combobox title-combobox" id="country-combobox">
-              <span class="title-field" data-empty="World" data-search="Search countries…">
-                <input id="country-input" type="text" role="combobox" aria-label="Country" aria-autocomplete="list"
-                  aria-expanded="false" aria-controls="country-list" autocomplete="off" spellcheck="false" />
+              <span class="title-field" data-empty="World" data-search="Search regions and countries…">
+                <input id="country-input" type="text" role="combobox" aria-label="Country or region" aria-autocomplete="list"
+                  aria-haspopup="tree" aria-expanded="false" aria-controls="country-list" autocomplete="off" spellcheck="false" />
                 <span class="title-caret" aria-hidden="true"></span>
               </span>
               <button class="combobox-clear" type="button" aria-label="Show the world" title="Show the world" hidden>×</button>
-              <ul class="combobox-list" id="country-list" role="listbox" aria-label="Countries" hidden></ul>
+              <ul class="combobox-list combobox-tree" id="country-list" role="tree" aria-label="Regions and countries" hidden></ul>
             </div>
           </div>
           <p id="cp-subtitle"></p>
@@ -194,6 +217,7 @@
         <div class="wb-heading">
           <div class="tabs-slot" data-view="basin"></div>
           <div class="wb-title" role="heading" aria-level="2">
+            <button class="title-parent" id="basin-parent" type="button" hidden></button>
             <div class="combobox title-combobox" id="basin-combobox">
               <span class="title-field" data-empty="All basins" data-search="Search basins and sub-basins…">
                 <input id="basin-input" type="text" role="combobox" aria-label="Basin" aria-autocomplete="list"
@@ -256,18 +280,30 @@
         <div class="wb-heading">
           <div class="tabs-slot" data-view="local"></div>
           <div class="wb-title" role="heading" aria-level="2">
-            <!-- The point as the title; a click opens its fields (src/toolbar/place-picker.ts). -->
+            <!-- The point as the title (or, a dam picked, the point and the dam's name): the point
+                 opens its fields, the dam's name the dams' search (src/toolbar/place-picker.ts). -->
+            <button class="title-parent" id="lp-coord" type="button" hidden></button>
             <div class="title-combobox point-picker">
               <button class="title-menu" id="lp-title" type="button" aria-haspopup="dialog" aria-expanded="false"
-                aria-controls="coords"><span class="title-menu-label">Pick a point</span><span class="title-caret" aria-hidden="true"></span></button>
+                aria-controls="lp-popup"><span class="title-menu-label">Pick a point</span><span class="title-caret" aria-hidden="true"></span></button>
               <button class="combobox-clear" id="coords-clear" type="button" aria-label="Clear point" title="Clear point" hidden>×</button>
-              <form class="coords point-popup" id="coords" aria-label="Point" hidden>
-                <label>X<input id="lon-input" type="number" step="any" min="-180" max="180" required
-                    placeholder="lon" aria-label="Longitude" /></label>
-                <label>Y<input id="lat-input" type="number" step="any" min="-90" max="90" required
-                    placeholder="lat" aria-label="Latitude" /></label>
-                <button class="coords-go" type="submit">Go</button>
-              </form>
+              <div class="point-popup" id="lp-popup" role="dialog" aria-label="Point" hidden>
+                <form class="coords" id="coords" aria-label="Coordinates">
+                  <label>X<input id="lon-input" type="number" step="any" min="-180" max="180" required
+                      placeholder="lon" aria-label="Longitude" /></label>
+                  <label>Y<input id="lat-input" type="number" step="any" min="-90" max="90" required
+                      placeholder="lat" aria-label="Latitude" /></label>
+                  <button class="coords-go" type="submit">Go</button>
+                </form>
+                <!-- Or, a dam picked (on the map), another dam: its list opens below, once the search is clicked. -->
+                <div class="combobox" id="dam-combobox">
+                  <input id="dam-input" type="text" role="combobox" aria-label="Dam" aria-autocomplete="list"
+                    aria-haspopup="tree" aria-expanded="false" aria-controls="dam-list" autocomplete="off" spellcheck="false"
+                    placeholder="Loading the dams…" data-search="Search dams by name or country…" disabled />
+                  <button class="combobox-clear" type="button" tabindex="-1" aria-hidden="true" hidden>×</button>
+                  <ul class="combobox-list combobox-tree" id="dam-list" role="tree" aria-label="Dams by country" hidden></ul>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -277,6 +313,16 @@
         <p class="wb-message" id="lp-message"></p>
         <!-- A ratio of totals (water productivity): the same days in every year (src/local/year-bars.ts). -->
         <!-- Cards: a click pins one, so it stays when the panel folds (as in the other views). -->
+        <!-- A GAEZ map on the map: the harvested area by crop at the point (src/local/crop-card.ts). -->
+        <section class="wb-section lp-section cp-card" id="lp-crops" data-pin="crops" tabindex="0" aria-label="By crop" hidden>
+          <h3><span class="cc-title">Harvested area by crop</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin
+                type="button" title="Remove pin" aria-label="Remove pin">×</button></span></h3>
+          <p class="ch-empty cc-empty">Click the map, or the title to type coordinates, to see the crops harvested there.</p>
+          <p class="wb-message error cc-message" hidden></p>
+          <div class="cc-head" hidden></div>
+          <div class="cc-chart" hidden></div>
+          <p class="cc-caption" hidden></p>
+        </section>
         <section class="wb-section lp-section cp-card" id="lp-bars" data-pin="bars" tabindex="0" aria-label="By year" hidden>
           <h3><span>By year</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin type="button"
                 title="Remove pin" aria-label="Remove pin">×</button></span></h3>
@@ -286,13 +332,16 @@
         <section class="wb-section lp-section cp-card" id="lp-series" data-pin="series" tabindex="0" aria-label="Time series">
           <h3><span id="lp-ts-title">Time series</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin
                 type="button" title="Remove pin" aria-label="Remove pin">×</button></span></h3>
-          <!-- No point yet: this instead of the charts. -->
-          <p class="ch-empty" id="lp-ts-empty" hidden>Click the map, or the title to type coordinates, to see the time series there.</p>
+          <!-- No map with time, or no point yet: a word instead of the charts (local-panel.ts). -->
+          <p class="ch-empty" id="lp-ts-empty" hidden></p>
           <p id="lp-ts-caption"></p>
           <div class="wb-overview" id="lp-overview"></div>
           <div class="wb-zoom" id="lp-zoom"></div>
           <div class="ts-key" id="lp-ts-key"></div>
         </section>
+        <!-- The dams' cards (src/local/dam-card.ts): all of them, and the one picked; hovering one
+             shows its attribute on the map, pinning it checks the dams with that attribute. -->
+        <div class="lp-dams" id="lp-dams"></div>
       </div>
     </aside>
 
