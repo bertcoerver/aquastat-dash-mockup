@@ -168,9 +168,21 @@ Other requirements:
 
 ## Browsers
 
-Chrome: works. Firefox: transparency works; the globe shook with the first render loop
-(fixed, see *Viewer*; to be re-checked). Safari: plays the WebMs but without alpha (the sea
-was opaque), hence the `.mov` files (to be re-checked).
+Alpha per format on macOS (2026-10-29), from `web/public/codec-test.html`, which plays one
+Delta tile in each format and checks that 24.4 % of the frame (the sea) is transparent:
+
+| | WebM (VP9 + alpha) | `.mov` (HEVC + alpha) |
+|---|---|---|
+| Chrome 156 | works | works (decoded by macOS) |
+| Firefox | works | doesn't work |
+| Safari | plays, no alpha | works |
+
+So no single format covers all three: the viewer gives Safari the `.mov` and the others
+the WebM. Chrome's HEVC goes through the OS decoder, so on Windows it depends on hardware
+or the HEVC Video Extensions, and on Linux it's generally absent.
+
+Viewer: works in Chrome. Firefox: the globe shook with the first render loop (fixed, see
+*Viewer*; to be re-checked).
 
 ## Not done (out of scope)
 
