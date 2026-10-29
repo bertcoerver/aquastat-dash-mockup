@@ -26,3 +26,7 @@ dist/
 .env
 .env.*
 *.log
+
+# WaPOR video POC: cached cubes and PNG frames (pipeline/extract.py and render.py rebuild them).
+video-poc/data/
+video-poc/pipeline/__pycache__/
