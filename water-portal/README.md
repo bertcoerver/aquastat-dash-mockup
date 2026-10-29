@@ -93,6 +93,8 @@ water-portal/
     │   ├── math.ts         clamp, lerp
     │   ├── scale.ts        Round steps and ticks for chart axes
     │   ├── csv.ts          Rows as a CSV file the browser saves
+    │   ├── format.ts       Numbers as text: one locale (en-US) everywhere
+    │   ├── data-url.ts     The static data files' URLs, with a version that changes when a file does
     │   ├── memo.ts         A memoised promise that forgets a failure; keeping the last few entries of a map
     │   ├── schedule.ts     perFrame: a draw once per animation frame
     │   ├── drag.ts         A pointer drag, its listeners taken off at the end
@@ -115,8 +117,10 @@ water-portal/
     │       ├── water.ts      Lakes (HydroLAKES) and rivers
     │       ├── wapor-variables.ts  WaPOR v3's variables: the catalogue, units, colours, where the rasters are
     │       ├── wapor-period.ts  A range as the rasters it's added up from, and whether they're published
+    │       ├── geotiff-lib.ts   The GeoTIFF reader, loaded with the first raster rather than the page
     │       ├── wapor-tiles.ts   The rasters and tiles read, decoded, kept and added up
-    │       ├── wapor.ts      The WaPOR raster on the map (Local view): the view's tiles and level, the layer, the values in view
+    │       ├── wapor-layer.ts   The layer that draws a period's rasters (loaded with the first raster too)
+    │       ├── wapor.ts      The WaPOR raster on the map (Local view): the view's tiles and level, the values in view
     │       ├── gaez.ts       GAEZ v5's cropland and harvested area maps (Local view), drawn by wapor.ts's layer
     │       ├── wapor-l2.ts   Where WaPOR has level 2 (100 m): a 1° footprint
     │       ├── wapor-plan.ts Which WaPOR rasters to add up for a range, cheapest first
@@ -166,6 +170,7 @@ water-portal/
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
     │   ├── load-bar.ts     Load bar under the graph pane's heading while anything loads
     │   ├── corner-warning.ts The bottom-left corner's warnings, one above the other
+    │   ├── crash-warning.ts Warning there for an error nothing else reports, and the map's graphics context lost
     │   ├── slow-server.ts  Warning there when the connection to Google Cloud is slow
     │   └── cors-check.ts   Warning there when a server's data is blocked by the browser (no CORS headers)
     ├── toolbar/
@@ -504,6 +509,16 @@ water-portal/
   dekad in `latest.json` (hatched on the slider), so a failed or late update shows as a
   shorter range rather than gaps; without the files the range isn't limited and Q and ΔS
   say they couldn't be loaded.
+- **The static data files** (`public/data`: the lists, the dams, the rivers) are fetched
+  with a version in their URL, a hash of their contents worked out at build time
+  (`vite.config.ts`, `src/lib/data-url.ts`), so a rebuilt file is never served from a
+  browser's or the host's cache. The tiles aren't versioned (they change rarely, and there
+  are thousands). The GeoTIFF reader and the map's raster layer are loaded with the first
+  raster, not with the page (`src/map/layers/geotiff-lib.ts`, `wapor-layer.ts`): the
+  Country view needs neither.
+- **What nothing else reports** (an error thrown outside any handler, a promise rejected
+  with nothing to catch it, the map's WebGL context lost) shows in the corner
+  (`src/panels/crash-warning.ts`), the last with a button to reload.
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
 - The URL keeps the map position (`#zoom/lat/lon`), so a view can be shared as a link.

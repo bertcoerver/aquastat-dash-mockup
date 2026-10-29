@@ -18,7 +18,8 @@
  */
 import { parse } from "@loaders.gl/core";
 import { MVTLoader } from "@loaders.gl/mvt";
-import { GeoTIFF, defaultDecoderPool } from "@developmentseed/geotiff";
+import type { GeoTIFF } from "@developmentseed/geotiff";
+import { geotiffLib } from "../map/layers/geotiff-lib";
 import type { Feature } from "geojson";
 import { publishedWaporPeriod } from "../map/layers/wapor-period";
 import { samples } from "../map/layers/wapor-tiles";
@@ -109,7 +110,7 @@ function subBasinMask(major: number, box: Box, subs: { key: string; ids: Set<num
 // --- Rasters -------------------------------------------------------------------------
 
 const rasters = new Map<string, Promise<GeoTIFF>>();
-const openRaster = (url: string) => memoized(rasters, url, () => GeoTIFF.fromUrl(url));
+const openRaster = (url: string) => memoized(rasters, url, () => geotiffLib().then(({ GeoTIFF }) => GeoTIFF.fromUrl(url)));
 
 
 /** A raster's raw values at the grid's cells (nearest pixel; NaN for nodata and off the raster). */
@@ -133,7 +134,8 @@ async function sampled(url: string, frame: Frame): Promise<Float32Array> {
   for (let ty = Math.floor(r0 / th); ty <= Math.floor(r1 / th); ty++) {
     for (let tx = Math.floor(c0 / tw); tx <= Math.floor(c1 / tw); tx++) xy.push([tx, ty]);
   }
-  const tiles = new Map((await image.fetchTiles(xy, { boundless: false, pool: defaultDecoderPool() })).map((t) => [`${t.x},${t.y}`, t.array]));
+  const pool = (await geotiffLib()).decoderPool();
+  const tiles = new Map((await image.fetchTiles(xy, { boundless: false, pool })).map((t) => [`${t.x},${t.y}`, t.array]));
   for (let j = 0; j < frame.height; j++) {
     const r = row(north - (j + 0.5) * cell);
     if (r < 0 || r >= height) continue;

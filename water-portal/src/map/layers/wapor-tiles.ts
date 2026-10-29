@@ -5,8 +5,9 @@
  * and the static maps' values. wapor.ts (the layer and the view) and the playback
  * buffer read through here.
  */
-import { GeoTIFF, PerOriginSemaphore, defaultDecoderPool, type RasterArray, type RasterTypedArray } from "@developmentseed/geotiff";
+import type { GeoTIFF, RasterArray, RasterTypedArray } from "@developmentseed/geotiff";
 import { cogImage, cogTile } from "../../local/cog-pixel";
+import { geotiffLib } from "./geotiff-lib";
 import { type RasterSum } from "./wapor-period";
 import { pixelArea, type WaporVariable } from "./wapor-variables";
 
@@ -24,9 +25,6 @@ export const openWapor = (period: RasterSum) => Promise.all(ownUrls(period).map(
  * (the map layer or the playback buffer). The least recently used are dropped first.
  */
 const MAX_OPEN_RASTERS = 64;
-// The bucket speaks HTTP/2, so more than the browser's 6 per host for HTTP/1.1 (the
-// library's default): playback loads several frames' tiles at once.
-export const LIMITER = new PerOriginSemaphore({ maxRequests: 16 });
 export const rasters = new Map<string, Promise<GeoTIFF>>();
 /** The rasters of each layer's `sources` (by its key; see waporLayer): kept open while a layer draws them. */
 export const sourceUrls = new Map<string, string[]>();
@@ -37,7 +35,7 @@ function openRaster(url: string): Promise<GeoTIFF> {
   if (raster) {
     rasters.delete(url);
   } else {
-    raster = GeoTIFF.fromUrl(url, { concurrencyLimiter: LIMITER });
+    raster = geotiffLib().then(({ GeoTIFF, limiter }) => GeoTIFF.fromUrl(url, { concurrencyLimiter: limiter }));
     raster.then((geotiff) => rasters.get(url) === raster && opened.set(url, geotiff), () => rasters.delete(url));
   }
   rasters.set(url, raster);
@@ -102,7 +100,7 @@ export function level(geotiff: GeoTIFF, z: number) {
 function rasterTile(url: string, { x, y, z }: TileIndex, signal?: AbortSignal): Promise<RasterTile> {
   return cachedTile(tileKey({ url }, { x, y, z }), signal, async () => {
     const geotiff = await openRaster(url);
-    const pool = defaultDecoderPool();
+    const pool = (await geotiffLib()).decoderPool();
     const { array } = await level(geotiff, z).fetchTile(x, y, { boundless: false, pool, signal });
     const values = samples(array);
     const { nodata } = array;

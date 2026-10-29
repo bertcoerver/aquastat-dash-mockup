@@ -18,6 +18,7 @@
  */
 import { fmt } from "../basin/variables";
 import { DAMS, PURPOSES, type Dams, type VectorAttribute } from "./vector-maps";
+import { fmtNumber } from "../lib/format";
 import { esc } from "../lib/html";
 
 export interface DamCards {
@@ -33,7 +34,7 @@ const MORE: Record<string, string> = { height: "higher", capacity: "larger", are
 const BINS = 32;
 const H = 30; // px, a strip's height
 
-const count = (n: number) => n.toLocaleString("en-US");
+const count = (n: number) => fmtNumber(n);
 const pct = (share: number) => `${Math.round(share * 100)}%`;
 
 /** A strip's dams, sorted, and its bins (over the middle 99% of the values: the rest go in the end bins). */
@@ -150,7 +151,7 @@ export function initDamCards(container: HTMLElement, tooltip: HTMLElement): DamC
     const mx = st.x(st.median) * 100;
     const marker = has ? `<line class="dc-mark" x1="${st.x(v) * 100}" x2="${st.x(v) * 100}" y1="0" y2="${H}"/>` : "";
     // (Powers of ten as they are, 0.1, 10, 1,000; years as years.)
-    const ticks = st.ticks.map((t) => `<span style="left:${st.x(t) * 100}%">${st.log ? t.toLocaleString("en-US") : t}</span>`).join("");
+    const ticks = st.ticks.map((t) => `<span style="left:${st.x(t) * 100}%">${st.log ? fmtNumber(t) : t}</span>`).join("");
     return (
       `<div class="dc-head"><span><i class="dc-dash"></i>median ${show(st.median)}${unit}</span><span>${count(st.values.length)} of ${count(d.count)} dams</span></div>` +
       (own ? `<div class="dc-head dc-own">${own}</div>` : "") +

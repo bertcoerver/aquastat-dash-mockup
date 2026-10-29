@@ -13,6 +13,7 @@
  * Also the legends' tick labels (fmtStop).
  */
 import type { WaporStretch } from "../map/layers/wapor-variables";
+import { compactNumber, fmtNumber } from "../lib/format";
 import { initTitleMenu } from "./title-menu";
 
 /** The menu's settings, as a % cut at either end. */
@@ -32,11 +33,10 @@ const stretchLabel = (cut: RampChoice, of: string) =>
       : `Colours span ${cut}–${100 - cut}% of ${of}`;
 
 /** A legend stop, with as many decimals as the range needs; large ones as "3.6M". */
-const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 3 });
 export function fmtStop(v: number, span: number) {
-  if (Math.abs(v) >= 1e5 || span >= 1e5) return compact.format(v);
+  if (Math.abs(v) >= 1e5 || span >= 1e5) return compactNumber.format(v);
   const decimals = span >= 10 ? 0 : span >= 1 ? 1 : span >= 0.1 ? 2 : 3;
-  return v.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return fmtNumber(v, decimals);
 }
 
 export interface RampMenu {

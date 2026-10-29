@@ -18,9 +18,8 @@ import { barsLayer, type Bar } from "./layers/bars";
 import { basinSchemeLayers, PARTICLES_ID, type BasinScheme, type SchemeArrow, type SchemeLineStyle } from "./layers/basin-scheme";
 import { EFFECTS_ID, effectGroundLayers, effectLayers, type BasinEffects } from "./layers/basin-effects";
 import type { RasterSum, WaporPeriod } from "./layers/wapor-period";
-import { openWapor, waporOpened } from "./layers/wapor-tiles";
 import { DEFAULT_RAMP } from "./layers/wapor-variables";
-import { onWaporLevel, waporLayer, waporShownLevel } from "./layers/wapor";
+import { onWaporLevel, prepareWapor, waporLayer, waporReady, waporShownLevel } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat, Place } from "./places";
@@ -321,8 +320,12 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 
   let wasFlow = false; // (whether the last layers had sub-basins picked out up- and downstream)
 
-  // Bottom to top. Rivers and lakes stay on top of whichever areas are shown.
-  function layers() {
+  /**
+   * The Basin view's: the major and sub-basins' areas (a statistics map's colours, the
+   * selected basin, up- and downstream of the hovered sub-basin), the outlines (shown
+   * in the other views if switched on), the sub-basins picked out and the hovered ones.
+   */
+  function basinLayers() {
     const basins = state.view === "basin";
     const stats = basins ? state.basinStats : null;
     // Upstream and downstream of the sub-basin under the pointer: the sub-basins filled
@@ -361,28 +364,79 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       selectedColor: theme.selectedSubBasin,
       fills: faded(fades.sub, flowFills ?? values, fillTiming),
     });
-    // (Under the pointer: an outline thinner than the selected one's.)
-    const scheme = basins ? state.scheme : null;
-    const effects = basins ? state.effects : null;
-    const outlined = stats ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])] : [];
-    return [
-      ...countriesLayer({
+    const picked = stats ? [...stats.outlined, ...(state.selection.subBasin ? [state.selection.subBasin] : [])] : [];
+    return {
+      areas: [...major.areas, ...sub.areas],
+      outlines: [sub.outlines, major.outlines], // (the sub-basins': not in the Basin view, for now)
+      picked: subBasinOutlinesLayer({ ids: picked, color: theme.outline, visible: basins }),
+      // (Under the pointer: an outline thinner than the selected one's.)
+      hovered: [
+        basinOutlinesLayer({ id: "major-basin-hovered", level: "major", ids: hovered && "major" in hovered ? [hovered.major] : [], color: theme.outline, halo: theme.markerRing, width: 1.75, visible: basins }),
+        basinOutlinesLayer({ id: "sub-basin-hovered", level: "sub", ids: hovered && "sub" in hovered ? [hovered.sub] : [], color: theme.outline, halo: theme.markerRing, width: 1.75, visible: basins }),
+      ],
+      scheme: basins ? state.scheme : null,
+      effects: basins ? state.effects : null,
+    };
+  }
+
+  /** The Country view's: the countries' areas (a map's colours), and the selected and the hovered one's outlines. */
+  function countryLayers() {
+    const countries = state.view === "country";
+    const hovered = state.hovered;
+    return {
+      areas: countriesLayer({
         color: theme.land,
         // (Not in the Local view: it's about the point, not the country it's in.)
         selected: state.view === "local" ? null : state.selection.country,
         selectedColor: theme.selected,
-        visible: !basins,
-        fills: faded(fades.countries, state.view === "country" ? state.countryFills : undefined, timing()),
+        visible: state.view !== "basin",
+        fills: faded(fades.countries, countries ? state.countryFills : undefined, timing()),
       }),
-      ...[state.waporLast, state.wapor, state.waporNext].flatMap((entry) => (entry ? waporLayers(entry) : [])),
-      gaezLayer(),
-      ...major.areas,
-      ...sub.areas,
+      selected: countryOutlineLayer({
+        m49: state.selection.country,
+        color: theme.outline,
+        halo: theme.markerRing,
+        visible: countries && Boolean(state.countryFills),
+      }),
+      hovered: countryOutlineLayer({
+        id: "m49-hovered",
+        m49: hovered && "country" in hovered ? hovered.country : null,
+        color: theme.outline,
+        halo: theme.markerRing,
+        width: 1.75,
+        visible: countries,
+      }),
+    };
+  }
+
+  /** The Local view's: the WaPOR raster (and the next one while playing), GAEZ's map, and the picked point's marker. */
+  function localLayers() {
+    return {
+      rasters: [...[state.waporLast, state.wapor, state.waporNext].flatMap((entry) => (entry ? waporLayers(entry) : [])), gaezLayer()],
+      // The clicked point: only the Local view is about a point. A dam picked: a target
+      // round its circle (as drawn: of the size it has, else as a point), and its name.
+      marker: markerLayer({
+        position: state.view === "local" ? (state.dragged ?? state.selection.lngLat) : null,
+        ring: theme.markerRing,
+        around: featureRadius(),
+      }),
+    };
+  }
+
+  // Bottom to top. Rivers and lakes stay on top of whichever areas are shown.
+  function layers() {
+    const basin = basinLayers();
+    const country = countryLayers();
+    const local = localLayers();
+    const { scheme, effects } = basin;
+    return [
+      ...country.areas,
+      ...local.rasters,
+      ...basin.areas,
       // The country view always has them; the others if switched on.
       bordersLayer({ color: theme.border, visible: state.view === "country" || state.visible.countries }),
       graticuleLayer({ color: theme.graticule, visible: state.visible.graticule }),
-      sub.outlines, // (not in the Basin view, for now)
-      major.outlines,
+      ...basin.outlines,
       ...effectGroundLayers(effects),
       riversLayer({
         color: theme.river,
@@ -390,23 +444,10 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         hidden: scheme ? { key: scheme.subBasinsKey, subBasins: scheme.subBasins } : undefined,
       }),
       lakesLayer({ color: theme.river, visible: state.visible.lakes }),
-      subBasinOutlinesLayer({ ids: outlined, color: theme.outline, visible: basins }),
-      countryOutlineLayer({
-        m49: state.selection.country,
-        color: theme.outline,
-        halo: theme.markerRing,
-        visible: state.view === "country" && Boolean(state.countryFills),
-      }),
-      basinOutlinesLayer({ id: "major-basin-hovered", level: "major", ids: hovered && "major" in hovered ? [hovered.major] : [], color: theme.outline, halo: theme.markerRing, width: 1.75, visible: basins }),
-      basinOutlinesLayer({ id: "sub-basin-hovered", level: "sub", ids: hovered && "sub" in hovered ? [hovered.sub] : [], color: theme.outline, halo: theme.markerRing, width: 1.75, visible: basins }),
-      countryOutlineLayer({
-        id: "m49-hovered",
-        m49: hovered && "country" in hovered ? hovered.country : null,
-        color: theme.outline,
-        halo: theme.markerRing,
-        width: 1.75,
-        visible: state.view === "country",
-      }),
+      basin.picked,
+      country.selected,
+      ...basin.hovered,
+      country.hovered,
       ...stacked({
         lines: basinSchemeLayers(scheme, schemeShown()),
         vapour: effects?.vapour ? effectLayers({ ...effects, rain: undefined }) : [],
@@ -415,13 +456,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         bars: [barsLayer({ bars: shownBars(), zoom: barsZoom, pickable: state.view === "local" })],
         circles: [countrySymbolsLayer({ symbols: visibleSymbols(), pickable: state.view === "local" })],
       }),
-      // The clicked point: only the Local view is about a point. A dam picked: a target
-      // round its circle (as drawn: of the size it has, else as a point), and its name.
-      ...markerLayer({
-        position: state.view === "local" ? (state.dragged ?? state.selection.lngLat) : null,
-        ring: theme.markerRing,
-        around: featureRadius(),
-      }),
+      ...local.marker,
     ];
   }
 
@@ -643,7 +678,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     const { period } = entry;
     const atL2 = waporShownLevel(period) === "L2";
     const layer = (p: WaporPeriod, id: string, hidden: boolean, onViewportLoad?: () => void) => {
-      if (!waporOpened(p)) {
+      if (!waporReady(p)) {
         openThenRender(p);
         return null;
       }
@@ -651,7 +686,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     };
     const l1 = !atL2
       ? layer(period, `wapor-aeti-${entry.id}`, next, next ? () => showNextWapor(entry) : undefined)
-      : !next && !entry.l2Loaded && waporOpened(period)
+      : !next && !entry.l2Loaded && waporReady(period)
         ? layer(period, `wapor-aeti-${entry.id}`, false)
         : null;
     const l2 = atL2
@@ -665,13 +700,14 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       : null;
     return [l1, l2];
   }
-  // Opens a period's rasters and draws again once they are: once, however many times the
-  // map is drawn meanwhile (each draw would add a redraw to the one opening).
+  // Opens a period's rasters (and loads the layer) and draws again once they are: once,
+  // however many times the map is drawn meanwhile (each draw would add a redraw to the
+  // one opening).
   const opening = new WeakSet<object>();
   function openThenRender(sum: RasterSum) {
     if (opening.has(sum)) return;
     opening.add(sum);
-    openWapor(sum)
+    prepareWapor(sum)
       .then(render, () => {})
       .finally(() => opening.delete(sum));
   }
@@ -679,7 +715,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   function gaezLayer() {
     const gaez = state.gaez;
     if (!gaez) return null;
-    if (!waporOpened(gaez.sum)) {
+    if (!waporReady(gaez.sum)) {
       openThenRender(gaez.sum);
       return null;
     }

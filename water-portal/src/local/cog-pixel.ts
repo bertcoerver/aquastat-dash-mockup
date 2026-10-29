@@ -31,7 +31,8 @@
  *
  * Based on holoviz-utils' pixel_values.js, which does the same with geotiff.js.
  */
-import { defaultDecoderPool, type DecoderMetadata, type DecoderPool, type RasterTypedArray } from "@developmentseed/geotiff";
+import type { DecoderMetadata, DecoderPool, RasterTypedArray } from "@developmentseed/geotiff";
+import { geotiffLib } from "../map/layers/geotiff-lib";
 import type { LngLat } from "../map/places";
 
 /** The first read of a raster: its header and first IFD, read on if the IFD is longer. */
@@ -451,7 +452,7 @@ export async function cogTile(url: string, col: number, row: number, signal?: Ab
   if (!tile) throw new Missing(`404 ${url}`);
   const { image, bytes, size } = tile;
   if (!bytes) return new Float32Array(size).fill(Number.NaN);
-  const decoded = await defaultDecoderPool().decode(bytes.slice(0), image.compression, image.metadata);
+  const decoded = await (await geotiffLib()).decoderPool().decode(bytes.slice(0), image.compression, image.metadata);
   if (decoded.layout === "band-separate") return decoded.bands[0];
   const n = image.metadata.samplesPerPixel;
   return n === 1 ? decoded.data : decoded.data.filter((_, i) => i % n === 0);
@@ -478,7 +479,7 @@ export async function cogPixel(url: string, [x, y]: LngLat, signal?: AbortSignal
   const { image, col, row, bytes } = tile;
   const { tileWidth: tw, tileHeight: th } = image;
   // The pool may hand the buffer to a worker: give it a copy, the cache keeps its own.
-  const decoded = await defaultDecoderPool().decode(bytes.slice(0), image.compression, image.metadata);
+  const decoded = await (await geotiffLib()).decoderPool().decode(bytes.slice(0), image.compression, image.metadata);
   const p = (row % th) * tw + (col % tw);
   const v = decoded.layout === "band-separate" ? decoded.bands[0][p] : decoded.data[p * image.metadata.samplesPerPixel];
   return v === image.nodata || Number.isNaN(v) ? null : Number(v);

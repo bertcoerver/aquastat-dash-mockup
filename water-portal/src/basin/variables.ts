@@ -9,6 +9,7 @@
  * zero (red: storage falls, blue: it rises).
  */
 import type { WaporStretch } from "../map/layers/wapor-variables";
+import { fmtNumber } from "../lib/format";
 import type { Color } from "../map/theme";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Variable } from "./model";
@@ -146,7 +147,7 @@ export function fmt(v: number): string {
   if (!Number.isFinite(v)) return "–";
   const a = Math.abs(v);
   if (a === 0) return "0";
-  if (a >= 1000) return Math.round(v).toLocaleString("en-US");
+  if (a >= 1000) return fmtNumber(Math.round(v));
   if (a >= 100) return v.toFixed(0);
   if (a >= 10) return v.toFixed(1);
   if (a >= 1) return v.toFixed(2);

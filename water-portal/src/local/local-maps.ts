@@ -31,9 +31,8 @@
  */
 import type { WaterMap } from "../map/map";
 import type { RasterSum } from "../map/layers/wapor-period";
-import { openWapor } from "../map/layers/wapor-tiles";
 import { WAPOR_VARIABLES, waporPixel, waporVariable, type WaporVariable } from "../map/layers/wapor-variables";
-import { waporValueAt, type WaporPixelValue } from "../map/layers/wapor";
+import { prepareWapor, waporValueAt, type WaporPixelValue } from "../map/layers/wapor";
 import { GAEZ_CROPS, GAEZ_MAPS, GAEZ_UNIT, gaezCrop, gaezSum, type GaezMap } from "../map/layers/gaez";
 import { rampColor, type WaporRamp } from "../map/layers/wapor-shader";
 import type { Bar } from "../map/layers/bars";
@@ -52,6 +51,7 @@ import type { SelectedFeature } from "../selection";
 import type { View } from "../toolbar/range-rules";
 import { VECTOR_MAPS, loadVectorMap, type PointData, type VectorAttribute, type VectorMap } from "./vector-maps";
 import { byId as $ } from "../lib/dom";
+import { fmtNumber } from "../lib/format";
 
 type Slot = "raster" | "circles" | "bars";
 /** The ways of drawing, bottom to top (the raster stays at the bottom: legend.ts's first slot). */
@@ -137,7 +137,7 @@ export function rasterTip(
   const q = ramp.quantities;
   const v = at.value * k;
   const value =
-    decimals === undefined ? fmtStop(v, (Math.abs(q[q.length - 1] - q[0]) * k) / 10) : v.toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    decimals === undefined ? fmtStop(v, (Math.abs(q[q.length - 1] - q[0]) * k) / 10) : fmtNumber(v, decimals);
   // (Its short name heads its one tile, which has the full one.)
   return { title: short, source: `${source} · ${pixel}`, rows: [{ color: rampColor(ramp, at.value), value, unit, label: title }] };
 }
@@ -455,7 +455,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
       state.gaezOpen.set(sum.key, open);
       draw();
     };
-    openWapor(sum).then(() => done("open"), () => done("failed"));
+    prepareWapor(sum).then(() => done("open"), () => done("failed"));
     return "opening";
   }
 
@@ -495,7 +495,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
   function buildVector(m: VectorMap, a: VectorAttribute<PointData>, d: PointData, slot: "circles" | "bars", off: Set<number>, style: ShapeStyle, symbols: CountrySymbol[], bars: Bar[]) {
     const position = (i: number): [number, number] => [d.lon[i], d.lat[i]];
     // (How many are drawn, and what to know about the attribute, under the key.)
-    const status = (shown: number) => [`${shown.toLocaleString("en-US")} of ${d.count.toLocaleString("en-US")} ${m.title.toLowerCase()} shown.`, a.note && `${a.note}.`].filter(Boolean).join(" ");
+    const status = (shown: number) => [`${fmtNumber(shown)} of ${fmtNumber(d.count)} ${m.title.toLowerCase()} shown.`, a.note && `${a.note}.`].filter(Boolean).join(" ");
 
     if (a.kind === "amount") {
       // Circles (area) or bars (height) by the value, the style's at full size (locked: as
@@ -511,7 +511,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
         else bars.push({ id, position: position(i), height: size.height(v), color: AMOUNT_COLOR });
       });
       const sizes: SizesKey = sizeKey(slot, size, () => css(AMOUNT_COLOR, slot === "circles" ? 0.7 : 1), false);
-      const tile = (i: number): MapTipRow => ({ color: css(AMOUNT_COLOR), value: values[i].toLocaleString("en-US"), unit: a.unit, label: a.label });
+      const tile = (i: number): MapTipRow => ({ color: css(AMOUNT_COLOR), value: fmtNumber(values[i]), unit: a.unit, label: a.label });
       return { tile, section: { unit: a.unit, sizes, status: status(shown) } };
     }
 
@@ -527,7 +527,7 @@ export function initLocalMaps({ map, wapor, variable, onWapor, onMapped, onTimed
       colorOf = (i) => scale.color(values[i]);
       // (A year, as it is: 1960, not 1,960.)
       legendKey = { kind: "ramp", gradient: scale.gradient, ticks: scale.ticks, format: a.unit ? undefined : (v) => String(Math.round(v)) };
-      tile = (i) => ({ color: css(colorOf(i) ?? AMOUNT_COLOR), value: a.unit ? values[i].toLocaleString("en-US") : String(values[i]), unit: a.unit, label: a.label });
+      tile = (i) => ({ color: css(colorOf(i) ?? AMOUNT_COLOR), value: a.unit ? fmtNumber(values[i]) : String(values[i]), unit: a.unit, label: a.label });
     } else {
       const classes = Array.from({ length: d.count }, (_, i) => a.classOf(d, i));
       const present = new Set(classes);

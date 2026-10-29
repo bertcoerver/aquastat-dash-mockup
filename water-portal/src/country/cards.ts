@@ -28,6 +28,7 @@ import {
   type VarKey,
 } from "./data";
 import { bars, bubbles, lines, shares, type BarRow, type Bubble, type LineSeries } from "./charts";
+import { fmtNumber } from "../lib/format";
 import type { Shape } from "../panels/shape-switch";
 
 
@@ -611,7 +612,7 @@ function quadrantMap(c: Ctx): MapSpec {
   };
 }
 
-const fmtN = (v: number) => v.toLocaleString("en-US");
+const fmtN = (v: number) => fmtNumber(v);
 
 /** A country's dot: the selected one in the first colour, its region's (or the selected region's) in the second, the rest grey. */
 function bubbleOf(c: Ctx, m49: number): Omit<Bubble, "x" | "y" | "size"> {

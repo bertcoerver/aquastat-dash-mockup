@@ -19,6 +19,7 @@ import { MONTHS, dkD, dkM, dkY, fmtEnd, fmtStart } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
 import { mean } from "./model";
 import { fmt } from "./variables";
+import { compactNumber } from "../lib/format";
 import { niceExtent, ticksWithin as niceTicks } from "../lib/scale";
 
 export interface TimeseriesData {
@@ -323,8 +324,7 @@ export function initTimeseries(
 }
 
 /** A y axis label: large ones as "3.6M", to fit next to the axis title. */
-const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumSignificantDigits: 3 });
-const fmtTick = (v: number) => (Math.abs(v) >= 1e5 ? compact.format(v) : fmt(v));
+const fmtTick = (v: number) => (Math.abs(v) >= 1e5 ? compactNumber.format(v) : fmt(v));
 
 /** Mean and sample standard deviation of the finite values (std NaN with fewer than 2). */
 function meanStd(vs: number[]): [number, number] {

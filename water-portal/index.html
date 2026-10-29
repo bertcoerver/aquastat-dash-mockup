@@ -18,10 +18,10 @@
     </script>
     <link rel="icon" href="data:," />
     <!-- The lists the page starts with (src/main.ts): fetched alongside the script, not after it has run. -->
-    <link rel="preload" href="%BASE_URL%data/sub-basins.json" as="fetch" crossorigin />
-    <link rel="preload" href="%BASE_URL%data/countries.json" as="fetch" crossorigin />
-    <link rel="preload" href="%BASE_URL%data/major-basins.json" as="fetch" crossorigin />
-    <link rel="preload" href="%BASE_URL%data/country-info.json" as="fetch" crossorigin />
+    <link rel="preload" href="%BASE_URL%data/sub-basins.json?v=%VITE_DATA_VERSION%" as="fetch" crossorigin />
+    <link rel="preload" href="%BASE_URL%data/countries.json?v=%VITE_DATA_VERSION%" as="fetch" crossorigin />
+    <link rel="preload" href="%BASE_URL%data/major-basins.json?v=%VITE_DATA_VERSION%" as="fetch" crossorigin />
+    <link rel="preload" href="%BASE_URL%data/country-info.json?v=%VITE_DATA_VERSION%" as="fetch" crossorigin />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <!-- (Loaded without holding up the first paint: the system font shows until they're in.) -->

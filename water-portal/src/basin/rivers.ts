@@ -6,6 +6,7 @@
  * with their upstream area (from a flow accumulation raster), their sub-basin and the arc
  * each flows into, simplified to ~500 m.
  */
+import { dataUrl } from "../lib/data-url";
 import { memoized } from "../lib/memo";
 
 
@@ -23,13 +24,12 @@ export interface RiverNetwork {
   coords: Float32Array;
 }
 
-const FILES = `${import.meta.env.BASE_URL}data/rivers/`;
 const loaded = new Map<number, Promise<RiverNetwork | null>>();
 
 /** A major basin's rivers (null: it has none, e.g. small islands). Kept once loaded. */
 export function loadRivers(major: number): Promise<RiverNetwork | null> {
   return memoized(loaded, major, () =>
-    fetch(`${FILES}${major}.bin`).then(async (r) => {
+    fetch(dataUrl(`rivers/${major}.bin`)).then(async (r) => {
       if (r.status === 404) return null;
       if (!r.ok) throw new Error(`Couldn't load the rivers (HTTP ${r.status}).`);
       // (Vite's dev server answers a missing file with index.html.)
@@ -62,7 +62,7 @@ let middles: Promise<Map<number, [number, number]>> | null = null;
 /** A point inside each sub-basin, near its centroid (public/data/sub-basin-middles.json). */
 export function loadMiddles(): Promise<Map<number, [number, number]>> {
   if (!middles) {
-    middles = fetch(`${import.meta.env.BASE_URL}data/sub-basin-middles.json`).then(async (r) => {
+    middles = fetch(dataUrl("sub-basin-middles.json")).then(async (r) => {
       if (!r.ok) throw new Error(`Couldn't load the sub-basins' middles (HTTP ${r.status}).`);
       const file: Record<string, [number, number]> = await r.json();
       return new Map(Object.entries(file).map(([id, p]) => [Number(id), p]));

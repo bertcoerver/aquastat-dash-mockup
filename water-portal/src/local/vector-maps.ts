@@ -13,6 +13,7 @@
  * loaded the first time the map is shown: all of it at once (no tiles), so any attribute
  * can be drawn, and its range and classes found, over all the points.
  */
+import { dataUrl } from "../lib/data-url";
 import { memoized } from "../lib/memo";
 
 
@@ -96,7 +97,7 @@ export const DAMS: VectorMap<Dams> = {
   title: "Dams",
   group: "Infrastructure",
   source: "AQUASTAT dams (2026 edition, via FAO's Water Portal)",
-  url: `${import.meta.env.BASE_URL}data/dams.json`,
+  url: dataUrl("dams.json"),
   parse(json) {
     const { count, columns } = json as { count: number; columns: Omit<Dams, "count"> };
     return { count, ...columns };

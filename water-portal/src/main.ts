@@ -18,6 +18,7 @@ import { initSlowServerCheck } from "./panels/slow-server";
 import { initLoadBar } from "./panels/load-bar";
 import { initCorsCheck } from "./panels/cors-check";
 import { cornerWarning } from "./panels/corner-warning";
+import { initCrashWarning } from "./panels/crash-warning";
 import { initThemeSwitch } from "./panels/theme-switch";
 import { mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
@@ -33,6 +34,7 @@ import "./styles/legend.css";
 import "./styles/basin.css";
 import "./styles/country.css";
 import { byId as $ } from "./lib/dom";
+import { dataUrl } from "./lib/data-url";
 
 // First, so it counts every request from here on.
 initLoadBar();
@@ -181,6 +183,7 @@ const waterMap = createMap(
   },
 );
 const { map, setView, setLayerVisible, setSelection, showBox, showPoint, setHovered } = waterMap;
+initCrashWarning(map);
 
 const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<Country>("countries"),
@@ -298,7 +301,7 @@ function fromColumns<T>(columns: Record<keyof T, unknown[]>): T[] {
 }
 
 async function loadData<T>(name: string): Promise<T> {
-  const response = await fetch(`${import.meta.env.BASE_URL}data/${name}.json`);
+  const response = await fetch(dataUrl(`${name}.json`));
   if (!response.ok) throw new Error(`${name}.json: ${response.status} ${response.statusText}`);
   return response.json() as Promise<T>;
 }

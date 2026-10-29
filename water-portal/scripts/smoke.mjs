@@ -106,6 +106,8 @@ try {
     await page.click('.tab[data-view="local"]');
     await page.waitForSelector("#lp-panel:not([hidden])", { timeout: 10000 });
     await page.waitForTimeout(3000);
+    // The WaPOR raster, read from FAO's bucket, drawn (the legend says so).
+    await page.waitForFunction(() => document.getElementById("wapor-legend")?.dataset.status === "ready", null, { timeout: 90000 });
     await page.mouse.move(650, 420);
     await page.waitForTimeout(300);
     await page.mouse.click(650, 420);
