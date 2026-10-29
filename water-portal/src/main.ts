@@ -217,7 +217,7 @@ function setWaporRamp(ramp: WaporRamp) {
 const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<Country>("countries"),
   loadList<MajorBasin>("major-basins"),
-  loadList<SubBasin>("sub-basins"),
+  loadData<Record<keyof SubBasin, unknown[]>>("sub-basins").then(fromColumns<SubBasin>),
   loadData<CountryInfo>("country-info"),
 ]).catch((err: Error) => {
   // (Without them there's no top bar or panel: say so, rather than leave a bare globe.)
@@ -329,6 +329,12 @@ selection.subscribe((s) => {
 
 function loadList<T>(name: string): Promise<T[]> {
   return loadData<T[]>(name);
+}
+
+/** Rows from an object of columns (sub-basins.json: 7,596 rows with the same keys, a fifth smaller so). */
+function fromColumns<T>(columns: Record<keyof T, unknown[]>): T[] {
+  const keys = Object.keys(columns) as (keyof T)[];
+  return columns[keys[0]].map((_, i) => Object.fromEntries(keys.map((k) => [k, columns[k][i]])) as T);
 }
 
 async function loadData<T>(name: string): Promise<T> {

@@ -2,7 +2,7 @@
  * Build the name lists for the country and basin pickers in the top bar:
  *   public/data/countries.json     [{ m49, name, bbox }]
  *   public/data/major-basins.json  [{ id, name, bbox }]
- *   public/data/sub-basins.json    [{ id, name, majorBasin, downstream, area, bbox }]
+ *   public/data/sub-basins.json    { id: [...], name: [...], majorBasin, downstream, area, bbox }: by column (fewer bytes)
  * bbox is [west, south, east, north] in degrees (west > east when it crosses 180°).
  *
  * Read from the same vector tiles the map shows, so the lists match the map:
@@ -39,6 +39,7 @@ const SETS = [
   },
   {
     out: "sub-basins.json",
+    columns: true,
     source: async (z, x, y) => {
       const r = await fetch(`https://storage.googleapis.com/fao-cog-data/basins/SDG6_SBM_v1_tiles/${z}/${x}/${y}.pbf`);
       return r.ok ? r.arrayBuffer() : null;
@@ -92,8 +93,15 @@ for (const set of SETS) {
     .map(({ entry, points }) => ({ ...entry, bbox: bbox(points) }))
     .sort((a, b) => a.name.localeCompare(b.name));
   await fs.mkdir(OUT, { recursive: true });
-  await fs.writeFile(path.join(OUT, set.out), JSON.stringify(list));
+  await fs.writeFile(path.join(OUT, set.out), JSON.stringify(set.columns ? byColumn(list) : list));
   console.log(`${set.out}: ${list.length} entries`);
+}
+
+/** Rows with one set of keys as an object of columns (src/main.ts fromColumns reads it back). */
+function byColumn(rows) {
+  const out = {};
+  for (const key of Object.keys(rows[0])) out[key] = rows.map((row) => row[key]);
+  return out;
 }
 
 function* coordinates(geometry) {

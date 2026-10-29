@@ -57,8 +57,8 @@ for (let a = 0; a < nArcs; a++) {
   }
 }
 
-const subBasins = JSON.parse(await fs.readFile(path.join(ROOT, "public/data/sub-basins.json"), "utf8"));
-const majorOf = new Map(subBasins.map((b) => [b.id, b.majorBasin]));
+const subBasins = JSON.parse(await fs.readFile(path.join(ROOT, "public/data/sub-basins.json"), "utf8")); // (by column)
+const majorOf = new Map(subBasins.id.map((id, i) => [id, subBasins.majorBasin[i]]));
 
 // --- Split ------------------------------------------------------------------------------
 const arcsOf = new Map(); // major basin -> arc indices, in the network's order

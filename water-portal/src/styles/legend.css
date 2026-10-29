@@ -48,14 +48,13 @@
   right: 8px;
   width: 5px;
   height: 5px;
-  margin-top: -4px;
+  transform: translateY(-4px) rotate(45deg);
 }
 .title-menu:hover .title-caret {
   border-color: var(--ink);
 }
 .title-menu[aria-expanded="true"] .title-caret {
-  margin-top: -1px;
-  transform: rotate(-135deg);
+  transform: translateY(-1px) rotate(-135deg);
 }
 .title-menu-list {
   width: max-content;
@@ -166,11 +165,11 @@
   right: 5px;
   width: 4px;
   height: 4px;
-  margin-top: -3px;
+  transform: translateY(-3px) rotate(45deg);
   border-width: 1px;
 }
 .unit-menu[aria-expanded="true"] .title-caret {
-  margin-top: -1px;
+  transform: translateY(-1px) rotate(-135deg);
 }
 .legend-status {
   font-size: 11px;
@@ -595,7 +594,12 @@
   -webkit-backdrop-filter: blur(12px) saturate(1.2);
   backdrop-filter: blur(12px) saturate(1.2);
 }
-/* (Following the pointer: over .wb-tooltip's own size and background, basin.css, loaded later.) */
+/* (Following the pointer: over .wb-tooltip's own size and background, basin.css, loaded later.
+   Not blurred: it moves at every pointer move, and the glass behind would be blurred again each time.) */
+.wb-tooltip.map-tip::before {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
 .wb-tooltip.map-tip {
   max-width: none;
   padding: 6px 0 5px;

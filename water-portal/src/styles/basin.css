@@ -88,8 +88,10 @@
   background: color-mix(in srgb, var(--surface) calc(var(--glass) * (1 - var(--rest, 0))), transparent);
   border-color: color-mix(in srgb, var(--line) calc(var(--glass) * (1 - var(--rest, 0))), transparent);
   box-shadow: 0 4px 16px rgb(0 0 0 / calc(0.12 * (1 - var(--rest, 0))));
-  -webkit-backdrop-filter: blur(calc(12px * (1 - var(--rest, 0)))) saturate(calc(1 + 0.2 * (1 - var(--rest, 0))));
-  backdrop-filter: blur(calc(12px * (1 - var(--rest, 0)))) saturate(calc(1 + 0.2 * (1 - var(--rest, 0))));
+  /* (No blur: a blur radius that changes with --rest has the pane blurred again at every
+     frame of the fold; at rest it would be none anyway.) */
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .wb-panel.folding.has-kept > .wb-head {
   --edge: color-mix(in srgb, var(--line) calc(var(--glass) * var(--rest, 0)), transparent);
@@ -287,10 +289,10 @@
   right: 9px;
   width: 6px;
   height: 6px;
-  margin-top: -5px;
+  transform: translateY(-5px) rotate(45deg);
 }
 .wb-title .title-menu[aria-expanded="true"] .title-caret {
-  margin-top: -1px;
+  transform: translateY(-1px) rotate(-135deg);
 }
 /* (The popup below the whole title, the point's and the dam's: not pushed off the panel.) */
 #lp-panel .wb-title {
@@ -572,19 +574,17 @@
   top: 50%;
   width: 6px;
   height: 6px;
-  margin-top: -5px;
   border-right: 1.5px solid var(--muted);
   border-bottom: 1.5px solid var(--muted);
-  transform: rotate(45deg);
+  transform: translateY(-5px) rotate(45deg);
   pointer-events: none;
-  transition: transform 0.12s, margin-top 0.12s;
+  transition: transform 0.12s;
 }
 .title-field:hover .title-caret {
   border-color: var(--ink);
 }
 .title-combobox:has([aria-expanded="true"]) .title-caret {
-  margin-top: -1px;
-  transform: rotate(-135deg);
+  transform: translateY(-1px) rotate(-135deg);
 }
 .title-combobox .combobox-clear {
   position: static;
