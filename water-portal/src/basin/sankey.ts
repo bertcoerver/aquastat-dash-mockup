@@ -17,6 +17,7 @@
  */
 import type { Variable } from "./model";
 import { STYLES, fmt } from "./variables";
+import { esc } from "../lib/html";
 
 export interface SankeyBasin {
   id: number;
@@ -285,5 +286,4 @@ function band(x0: number, y0: number, x1: number, y1: number, w: number) {
   return `M${left.join("L")}L${right.reverse().join("L")}Z`;
 }
 
-const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
-const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+const attr = esc;

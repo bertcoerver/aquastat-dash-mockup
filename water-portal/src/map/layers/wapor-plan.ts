@@ -52,7 +52,7 @@ export interface Plan {
  * its header (~0.3 MB) and one more request for every tile on screen.
  */
 const PER_RASTER = 1;
-export const COST: Record<BlockKind, number> = { D: PER_RASTER + 1, M: PER_RASTER + 2, A: PER_RASTER + 5.8 };
+const COST: Record<BlockKind, number> = { D: PER_RASTER + 1, M: PER_RASTER + 2, A: PER_RASTER + 5.8 };
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
@@ -65,7 +65,7 @@ export function block(kind: BlockKind, start: number): Block {
 }
 
 /** Days in a dekad: 10, or 8 to 11 for the last of the month. */
-export const dekadDays = (dk: number) => endDay(dk) - startDay(dk) + 1;
+const dekadDays = (dk: number) => endDay(dk) - startDay(dk) + 1;
 
 /** "A[2025]", "M[2025-01]" or "D[2025-03-D2]". */
 export const blockName = (b: Block) => `${b.kind}[${b.code}]`;

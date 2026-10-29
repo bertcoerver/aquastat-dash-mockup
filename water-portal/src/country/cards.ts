@@ -286,14 +286,13 @@ const compared = (c: Ctx) =>
 const lastYear = (ctx: Ctx) => Math.max(latestYear(), ctx.period.to);
 
 /** The country, its region and the World over the years, for one variable. */
-function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
+function areaSeries(ctx: Ctx, key: VarKey): LineSeries[] {
   const over = (area: number) => {
-    if (isCountry(ctx, area) || !weight) {
-      const own = seriesOf(area, key);
-      if (own.size || isCountry(ctx, area)) return own;
-    }
+    const own = seriesOf(area, key);
+    if (own.size || isCountry(ctx, area)) return own;
+    // (A region without an aggregate of its own: summed over its countries, year by year.)
     const out = new Map<number, number>();
-    for (let y = FIRST_YEAR; y <= lastYear(ctx); y++) out.set(y, val(ctx, area, key, yearPeriod(y), weight));
+    for (let y = FIRST_YEAR; y <= lastYear(ctx); y++) out.set(y, val(ctx, area, key, yearPeriod(y)));
     return out;
   };
   const s: LineSeries[] = [{ label: "World", color: C.world, values: over(WORLD) }];
@@ -302,8 +301,8 @@ function areaSeries(ctx: Ctx, key: VarKey, weight?: VarKey): LineSeries[] {
   return s;
 }
 
-function lineChart(ctx: Ctx, series: LineSeries[], unit: string, axis: string, height?: number) {
-  return lines({ series, from: FIRST_YEAR, to: lastYear(ctx), selected: ctx.period.from, selectedTo: ctx.period.to, unit, axis, width: ctx.width, height, clickable: ctx.canSelect });
+function lineChart(ctx: Ctx, series: LineSeries[], unit: string, axis: string) {
+  return lines({ series, from: FIRST_YEAR, to: lastYear(ctx), selected: ctx.period.from, selectedTo: ctx.period.to, unit, axis, width: ctx.width, clickable: ctx.canSelect });
 }
 
 function seriesCsv(series: LineSeries[], unit: string) {

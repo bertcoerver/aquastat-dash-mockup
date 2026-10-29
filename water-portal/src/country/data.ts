@@ -12,6 +12,8 @@
  * resources by origin and source, wastewater reuse, irrigation by source); charts that
  * need them per region sum or weight the region's countries themselves (see regionValue).
  */
+import { memoized } from "../lib/memo";
+
 const PROXY_URL = "https://data.apps.fao.org/api/v2/bigquery";
 const TABLE = "`fao-maps.fao_aquastat_dissemination.mvw_aquastat`";
 export const FIRST_YEAR = 2010;
@@ -92,13 +94,7 @@ let latest = 0;
 
 /** Load a topic's variables (once; a failed load is forgotten, so it can be retried). */
 export function loadTopic(topic: Topic): Promise<void> {
-  let load = loads.get(topic);
-  if (!load) {
-    load = query(TOPIC_VARS[topic]);
-    load.catch(() => loads.delete(topic));
-    loads.set(topic, load);
-  }
-  return load;
+  return memoized(loads, topic, () => query(TOPIC_VARS[topic]));
 }
 
 async function query(keys: VarKey[]) {
@@ -140,7 +136,7 @@ export function series(area: number, key: VarKey): Map<number, number> {
 }
 
 /** The value in `year`, or else the latest one before it (AQUASTAT fills most years). */
-export function valueAt(area: number, key: VarKey, year: number): number {
+function valueAt(area: number, key: VarKey, year: number): number {
   const s = store.get(area)?.get(key);
   if (!s) return NaN;
   for (let y = year; y >= FIRST_YEAR; y--) {
@@ -176,11 +172,6 @@ export function meanOver(p: Period, value: (year: number) => number): number {
 
 /** A variable's yearly mean over a period (each year as in valueAt). */
 export const meanAt = (area: number, key: VarKey, p: Period) => meanOver(p, (y) => valueAt(area, key, y));
-
-/** All countries (not aggregates) with data loaded. */
-export function countryCodes(countryRegion: Map<number, number>): number[] {
-  return [...store.keys()].filter((a) => countryRegion.has(a));
-}
 
 /**
  * A region's (or the World's) value: AQUASTAT's own aggregate where there is one,

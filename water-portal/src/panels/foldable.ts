@@ -11,6 +11,8 @@
  * way), .resting once fully folded; .has-kept with a pinned chart, whose element gets
  * .kept and its ancestors in the body .keep-path. --rest goes from 0 (open) to 1.
  */
+import { reduceMotion } from "../lib/dom";
+
 
 const OPEN_DELAY = 60; // ms; a pointer passing over doesn't unfold it
 const CLOSE_DELAY = 250; // ms; nor does one slipping off the edge fold it
@@ -19,7 +21,6 @@ const DURATION = 280; // ms
 /** One of its menus or pickers, open (not a tree item, which keeps it when hidden). */
 const POPUP_OPEN = ':is([aria-haspopup], [role="combobox"])[aria-expanded="true"]';
 
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 export function makeFoldable(pane: HTMLElement) {
   const head = pane.querySelector<HTMLElement>(".wb-head")!;

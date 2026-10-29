@@ -18,7 +18,7 @@
  * While playing, a lighter part of the track after the range shows how far ahead the
  * map has loaded.
  */
-import { MAX_DAY, MIN_YEAR, dayOf, fmtDay } from "./dekads";
+import { MAX_DAY, MAX_DK, MIN_YEAR, dayOf, dkY, fmtDay } from "./dekads";
 import {
   changeEnd,
   changeStart,
@@ -31,6 +31,8 @@ import {
   type DayRange,
   type View,
 } from "./range-rules";
+import { byId as $ } from "../lib/dom";
+import { clamp } from "../lib/math";
 
 /** What the slider shows: the view (whose rules apply) and the range, in days. */
 interface SliderState {
@@ -47,8 +49,6 @@ const LABEL_GAP_PX = 8; // least space between year labels
 const MONTH_TICK_PX = 8; // least space between month ticks for them to show
 const CORE_PX = 5; // same inside the band, at most (a narrow band leaves its middle draggable)
 const pct = (b: number) => `${(b / BOUNDARIES) * 100}%`;
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-const $ = (id: string) => document.getElementById(id)!;
 
 /** The range's length: in years in Country (whole years), else in days. */
 function lengthLabel(view: View, range: DayRange) {
@@ -75,7 +75,7 @@ export function initRangeSlider(
   // Year ticks, labelled in the middle of each year where the label fits, and month
   // ticks once there's room for them. The pane is kept wide enough for every whole
   // year's label (--range-min).
-  const lastYear = new Date(Date.UTC(MIN_YEAR, 0, 1 + MAX_DAY)).getUTCFullYear();
+  const lastYear = dkY(MAX_DK);
   const years = $("slider-years");
   years.innerHTML = Array.from({ length: lastYear - MIN_YEAR + 1 }, (_, i) => {
     const a = dayOf(MIN_YEAR + i, 0, 1);

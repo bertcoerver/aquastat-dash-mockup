@@ -30,6 +30,7 @@ import {
   dkLastDay,
   dkY,
 } from "./dekads";
+import { clamp } from "../lib/math";
 
 export type View = "country" | "basin" | "local";
 
@@ -49,13 +50,7 @@ export interface DayRange {
 export const daysOfDekads = ({ start, end }: DekadRange): DayRange => ({ start: dkFirstDay(start), end: dkLastDay(end) });
 /** The dekads a range of days lies in. */
 export const coveringDekads = ({ start, end }: DayRange): DekadRange => ({ start: dayDk(start), end: dayDk(end) });
-/** Whether a range of days is whole dekads. */
-export const isDekads = (days: DayRange) => {
-  const dekads = daysOfDekads(coveringDekads(days));
-  return dekads.start === days.start && dekads.end === days.end;
-};
 
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 // --- Limits ---------------------------------------------------------------------
 

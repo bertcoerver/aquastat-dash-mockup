@@ -19,6 +19,7 @@ import { MONTHS, dkD, dkM, dkY, fmtEnd, fmtStart } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
 import { mean } from "./model";
 import { fmt } from "./variables";
+import { niceExtent, ticksWithin as niceTicks } from "../lib/scale";
 
 export interface TimeseriesData {
   dekads: number[];
@@ -428,25 +429,6 @@ function extent(values: Float64Array, ...extra: number[]): [number, number] {
   return lo <= hi ? [lo, hi] : [0, 1];
 }
 
-function niceStep(span: number, count: number) {
-  const raw = span / count;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const f = raw / mag;
-  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
-}
-
-function niceExtent([lo, hi]: [number, number]): [number, number] {
-  if (hi === lo) return [lo - 1, hi + 1];
-  const step = niceStep(hi - lo, 4);
-  return [Math.floor(lo / step) * step, Math.ceil(hi / step) * step];
-}
-
-function niceTicks(lo: number, hi: number, count: number) {
-  const step = niceStep(hi - lo, count);
-  const ticks = [];
-  for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) ticks.push(Math.round(v / step) * step);
-  return ticks;
-}
 
 /** Date ticks for a period: at most `max`, on dekad, month or year starts. */
 function dekadTicks(range: DekadRange, max: number) {

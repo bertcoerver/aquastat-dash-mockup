@@ -32,7 +32,7 @@ import type { Flow, WaterMap } from "../map/map";
 import { flyTo, type Extent } from "../map/fly-to";
 import type { Place } from "../map/places";
 import type { SubBasin } from "../map/sub-basin-network";
-import { mixColor, type Color } from "../map/theme";
+import { cssRgb as css, mixColor, type Color } from "../map/theme";
 import { unlessLoading } from "../panels/load-bar";
 import { initDrivers, markDrivers, type Driver } from "../panels/map-drivers";
 import { initLayerLegend, onePerSlot, toggled, type LegendKey, type LegendLayer, type SizesKey } from "../panels/legend";
@@ -75,6 +75,10 @@ import {
 import { loadSeries, monthlyStats, periodStats, windowRates, type Monthly, type PeriodStats, type WaporSeries, type WindowRates } from "./stats-data";
 import { fmt, rampScale, type ColorScale } from "./variables";
 import { showMapTip, type MapTipRow } from "../panels/map-tip";
+import { esc } from "../lib/html";
+import { byId as $ } from "../lib/dom";
+import { downloadCsv } from "../lib/csv";
+import { perFrame } from "../lib/schedule";
 
 interface Options {
   map: WaterMap;
@@ -124,8 +128,6 @@ interface Layer {
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; series: WaporSeries };
 
-const $ = (id: string) => document.getElementById(id)!;
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 /** The first dekad of the WaPOR record. */
 const FIRST_DK = mk(WAPOR_MIN_YEAR, 0, 0);
 
@@ -554,11 +556,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
   }
 
   // --- Rendering -------------------------------------------------------------------------------
-  let frame = 0;
-  function render() {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(draw);
-  }
+  const render = perFrame(draw);
 
   function draw() {
     const shown = state.view === "basin";
@@ -615,7 +613,6 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       stats,
       windows,
       rates,
-      ratesError: null,
       flux: { majors: majorFlux, sub: subFlux },
       monthly,
       major: major && { id: major.id, name: majorNames.get(major.id) ?? major.name },
@@ -900,7 +897,6 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
     const sizes = new Map<string, SizesKey>();
     const waiting = new Map<string, string>();
     const at = loadedMiddles();
-    const css = (c: Color, alpha = 1) => `rgb(${c[0]} ${c[1]} ${c[2]} / ${alpha})`;
     for (const { spec, slot } of layers.filter(isShape)) {
       const { ids, values, scale, shown } = paint(spec);
       scales.set(slot, scale);
@@ -1015,7 +1011,6 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
 
   /** Up- and downstream of the hovered sub-basin: how many, how big, and where the water goes. */
   function showFlowTip({ sub, upstream, downstream }: Flow) {
-    const css = (c: Color) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
     const count = (n: number) => `${n} sub-basin${n === 1 ? "" : "s"}`;
     const area = (ids: Set<number>) => [...ids].reduce((sum, id) => sum + (subsById.get(id)?.area ?? 0), 0);
     // Where it all ends: the sea or an inland sink (-999, -888 past the last sub-basin).
@@ -1052,12 +1047,7 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
   function download(id: string) {
     const rows = current?.csv.get(id);
     if (!rows || !current) return;
-    const csvText = rows.map((r) => r.map(csvCell).join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csvText], { type: "text/csv" }));
-    a.download = `${id}_${current.ctx.major?.id ?? "world"}_${current.ctx.period.replace(/ /g, "")}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadCsv(`${id}_${current.ctx.major?.id ?? "world"}_${current.ctx.period.replace(/ /g, "")}.csv`, rows);
   }
 
   new ResizeObserver(() => {
@@ -1107,7 +1097,6 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       state.flow = flow;
       tellTimed();
       if (state.view === "basin") showMapTooltip();
-      const css = (c: Color) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
       const items = [
         ...(flow?.upstream ? [{ label: "Upstream: draining into it", background: css(map.theme.upstreamVeil), absent: !flow.upstream.size }] : []),
         ...(flow?.downstream ? [{ label: "Downstream: where it drains to", background: css(map.theme.downstreamVeil), absent: !flow.downstream.size }] : []),
@@ -1118,5 +1107,3 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
   };
 }
 
-const csvCell = (v: string | number) =>
-  typeof v === "number" ? (Number.isFinite(v) ? String(v) : "") : /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;

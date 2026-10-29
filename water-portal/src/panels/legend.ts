@@ -37,6 +37,7 @@ import { drag } from "../lib/drag";
 import type { WaporStretch } from "../map/layers/wapor";
 import { fmtStop, initRampMenu, type RampMenu } from "./ramp-menu";
 import { initTitleMenu, type MenuOption } from "./title-menu";
+import { esc } from "../lib/html";
 
 export interface Tick {
   value: number;
@@ -147,7 +148,6 @@ const ARROW_SVG =
   `<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2 6.5L5 3.5L8 6.5" fill="none" ` +
   `stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** One layer per slot, the last of `layers` (the latest checked) in its slot winning, in the slots' order. */
 export function onePerSlot<T extends { slot: string }>(layers: T[], slots: string[]): T[] {

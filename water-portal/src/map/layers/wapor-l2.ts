@@ -42,9 +42,6 @@ function cell(lon: number, lat: number) {
   return (lat + 90) * 360 + ((((lon + 180) % 360) + 360) % 360);
 }
 
-/** Whether L2 may have data at a point. */
-export const inL2 = (lon: number, lat: number) => cells.has(cell(Math.floor(lon), Math.floor(lat)));
-
 /** Whether L2 may have data in a lon/lat box (west may be below -180, east above 180). */
 export function boxInL2(west: number, south: number, east: number, north: number) {
   if (east - west >= 360) [west, east] = [-180, 180];

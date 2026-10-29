@@ -98,3 +98,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
 export function mixColor(a: Color, b: Color, t: number): Color {
   return [0, 1, 2].map((i) => Math.round(a[i] + (b[i] - a[i]) * t)).concat(255) as Color;
 }
+
+/** A colour as CSS, `rgb(r g b)`, or with an opacity. */
+export const cssRgb = (c: Color | [number, number, number], alpha?: number) =>
+  alpha === undefined ? `rgb(${c[0]} ${c[1]} ${c[2]})` : `rgb(${c[0]} ${c[1]} ${c[2]} / ${alpha})`;

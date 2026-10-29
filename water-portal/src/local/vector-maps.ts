@@ -13,6 +13,8 @@
  * loaded the first time the map is shown: all of it at once (no tiles), so any attribute
  * can be drawn, and its range and classes found, over all the points.
  */
+import { memoized } from "../lib/memo";
+
 
 /** A map's data: the points' positions, and its own columns. */
 export interface PointData {
@@ -136,19 +138,14 @@ export const VECTOR_MAPS: VectorMap[] = [DAMS as unknown as VectorMap];
 const loaded = new Map<string, Promise<PointData>>();
 /** A map's data (loaded once). */
 export function loadVectorMap(m: VectorMap): Promise<PointData> {
-  let p = loaded.get(m.id);
-  if (!p) {
-    p = fetch(m.url)
+  return memoized(loaded, m.id, () =>
+    fetch(m.url)
       .then((res) => {
         if (!res.ok) throw new Error(`${m.title}: ${res.status} ${res.statusText}`);
         return res.json();
       })
-      .then((json) => m.parse(json));
-    // (A failed load is tried again next time.)
-    p.catch(() => loaded.delete(m.id));
-    loaded.set(m.id, p);
-  }
-  return p;
+      .then((json) => m.parse(json)),
+  );
 }
 
 /** The dams' data (loaded once: the same as their map's). */

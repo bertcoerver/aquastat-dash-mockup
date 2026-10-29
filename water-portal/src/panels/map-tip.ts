@@ -18,6 +18,8 @@
  */
 
 import { PIN } from "../country/charts";
+import { esc } from "../lib/html";
+import { reduceMotion } from "../lib/dom";
 
 export interface MapTipRow {
   /** Its colour there, as CSS (a colour or a gradient); null: drawn without one (no swatch). */
@@ -35,7 +37,6 @@ export interface MapTip {
   rows: MapTipRow[];
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
 /** One header, and a tile per map. */
 function html({ title, source, rows }: MapTip) {
@@ -68,7 +69,6 @@ let owner: HTMLElement | null = null;
 let overDock = false;
 /** Whether the pinned box shows a tooltip (to fade its content in when it gets one). */
 let dockFull = false;
-const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 /** Released: the tooltip shown (to pin it as it is); null: none. */
 let following: { el: HTMLElement; tip: MapTip } | null = null;
 /** Released: the last tooltip shown, hidden since or not (leaving the map for the zone hides it). */

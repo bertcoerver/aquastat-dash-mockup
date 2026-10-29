@@ -15,6 +15,7 @@
 import { fmt } from "../basin/variables";
 import { fmtDay } from "../toolbar/dekads";
 import type { DayRange } from "../toolbar/range-rules";
+import { niceMax } from "../lib/scale";
 
 export interface YearBar {
   days: DayRange;
@@ -172,14 +173,6 @@ function roundedBar(x: number, y: number, w: number, h: number) {
   return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
 }
 
-/** A round top for the axis, and its tick step. */
-function niceMax(v: number): [number, number] {
-  const raw = v / 3;
-  const mag = 10 ** Math.floor(Math.log10(raw));
-  const f = raw / mag;
-  const step = (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * mag;
-  return [Math.ceil(v / step) * step, step];
-}
 
 /** "26 Feb – 13 Oct 2023", or with both years when it runs over the new year. */
 function fmtRange({ start, end }: DayRange) {

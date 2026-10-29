@@ -18,12 +18,13 @@
  */
 import { parse } from "@loaders.gl/core";
 import { MVTLoader } from "@loaders.gl/mvt";
-import { GeoTIFF, defaultDecoderPool, type RasterArray } from "@developmentseed/geotiff";
+import { GeoTIFF, defaultDecoderPool } from "@developmentseed/geotiff";
 import type { Feature } from "geojson";
-import { WAPOR_VARIABLES, publishedWaporPeriod, type WaporVariableId } from "../map/layers/wapor";
+import { WAPOR_VARIABLES, publishedWaporPeriod, samples, type WaporVariableId } from "../map/layers/wapor";
 import type { MajorBasinProperties, SubBasinProperties } from "../map/layers/basins";
 import { FAO_TILES } from "../map/layers/tile-urls";
 import type { DayRange } from "../toolbar/range-rules";
+import { keepLast, memoized } from "../lib/memo";
 
 export type GridVariable = Extract<WaporVariableId, "PCP" | "AETI" | "T">;
 
@@ -55,24 +56,11 @@ function frameOf([w, s, e, n]: Box): Frame {
 const KEPT_GRIDS = 16;
 const grids = new Map<string, Promise<BasinGrid>>();
 
-/** The last few `max` of a map's entries are kept: the oldest go. */
-function keepLast<K, V>(map: Map<K, V>, max: number) {
-  for (const key of map.keys()) {
-    if (map.size <= max) break;
-    map.delete(key);
-  }
-}
-
 /** A variable's mean mm/day over a range, on the basin's grid (kept; a failed one is forgotten). */
 export function loadBasinGrid(variable: GridVariable, range: DayRange, major: number, box: Box): Promise<BasinGrid> {
   const key = `${variable}:${range.start}-${range.end}:${major}`;
-  let grid = grids.get(key);
-  if (!grid) {
-    grid = readGrid(variable, range, major, box);
-    grid.catch(() => grids.delete(key));
-    grids.set(key, grid);
-    keepLast(grids, KEPT_GRIDS);
-  }
+  const grid = memoized(grids, key, () => readGrid(variable, range, major, box));
+  keepLast(grids, KEPT_GRIDS);
   return grid;
 }
 
@@ -96,16 +84,13 @@ const masked = new Map<string, Promise<BasinGrid>>();
 /** A variable's grid (as loadBasinGrid) with the cells outside some sub-basins (`key` names them) NaN (kept). */
 export function withinSubBasins(variable: GridVariable, range: DayRange, major: number, box: Box, subs: { key: string; ids: Set<number> }): Promise<BasinGrid> {
   const key = `${variable}:${range.start}-${range.end}:${major}:${subs.key}`;
-  let grid = masked.get(key);
-  if (!grid) {
-    grid = Promise.all([loadBasinGrid(variable, range, major, box), subBasinMask(major, box, subs)]).then(([g, mask]) => ({
+  const grid = memoized(masked, key, () =>
+    Promise.all([loadBasinGrid(variable, range, major, box), subBasinMask(major, box, subs)]).then(([g, mask]) => ({
       ...g,
       values: g.values.map((v, i) => (mask[i] ? v : NaN)),
-    }));
-    grid.catch(() => masked.delete(key));
-    masked.set(key, grid);
-    keepLast(masked, KEPT_GRIDS);
-  }
+    })),
+  );
+  keepLast(masked, KEPT_GRIDS);
   return grid;
 }
 
@@ -113,32 +98,17 @@ const masks = new Map<string, Promise<Uint8Array>>();
 
 /** 1 where a cell's centre lies in one of the sub-basins, else 0 (kept). */
 function subBasinMask(major: number, box: Box, subs: { key: string; ids: Set<number> }): Promise<Uint8Array> {
-  const key = `${major}:${subs.key}`;
-  let mask = masks.get(key);
-  if (!mask) {
-    const frame = frameOf(box);
-    mask = tilesOver(frame, FAO_TILES.subBasins).then((all) => maskOf(frame, all.filter((f) => subs.ids.has((f.properties as SubBasinProperties).SDG6_SB_ID))));
-    mask.catch(() => masks.delete(key));
-    masks.set(key, mask);
-  }
-  return mask;
+  const frame = frameOf(box);
+  return memoized(masks, `${major}:${subs.key}`, () =>
+    tilesOver(frame, FAO_TILES.subBasins).then((all) => maskOf(frame, all.filter((f) => subs.ids.has((f.properties as SubBasinProperties).SDG6_SB_ID)))),
+  );
 }
 
 // --- Rasters -------------------------------------------------------------------------
 
 const rasters = new Map<string, Promise<GeoTIFF>>();
-function openRaster(url: string) {
-  let raster = rasters.get(url);
-  if (!raster) {
-    raster = GeoTIFF.fromUrl(url);
-    raster.catch(() => rasters.delete(url));
-    rasters.set(url, raster);
-  }
-  return raster;
-}
+const openRaster = (url: string) => memoized(rasters, url, () => GeoTIFF.fromUrl(url));
 
-/** The samples of a one-band tile, in either layout. */
-const samples = (array: RasterArray) => (array.layout === "band-separate" ? array.bands[0] : array.data);
 
 /** A raster's raw values at the grid's cells (nearest pixel; NaN for nodata and off the raster). */
 async function sampled(url: string, frame: Frame): Promise<Float32Array> {
@@ -215,13 +185,7 @@ export function loadTranspiration(range: DayRange, major: number, box: Box): Pro
  */
 const zones = new Map<number, Promise<Int32Array>>();
 function subBasinZones(major: number, frame: Frame): Promise<Int32Array> {
-  let z = zones.get(major);
-  if (!z) {
-    z = subBasinZonesOnce(major, frame);
-    z.catch(() => zones.delete(major));
-    zones.set(major, z);
-  }
-  return z;
+  return memoized(zones, major, () => subBasinZonesOnce(major, frame));
 }
 async function subBasinZonesOnce(major: number, frame: Frame): Promise<Int32Array> {
   const features = (await tilesOver(frame, FAO_TILES.subBasins)).filter((f) => (f.properties as SubBasinProperties).SDG6_MB_ID === major);
@@ -292,13 +256,9 @@ const basinMasks = new Map<number, Promise<Uint8Array>>();
 
 /** 1 where a cell's centre lies in the major basin, else 0 (kept: every variable and range over the basin needs it; a failed one is forgotten). */
 function basinMask(major: number, frame: Frame): Promise<Uint8Array> {
-  let mask = basinMasks.get(major);
-  if (!mask) {
-    mask = tilesOver(frame, FAO_TILES.majorBasins).then((all) => maskOf(frame, all.filter((f) => (f.properties as MajorBasinProperties).SDG6_MB_ID === major)));
-    mask.catch(() => basinMasks.delete(major));
-    basinMasks.set(major, mask);
-  }
-  return mask;
+  return memoized(basinMasks, major, () =>
+    tilesOver(frame, FAO_TILES.majorBasins).then((all) => maskOf(frame, all.filter((f) => (f.properties as MajorBasinProperties).SDG6_MB_ID === major))),
+  );
 }
 
 async function loadTile(tiles: string, x: number, y: number, z: number): Promise<Feature[]> {

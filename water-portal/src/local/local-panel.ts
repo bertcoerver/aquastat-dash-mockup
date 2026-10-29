@@ -27,6 +27,7 @@ import { initDamCards } from "./dam-card";
 import { initCropCard, type CropMap } from "./crop-card";
 import type { GaezMap } from "../map/layers/gaez";
 import type { Dams } from "./vector-maps";
+import { byId as $ } from "../lib/dom";
 
 interface LocalPanelOptions {
   /** The WaPOR variable on the map (null: none, no map with time). */
@@ -62,7 +63,6 @@ export interface LocalPanel {
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
 
 export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMap, addMap }: LocalPanelOptions): LocalPanel {
-  const $ = (id: string) => document.getElementById(id)!;
   const message = $("lp-message");
   const section = $("lp-series");
   const caption = $("lp-ts-caption");

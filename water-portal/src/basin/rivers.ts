@@ -6,6 +6,8 @@
  * with their upstream area (from a flow accumulation raster), their sub-basin and the arc
  * each flows into, simplified to ~500 m.
  */
+import { memoized } from "../lib/memo";
+
 
 export interface RiverNetwork {
   /** Number of arcs. */
@@ -26,19 +28,15 @@ const loaded = new Map<number, Promise<RiverNetwork | null>>();
 
 /** A major basin's rivers (null: it has none, e.g. small islands). Kept once loaded. */
 export function loadRivers(major: number): Promise<RiverNetwork | null> {
-  let network = loaded.get(major);
-  if (!network) {
-    network = fetch(`${FILES}${major}.bin`).then(async (r) => {
+  return memoized(loaded, major, () =>
+    fetch(`${FILES}${major}.bin`).then(async (r) => {
       if (r.status === 404) return null;
       if (!r.ok) throw new Error(`Couldn't load the rivers (HTTP ${r.status}).`);
       // (Vite's dev server answers a missing file with index.html.)
       if (r.headers.get("content-type")?.includes("text/html")) return null;
       return parse(await r.arrayBuffer());
-    });
-    network.catch(() => loaded.delete(major));
-    loaded.set(major, network);
-  }
-  return network;
+    }),
+  );
 }
 
 function parse(buffer: ArrayBuffer): RiverNetwork {

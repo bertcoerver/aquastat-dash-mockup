@@ -23,7 +23,7 @@ export interface PlaybackSettings {
   startAhead: number; // frames in before playing (or all that are left)
 }
 
-export const DEFAULT_PLAYBACK: PlaybackSettings = { stepDays: 1, frameMs: 200, ahead: 30, loaders: 3, startAhead: 3 };
+const DEFAULT_PLAYBACK: PlaybackSettings = { stepDays: 1, frameMs: 200, ahead: 30, loaders: 3, startAhead: 3 };
 
 /** Fewer frames in ahead than this: each shows longer, up to SLOWEST times as long with none. */
 const SLOW_BELOW = 10;

@@ -1,7 +1,7 @@
 import type { ShaderModule } from "@luma.gl/shadertools";
 
 /** The most stops a colour map can have (WaPOR's PCP-M and PCP-A have 11). */
-export const MAX_STOPS = 12;
+const MAX_STOPS = 12;
 
 /** A WaPOR colour map: 2 to MAX_STOPS stops, rising, and a colour for each. */
 export interface WaporRamp {

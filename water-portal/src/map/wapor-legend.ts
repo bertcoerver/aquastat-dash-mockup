@@ -29,6 +29,7 @@ import {
   type WaporVariable,
 } from "./layers/wapor";
 import type { WaporRamp } from "./layers/wapor-shader";
+import { byId as $ } from "../lib/dom";
 
 export type WaporStatus = "checking" | "loading" | "ready" | "missing" | "error";
 export type QualityStatus = "checking" | "ready" | "missing";
@@ -64,7 +65,6 @@ function describe(maxGap: number | null) {
 /** The least gap between the ramp's ticks, in % of its width. */
 const MIN_TICK_GAP = 14;
 
-const $ = (id: string) => document.getElementById(id)!;
 
 /** What each raster in an equation is, e.g. A[2025]: WaPOR's annual raster for 2025. */
 const BLOCK_KINDS: Record<string, string> = {

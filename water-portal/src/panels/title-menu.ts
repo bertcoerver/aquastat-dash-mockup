@@ -116,7 +116,16 @@ export function initTitleMenu(
     button.setAttribute("aria-expanded", "true");
     setActive(Math.max(0, first));
     list.focus();
+    // (Only while open: there are dozens of these menus, one per legend section.)
+    document.addEventListener("pointerdown", onPressElsewhere);
+    window.addEventListener("resize", onResize);
   }
+  // A press anywhere else closes it (on the title, its click does).
+  const onPressElsewhere = (e: PointerEvent) => {
+    const target = e.target as Node;
+    if (!list.contains(target) && !button.contains(target)) close(false);
+  };
+  const onResize = () => close(false);
 
   function place() {
     const r = button.getBoundingClientRect();
@@ -135,6 +144,8 @@ export function initTitleMenu(
     list.hidden = true;
     button.setAttribute("aria-expanded", "false");
     list.removeAttribute("aria-activedescendant");
+    document.removeEventListener("pointerdown", onPressElsewhere);
+    window.removeEventListener("resize", onResize);
     if (refocus) button.focus();
   }
 
@@ -209,15 +220,9 @@ export function initTitleMenu(
     const li = (e.target as HTMLElement).closest<HTMLElement>("[role=option]");
     if (li && Number(li.dataset.index) !== active) setActive(Number(li.dataset.index));
   });
-  // A press anywhere else closes it (on the title, its click does).
-  document.addEventListener("pointerdown", (e) => {
-    const target = e.target as Node;
-    if (!list.contains(target) && !button.contains(target)) close(false);
-  });
   list.addEventListener("focusout", (e) => {
     if (e.relatedTarget !== button) close(false);
   });
-  window.addEventListener("resize", () => close(false));
 
   return {
     setLabel(text) {

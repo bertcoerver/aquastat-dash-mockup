@@ -12,6 +12,7 @@ import type { CountryProperties } from "./layers/countries";
 import type { MajorBasinProperties, SubBasinProperties } from "./layers/basins";
 import { FAO_TILES, localTiles } from "./layers/tile-urls";
 import { quietFetch } from "../panels/load-bar";
+import { memoized } from "../lib/memo";
 
 export type LngLat = [number, number];
 
@@ -50,14 +51,7 @@ const tiles = new Map<string, Promise<Feature[]>>();
 async function featureAt({ url, zoom }: { url: string; zoom: number }, [lng, lat]: LngLat) {
   const { x, y } = tileIndex(lng, lat, zoom);
   const tileUrl = url.replace("{z}", String(zoom)).replace("{x}", String(x)).replace("{y}", String(y));
-  let tile = tiles.get(tileUrl);
-  if (!tile) {
-    tile = loadTile(tileUrl, { x, y, z: zoom });
-    tiles.set(tileUrl, tile);
-    // (A failed read isn't kept: it's tried again next time.)
-    tile.catch(() => tiles.get(tileUrl) === tile && tiles.delete(tileUrl));
-  }
-  const features = await tile;
+  const features = await memoized(tiles, tileUrl, () => loadTile(tileUrl, { x, y, z: zoom }));
   return features.find((f) => contains(f, [lng, lat])) ?? null;
 }
 

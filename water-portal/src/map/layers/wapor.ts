@@ -47,6 +47,7 @@ import { cogImage, cogTile } from "../../local/cog-pixel";
 import { boxInL2 } from "./wapor-l2";
 import { block, blockName, formatPlan, planRange, type Block, type BlockKind } from "./wapor-plan";
 import { AetiRamp, rampProps, type WaporRamp } from "./wapor-shader";
+import { memoized } from "../../lib/memo";
 
 export const BUCKET = "https://storage.googleapis.com/fao-gismgr-wapor-3-data/DATA/WAPOR-3/MAPSET";
 
@@ -321,7 +322,7 @@ export const WAPOR_VARIABLES: WaporVariable[] = [
 export const waporVariable = (id: string) => WAPOR_VARIABLES.find((v) => v.id === id) ?? WAPOR_VARIABLES[0];
 
 /** Whether a variable can be shown from L2: one made from others if its `grid`'s is (PCP stays on its own). */
-export const waporHasL2 = (variable: WaporVariable) => !!waporVariable(variable.grid ?? variable.id).l2;
+const waporHasL2 = (variable: WaporVariable) => !!waporVariable(variable.grid ?? variable.id).l2;
 
 /** The level a variable's rasters are read from, for a level shown (L1 if it has no L2 rasters). */
 const levelOf = (variable: WaporVariable, level: WaporLevel): WaporLevel => (variable.l2 ? level : "L1");
@@ -644,13 +645,7 @@ async function checkedL2(l2: WaporPeriod, l1: WaporPeriod): Promise<WaporPeriod>
 const exists = new Map<string, Promise<boolean>>();
 
 export function waporAvailable(url: string): Promise<boolean> {
-  let check = exists.get(url);
-  if (!check) {
-    check = fetch(url, { method: "HEAD" }).then((res) => res.ok);
-    exists.set(url, check);
-    check.catch(() => exists.delete(url));
-  }
-  return check;
+  return memoized(exists, url, () => fetch(url, { method: "HEAD" }).then((res) => res.ok));
 }
 
 /**
@@ -982,8 +977,6 @@ export function onWaporLevel(callback: (level: WaporLevel) => void) {
   return () => levelListeners.delete(callback);
 }
 
-/** The level the view asks for: L2 where L1 is too coarse, if the view reaches L2's countries. */
-export const waporViewLevel = () => viewLevel;
 
 /** The level a period is shown at in the current view (L1 if it has no L2). */
 export const waporShownLevel = (period: WaporPeriod): WaporLevel => (viewLevel === "L2" && period.l2 ? "L2" : "L1");
@@ -1467,7 +1460,7 @@ export function waporValueAt(period: RasterSum, [lng, lat]: LngLat, maxGap: numb
 }
 
 /** The samples of a one-band tile, in either layout. */
-const samples = (array: RasterArray) => (array.layout === "band-separate" ? array.bands[0] : array.data);
+export const samples = (array: RasterArray) => (array.layout === "band-separate" ? array.bands[0] : array.data);
 
 function band(device: Texture["device"], data: RasterTypedArray, format: "r32float" | "r8unorm", width: number, height: number) {
   const texture = device.createTexture({ data, format, width, height, sampler: { minFilter: "nearest", magFilter: "nearest" } });

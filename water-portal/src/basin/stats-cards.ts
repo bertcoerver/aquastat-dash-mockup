@@ -51,7 +51,7 @@ export interface SameDays {
 }
 
 /** Fewer other years than this: no average to compare with. */
-export const MIN_OTHERS = 3;
+const MIN_OTHERS = 3;
 
 /**
  * `range` and the same days in other years within [first, last]: moved by whole years,
@@ -88,9 +88,8 @@ export interface BasinCtx {
   days: number;
   stats: PeriodStats;
   windows: SameDays;
-  /** PCP and AETI in the other years (null: loading; see ratesError). */
+  /** PCP and AETI in the other years (null: too few years to compare with). */
   rates: WindowRates | null;
-  ratesError: string | null;
   /** The model's output: per major basin, and per sub-basin of the selected one. */
   flux: { majors: FluxStatus; sub: FluxStatus | null };
   monthly: Monthly | null;
@@ -139,9 +138,9 @@ export const BASIN_UNITS: BasinUnits[] = [false, true].flatMap((basin) =>
   (["day", "month", "year", "total"] as WaporPer[]).map((per) => ({ per, basin })),
 );
 /** "mm/month", "mm" in total, "km³/month" over the basin. */
-export const basinUnit = ({ per, basin }: BasinUnits) => `${basin ? "km³" : "mm"}${per === "total" ? "" : `/${per}`}`;
+const basinUnit = ({ per, basin }: BasinUnits) => `${basin ? "km³" : "mm"}${per === "total" ? "" : `/${per}`}`;
 /** For the unit menu's tooltip, as the WaPOR legend's: "per month (30 days), over the basin". */
-export const describeBasinUnits = ({ per, basin }: BasinUnits) =>
+const describeBasinUnits = ({ per, basin }: BasinUnits) =>
   (per === "total" ? "in total over the period" : per === "day" ? "per day" : `per ${per} (${perDays(per, 0)} days)`) +
   (basin ? ", over the basin" : "");
 /** For CSV columns: "mm_per_month", "km3". */
@@ -332,7 +331,7 @@ function areaFlux(c: BasinCtx, a: Area, v: Flux) {
 }
 
 /** A measure's value for an area over range `w` of c.windows (the period itself by default), in units `u` (the legend's by default). */
-export function valueOf(c: BasinCtx, m: MeasureKey, a: Area, w = c.windows.current, u = c.units): number {
+function valueOf(c: BasinCtx, m: MeasureKey, a: Area, w = c.windows.current, u = c.units): number {
   const key = `${m}|${areaKey(a)}|${w}|${unitSlug(u)}`;
   let v = c.cache.get(key);
   if (v === undefined) {
@@ -377,7 +376,7 @@ function othersStatus(c: BasinCtx, m: MeasureKey): string {
     return `The record (${dkY(c.windows.first)}–${dkY(c.windows.last)}) has too few other ${spanYears(c) > 1 ? `${spanYears(c)}-year spans` : "years"} to compare this period with.`;
   }
   if (MEASURES[m].flux) return fluxMessage(c, m) ?? "";
-  return c.ratesError ?? (c.rates ? "" : LOADING);
+  return c.rates ? "" : LOADING;
 }
 
 /** Why the model's output isn't there (null: it is). */
@@ -707,8 +706,7 @@ function yearsCard(m: MeasureKey): BasinCard {
       }
       series.push({ label: areaName(c, focus(c)), color: def.color, values: at(focus(c)), emphasis: true });
       const label = (w: number) => windowLabel(ranges[w] ?? ranges[0]);
-      const html = lines({ series, from: 0, to: ranges.length - 1, selected: current, unit: unitOf(c, m), axis: def.label, width: c.width, clickable: (w) => w !== current, label }) +
-        (c.rates || def.flux || !c.ratesError ? "" : `<p class="ch-empty">${c.ratesError}</p>`);
+      const html = lines({ series, from: 0, to: ranges.length - 1, selected: current, unit: unitOf(c, m), axis: def.label, width: c.width, clickable: (w) => w !== current, label });
       const csv: (string | number)[][] = [["years", ...series.map((s) => `${s.label} ${column(c, m)}`)]];
       ranges.forEach((_, w) => csv.push([label(w), ...series.map((s) => s.values.get(w) ?? NaN)]));
       return { html, csv };

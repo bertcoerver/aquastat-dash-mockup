@@ -29,6 +29,9 @@ import { initSankey, type SankeyData } from "./sankey";
 import { initTimeseries } from "./timeseries";
 import { STYLES, colorScale, fmt, type ColorScale } from "./variables";
 import { showMapTip } from "../panels/map-tip";
+import { byId as $ } from "../lib/dom";
+import { downloadCsv } from "../lib/csv";
+import { perFrame } from "../lib/schedule";
 
 interface Options {
   map: WaterMap;
@@ -50,7 +53,6 @@ export interface WaterBalance {
 
 type Status = { kind: "idle" } | { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready"; result: NetworkResult };
 
-const $ = (id: string) => document.getElementById(id)!;
 
 /** Whether selecting a sub-basin shows the model's results for its network (off for now). */
 export const MODEL_SHOWN = false;
@@ -154,14 +156,9 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
   // --- Rendering ---------------------------------------------------------------------
   // Range changes come in quickly while dragging: redraw once per frame, and the
   // Sankey diagram (the slowest part) only once the range rests for a moment.
-  let frame = 0;
   let sankeyTimer = 0;
   let sankeyKey = "";
-
-  function render() {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(draw);
-  }
+  const render = perFrame(draw);
 
   function draw() {
     // (A Sankey still waiting for the range to rest would be of the last network.)
@@ -367,12 +364,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
         rows.push([b.name, down, "Q", ...period, b.q]);
       }
     }
-    const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `${what === "flows" ? "water_balance" : what}_${result.outlet}_${period[0]}_${period[1]}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadCsv(`${what === "flows" ? "water_balance" : what}_${result.outlet}_${period[0]}_${period[1]}.csv`, rows);
   }
 
   /** The Sankey diagram's input: period means in m³/s. */
@@ -424,5 +416,3 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
 const pad = (n: number) => String(n).padStart(2, "0");
 const isoStart = (dk: number) => `${dkY(dk)}-${pad(dkM(dk) + 1)}-${pad(startDay(dk))}`;
 const isoEnd = (dk: number) => `${dkY(dk)}-${pad(dkM(dk) + 1)}-${pad(endDay(dk))}`;
-const csvCell = (v: string | number) =>
-  typeof v === "number" ? (Number.isFinite(v) ? String(v) : "") : /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;

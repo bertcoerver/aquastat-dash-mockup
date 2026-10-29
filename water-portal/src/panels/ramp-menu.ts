@@ -16,7 +16,7 @@ import type { WaporStretch } from "../map/layers/wapor";
 import { initTitleMenu } from "./title-menu";
 
 /** The menu's settings, as a % cut at either end. */
-export const STRETCHES: WaporStretch[] = [0, 1, 5];
+const STRETCHES: WaporStretch[] = [0, 1, 5];
 /** What starts out picked. */
 export const DEFAULT_STRETCH: WaporStretch = 1;
 
@@ -24,7 +24,7 @@ export const DEFAULT_STRETCH: WaporStretch = 1;
 export type RampChoice = WaporStretch | "wapor";
 
 /** "Colours span 1–99% of the values in view". */
-export const stretchLabel = (cut: RampChoice, of: string) =>
+const stretchLabel = (cut: RampChoice, of: string) =>
   cut === "wapor"
     ? "Colours span WaPOR's default range"
     : cut === 0

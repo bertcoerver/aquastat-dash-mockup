@@ -24,7 +24,7 @@
  */
 import type { WaterMap } from "../map/map";
 import { flyTo, type Box } from "../map/fly-to";
-import { mixColor as mix, type Color } from "../map/theme";
+import { cssRgb as css, mixColor as mix, type Color } from "../map/theme";
 import type { Selection } from "../selection";
 import { fmt, hexToColor, rampScale } from "../basin/variables";
 import { initLayerLegend, onePerSlot, toggled, type LegendKey, type SizesKey } from "../panels/legend";
@@ -41,6 +41,10 @@ import { describeStyle, initShapeStyles, signColor, sizeKey, type ShapeStyle } f
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
 import { showMapTip, type MapTipRow } from "../panels/map-tip";
+import { esc } from "../lib/html";
+import { byId as $ } from "../lib/dom";
+import { downloadCsv } from "../lib/csv";
+import { perFrame } from "../lib/schedule";
 
 export interface CountryInfo {
   regions: { code: number; name: string }[];
@@ -88,10 +92,8 @@ type Status = { kind: "loading" } | { kind: "error"; message: string } | { kind:
 
 const SHORT: Record<number, string> = { 419: "Latin Am. & Caribbean", 513: "Europe & N. America" };
 
-const $ = (id: string) => document.getElementById(id)!;
 /** The period as the subtitle and the map legend show it: "2023", or "2019–2023 average". */
 const shownPeriod = (ctx: Ctx) => (ctx.period.from < ctx.period.to ? `${ctx.label} average` : ctx.label);
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 /** The class a value falls in: the first whose upper bound it is below, else the last. */
 const classIndex = (classes: MapClass[], v: number) => {
   const i = classes.findIndex((k) => v < k.max);
@@ -349,11 +351,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   mapEl.addEventListener("pointerleave", () => showMapTip(tooltip, null));
 
   // --- Rendering -------------------------------------------------------------------------------
-  let frame = 0;
-  function render() {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(draw);
-  }
+  const render = perFrame(draw);
 
   const topicDef = (): TopicDef => TOPICS.find((t) => t.id === state.topic)!;
   /** A map's tile or card, and which of the maps it brings along it is ("<driver>~<index>"; null: its own). */
@@ -566,7 +564,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     const bars: Bar[] = [];
     const keys = new Map<string, LegendKey | null>();
     const sizes = new Map<string, SizesKey>();
-    const css = (c: Color, alpha = 1) => `rgb(${c[0]} ${c[1]} ${c[2]} / ${alpha})`;
     tipColors = new Map();
 
     for (const { spec, slot } of layers) {
@@ -789,12 +786,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   function download(id: string) {
     const rows = current?.csv.get(id);
     if (!rows || !current) return;
-    const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = `${id}_${current.ctx.selected?.code ?? "world"}_${current.ctx.period.from}-${current.ctx.period.to}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadCsv(`${id}_${current.ctx.selected?.code ?? "world"}_${current.ctx.period.from}-${current.ctx.period.to}.csv`, rows);
   }
 
   new ResizeObserver(() => {
@@ -828,8 +820,6 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   };
 }
 
-const csvCell = (v: string | number) =>
-  typeof v === "number" ? (Number.isFinite(v) ? String(v) : "") : /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
 
 /** A pie's cuts (where its first three slices end, 0–1) and its four slices' colours, for the circles layer. */
 function pieOf(amounts: number[], parts: { color: string }[]) {

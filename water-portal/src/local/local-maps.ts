@@ -35,7 +35,7 @@ import { GAEZ_CROPS, GAEZ_MAPS, GAEZ_UNIT, gaezCrop, gaezSum, type GaezMap } fro
 import { rampColor, type WaporRamp } from "../map/layers/wapor-shader";
 import type { Bar } from "../map/layers/bars";
 import type { CountrySymbol } from "../map/layers/countries";
-import type { Color } from "../map/theme";
+import { cssRgb as css, type Color } from "../map/theme";
 import { hexToColor, rampScale } from "../basin/variables";
 import { initLayerLegend, onePerSlot, toggled, type LegendKey, type LegendLayer, type SizesKey } from "../panels/legend";
 import { DEFAULT_STRETCH, fmtStop } from "../panels/ramp-menu";
@@ -48,6 +48,7 @@ import type { LngLat } from "../map/places";
 import type { SelectedFeature } from "../selection";
 import type { View } from "../toolbar/range-rules";
 import { VECTOR_MAPS, loadVectorMap, type PointData, type VectorAttribute, type VectorMap } from "./vector-maps";
+import { byId as $ } from "../lib/dom";
 
 type Slot = "raster" | "circles" | "bars";
 /** The ways of drawing, bottom to top (the raster stays at the bottom: legend.ts's first slot). */
@@ -114,8 +115,6 @@ type Layer = { id: string; slot: Slot } & (
 const waporId = (v: WaporVariable) => `wapor:${v.id}`;
 const gaezId = (g: GaezMap) => `gaez:${g.id}`;
 const vectorId = (m: VectorMap) => `vector:${m.id}`;
-const css = (c: Color, alpha = 1) => `rgb(${c[0]} ${c[1]} ${c[2]} / ${alpha})`;
-const $ = (id: string) => document.getElementById(id)!;
 
 
 /**

@@ -18,6 +18,7 @@
  */
 import { fmt } from "../basin/variables";
 import { DAMS, PURPOSES, type Dams, type VectorAttribute } from "./vector-maps";
+import { esc } from "../lib/html";
 
 export interface DamCards {
   setData(dams: Dams): void;
@@ -32,7 +33,6 @@ const MORE: Record<string, string> = { height: "higher", capacity: "larger", are
 const BINS = 32;
 const H = 30; // px, a strip's height
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const count = (n: number) => n.toLocaleString("en-US");
 const pct = (share: number) => `${Math.round(share * 100)}%`;
 

@@ -57,6 +57,7 @@ import "./styles/panels.css";
 import "./styles/legend.css";
 import "./styles/basin.css";
 import "./styles/country.css";
+import { byId as $ } from "./lib/dom";
 
 // First, so it counts every request from here on.
 initLoadBar();
@@ -345,7 +346,6 @@ async function loadData<T>(name: string): Promise<T> {
 
 // The graph panes (one per view, one shows at a time) share a width that can be changed,
 // and fold away when the pointer isn't over them.
-const $ = (id: string) => document.getElementById(id)!;
 for (const id of ["cp-panel", "wb-panel", "lp-panel"]) {
   makeResizable($(id), "side-panel");
   makeFoldable($(id));

@@ -14,6 +14,8 @@ import {
   type Period,
   type View,
 } from "./range-rules";
+import { clamp } from "../lib/math";
+import { closesLikePopover } from "../lib/popover";
 
 interface PickerState {
   view: View;
@@ -31,7 +33,6 @@ const HINT: Record<View, string> = {
   country: "Whole years",
 };
 const PERIODS: Period[] = ["dekad", "month", "year"];
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 const unit = (view: View) => (view === "country" ? "years" : "days");
 /** The longest range a view can show, in its unit. */
 function maxLength(view: View) {
@@ -138,29 +139,7 @@ export function initLengthPicker(
     });
   }
 
-  // (On the popup and its button, not the page: Escape elsewhere unpins the map.)
-  for (const el of [pop, label]) {
-    el.addEventListener("keydown", (e) => {
-      if (!openView || e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      hide(true);
-    });
-  }
-  document.addEventListener(
-    "pointerdown",
-    (e) => {
-      const t = e.target as Node;
-      if (openView && !pop.contains(t) && !label.contains(t)) hide();
-    },
-    true,
-  );
-  pop.addEventListener("focusout", (e) => {
-    const to = e.relatedTarget as Node | null;
-    if (to && !pop.contains(to) && to !== label) hide();
-  });
-  window.addEventListener("resize", () => hide());
-  window.addEventListener("panes-moved", () => hide());
+  closesLikePopover(pop, [label], () => openView !== null, hide);
 
   return {
     render() {

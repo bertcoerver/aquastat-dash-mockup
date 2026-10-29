@@ -46,6 +46,11 @@ const EPOCH = Date.UTC(MIN_YEAR, 0, 1);
 /** Day index of a date (month 0–11, day of the month 1–31). */
 export const dayOf = (y: number, m: number, d: number) => Math.round((Date.UTC(y, m, d) - EPOCH) / DAY_MS);
 const dateOf = (day: number) => new Date(EPOCH + day * DAY_MS);
+/** Year, month (0–11) and day of the month of a day index. */
+export const ymd = (day: number) => {
+  const date = dateOf(day);
+  return { y: date.getUTCFullYear(), m: date.getUTCMonth(), d: date.getUTCDate() };
+};
 /** First and last day of a dekad. */
 export const dkFirstDay = (dk: number) => dayOf(dkY(dk), dkM(dk), startDay(dk));
 export const dkLastDay = (dk: number) => dayOf(dkY(dk), dkM(dk), endDay(dk));

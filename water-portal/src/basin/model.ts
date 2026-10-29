@@ -20,6 +20,7 @@
 import { MIN_YEAR } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
 import type { SubBasin } from "../map/sub-basin-network";
+import { memoized } from "../lib/memo";
 
 /** Where the precomputed files are (a directory URL, ending in /). */
 const MODEL_FILES: string = import.meta.env.VITE_MODEL_FILES ?? `${import.meta.env.BASE_URL}data/model/`;
@@ -95,17 +96,13 @@ export function loadModelFiles(): Promise<ModelFiles> {
 
 /** One of the .bin files, by its path under MODEL_FILES. */
 export function loadFile(path: string): Promise<DataFile> {
-  let file = files.get(path);
-  if (!file) {
-    // Versioned, so a browser doesn't keep a copy from before an update.
-    file = loadModelFiles()
+  // Versioned, so a browser doesn't keep a copy from before an update.
+  return memoized(files, path, () =>
+    loadModelFiles()
       .then(({ updated }) => fetch(`${MODEL_FILES}${path}?v=${encodeURIComponent(updated)}`))
       .then((r) => checked(r, path).arrayBuffer())
-      .then(parseFile);
-    file.catch(() => files.delete(path));
-    files.set(path, file);
-  }
-  return file;
+      .then(parseFile),
+  );
 }
 
 function checked(response: Response, path: string) {
@@ -152,16 +149,12 @@ export const loadMajorFluxes = () => loadFluxes("majors.bin");
 export const loadSubBasinFluxes = (major: number) => loadFluxes(`major/${major}.bin`);
 
 function loadFluxes(path: string): Promise<FluxSeries> {
-  let result = fluxes.get(path);
-  if (!result) {
-    result = loadFile(path).then((file) => ({
+  return memoized(fluxes, path, () =>
+    loadFile(path).then((file) => ({
       dekads: Array.from({ length: file.dekads }, (_, i) => file.first + i),
       series: new Map([...file.ids].map((id, row) => [id, { Q: rowOf(file, "Q", row), dS: rowOf(file, "dS", row) }])),
-    }));
-    result.catch(() => fluxes.delete(path));
-    fluxes.set(path, result);
-  }
-  return result;
+    })),
+  );
 }
 
 /**

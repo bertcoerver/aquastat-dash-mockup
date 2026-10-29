@@ -8,8 +8,11 @@
  * Keyboard (in the grid): arrows move a day (a year in Country), Page Up/Down a month
  * (with Shift a year), Enter or Space picks.
  */
-import { MAX_DAY, MIN_YEAR, MONTHS, dayDk, dayOf, daysInMonth, fmtDay } from "./dekads";
+import { MAX_DAY, MIN_YEAR, MONTHS, dayDk, dayOf, daysInMonth, fmtDay, ymd } from "./dekads";
 import { firstDay, isCountryYear, lastDay, pickDay, type DayRange, type View } from "./range-rules";
+import { byId as $ } from "../lib/dom";
+import { clamp } from "../lib/math";
+import { closesLikePopover } from "../lib/popover";
 
 type End = "start" | "end";
 
@@ -29,14 +32,7 @@ const HINT: Record<View, string> = {
   basin: "Picks a whole dekad",
   country: "Picks a whole year",
 };
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-const $ = (id: string) => document.getElementById(id)!;
 
-/** Year, month (0–11) and day of the month of a day index. */
-function ymd(day: number) {
-  const date = new Date(Date.UTC(MIN_YEAR, 0, 1 + day));
-  return { y: date.getUTCFullYear(), m: date.getUTCMonth(), d: date.getUTCDate() };
-}
 /** The same date `n` months later (or earlier), on the month's last day if it has fewer. */
 function addMonths(day: number, n: number) {
   const { y, m, d } = ymd(day);
@@ -247,29 +243,7 @@ export function initDatePicker(getState: () => PickerState, onPick: (next: DayRa
     for (const el of grid.querySelectorAll(".dk-hover")) el.classList.remove("dk-hover");
   });
 
-  // (On the calendar and its buttons, not the page: Escape elsewhere unpins the map.)
-  for (const el of [pop, labels.start, labels.end]) {
-    el.addEventListener("keydown", (e) => {
-      if (!open || e.key !== "Escape") return;
-      e.preventDefault();
-      e.stopPropagation();
-      hide(true);
-    });
-  }
-  document.addEventListener(
-    "pointerdown",
-    (e) => {
-      const t = e.target as Node;
-      if (open && !pop.contains(t) && !labels.start.contains(t) && !labels.end.contains(t)) hide();
-    },
-    true,
-  );
-  pop.addEventListener("focusout", (e) => {
-    const to = e.relatedTarget as Node | null;
-    if (to && !pop.contains(to) && to !== labels[open!]) hide();
-  });
-  window.addEventListener("resize", () => hide());
-  window.addEventListener("panes-moved", () => hide());
+  closesLikePopover(pop, [labels.start, labels.end], () => open !== null, hide);
 
   return {
     render() {

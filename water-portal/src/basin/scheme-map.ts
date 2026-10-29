@@ -24,14 +24,15 @@ import type { SubBasin } from "../map/sub-basin-network";
 import type { Color } from "../map/theme";
 import { nice, type LayerLegend, type LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
-import { tuningSection } from "../panels/tuning-pane";
+import { tuningPanel, tuningSection } from "../panels/tuning-pane";
 import { SHAPES, SHAPE_LABELS, type Shape, type ShapeOption } from "../panels/shape-switch";
 import { loadMiddles, loadRivers, type RiverNetwork } from "./rivers";
 import { buildScheme, lineQ, simplify, type Scheme } from "./scheme";
+import { byId as $ } from "../lib/dom";
 
 export type SchemeKind = "Q";
 /** The legend's slot of each kind drawn as the scheme. */
-export const SCHEME_SLOT: Record<SchemeKind, "lines"> = { Q: "lines" };
+const SCHEME_SLOT: Record<SchemeKind, "lines"> = { Q: "lines" };
 
 /**
  * A map to draw as the scheme: its value per sub-basin, `key` names those (for the
@@ -60,13 +61,6 @@ interface Options {
 }
 
 export interface SchemeMap {
-  /**
-   * Whether a map of `kind` (BasinMapSpec.scheme; undefined: not allowed) of major basin
-   * `major` is drawn as the scheme (true) or in a shape (see shape).
-   */
-  isScheme(kind: SchemeKind | undefined, major: number | null): boolean;
-  /** The shape a map of `kind` is drawn in when it isn't the scheme. */
-  shape(kind: SchemeKind): Shape;
   /** How a map of `kind` can be drawn (its icons in the legend's checklist): the scheme's lines or particles, or a shape. */
   modes(kind: SchemeKind): ShapeOption[];
   /** How it's drawn (one of modes' ids). */
@@ -170,7 +164,6 @@ const MODES: Record<SchemeKind, [Mode, string, string][]> = {
 };
 const isShape = (m: Mode): m is Shape => (SHAPES as Mode[]).includes(m);
 
-const $ = (id: string) => document.getElementById(id)!;
 const rgb = (c: Color | RGB) => `rgb(${c[0]},${c[1]},${c[2]})`;
 
 export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Options): SchemeMap {
@@ -185,38 +178,13 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
 
   // --- The particles' settings: sliders in the tuning pane ----------------------------------
   const tune: ParticleSettings = { ...PARTICLES };
-  const tuning = document.createElement("div");
-  tuning.className = "legend-quality particle-tuning";
-  tuning.innerHTML =
-    TUNING.map(
-      ({ key, label, min, max, step }) =>
-        `<div><label class="legend-quality-head" for="bs-p-${key}">${label} <span data-value="${key}"></span></label>` +
-        `<input class="legend-quality-input" id="bs-p-${key}" data-key="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${tune[key]}" /></div>`,
-    ).join("") +
-    '<div><label class="legend-quality-head" for="bs-p-color">Particle colour</label><select class="particle-tuning-select" id="bs-p-color">' +
-    Object.entries(PARTICLE_COLORS).map(([key, { label }]) => `<option value="${key}"${key === tune.color ? " selected" : ""}>${label}</option>`).join("") +
-    "</select></div>" +
-    '<button type="button" class="particle-tuning-copy" title="Copy the settings">Copy settings</button>';
   const tuningBody = tuningSection("Discharge particles", "Draw the discharge map as particles to tune them.");
-  tuningBody.append(tuning);
-  const showTune = () => {
-    for (const el of tuning.querySelectorAll<HTMLElement>("[data-value]")) el.textContent = String(tune[el.dataset.value as NumberSetting]);
-  };
-  showTune();
-  tuning.addEventListener("input", (e) => {
-    const el = e.target as HTMLInputElement;
-    if (el.id === "bs-p-color") tune.color = el.value;
-    else if (el.dataset.key) tune[el.dataset.key as NumberSetting] = Number(el.value);
-    else return;
-    showTune();
-    drawn = "";
-    onChange();
-  });
-  tuning.querySelector("button")!.addEventListener("click", (e) => {
-    void navigator.clipboard?.writeText(JSON.stringify(tune));
-    (e.target as HTMLElement).textContent = "Copied";
-    setTimeout(() => ((e.target as HTMLElement).textContent = "Copy settings"), 1200);
-  });
+  tuningBody.append(
+    tuningPanel("p", tune, TUNING, PARTICLE_COLORS, () => {
+      drawn = "";
+      onChange();
+    }),
+  );
 
   // --- The simplification slider -----------------------------------------------------------
   /** Tolerance as a share of the basin's size. */
@@ -265,15 +233,6 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
   let drawnKeys = new Map<SchemeKind, { status: string; key: LegendKey | null }>();
 
   return {
-    isScheme(kind, major) {
-      return !!kind && major !== null && !isShape(mode[kind]);
-    },
-
-    shape(kind) {
-      const m = mode[kind];
-      return isShape(m) ? m : "fill";
-    },
-
     modes(kind) {
       return MODES[kind].map(([m, label, title]) => ({ id: m, slot: isShape(m) ? m : SCHEME_SLOT[kind], icon: m, label, title }));
     },

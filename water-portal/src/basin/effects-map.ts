@@ -23,7 +23,7 @@ import type { WaterMap } from "../map/map";
 import type { Color } from "../map/theme";
 import type { LegendKey } from "../panels/legend";
 import { LOADING } from "../panels/load-bar";
-import { tuningSection } from "../panels/tuning-pane";
+import { tuningPanel, tuningSection, type Slider } from "../panels/tuning-pane";
 import { SHAPES, SHAPE_LABELS, type Shape, type ShapeOption } from "../panels/shape-switch";
 import type { MajorBasin } from "../toolbar/place-picker";
 import type { DayRange } from "../toolbar/range-rules";
@@ -108,8 +108,6 @@ const VAPOUR = {
   color: "split",
 };
 
-type Settings = Record<string, number | string>;
-type Slider = { key: string; label: string; min: number; max: number; step: number };
 
 const RAIN_TUNING: Slider[] = [
   { key: "count", label: "Drops", min: 5000, max: 300000, step: 5000 },
@@ -336,43 +334,6 @@ export function initEffectsMap({ map, majorBasins, onChange }: Options): Effects
       return out;
     },
   };
-}
-
-/** A panel of sliders and a colour menu that change `values` in place. */
-function tuningPanel(id: string, values: Settings, sliders: Slider[], colors: Record<string, { label: string }>, onChange: () => void) {
-  const panel = document.createElement("div");
-  panel.className = "legend-quality particle-tuning";
-  panel.innerHTML =
-    sliders
-      .map(
-        ({ key, label, min, max, step }) =>
-          `<div><label class="legend-quality-head" for="bs-${id}-${key}">${label} <span data-value="${key}"></span></label>` +
-          `<input class="legend-quality-input" id="bs-${id}-${key}" data-key="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${values[key]}" /></div>`,
-      )
-      .join("") +
-    `<div><label class="legend-quality-head" for="bs-${id}-color">Colour</label><select class="particle-tuning-select" id="bs-${id}-color" data-key="color">` +
-    Object.entries(colors).map(([key, { label }]) => `<option value="${key}"${key === values.color ? " selected" : ""}>${label}</option>`).join("") +
-    "</select></div>" +
-    '<button type="button" class="particle-tuning-copy" title="Copy the settings">Copy settings</button>';
-  const show = () => {
-    for (const el of panel.querySelectorAll<HTMLElement>("[data-value]")) el.textContent = String(values[el.dataset.value!]);
-  };
-  show();
-  panel.addEventListener("input", (e) => {
-    const el = e.target as HTMLInputElement;
-    const key = el.dataset.key;
-    if (!key) return;
-    values[key] = key === "color" ? el.value : Number(el.value);
-    show();
-    onChange();
-  });
-  const copy = panel.querySelector("button")!;
-  copy.addEventListener("click", () => {
-    void navigator.clipboard?.writeText(JSON.stringify(values));
-    copy.textContent = "Copied";
-    setTimeout(() => (copy.textContent = "Copy settings"), 1200);
-  });
-  return panel;
 }
 
 const effectGrids = new WeakMap<BasinGrid, { grid: EffectGrid; max: number }>();
