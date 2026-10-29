@@ -107,6 +107,8 @@ export function loadFile(path: string): Promise<DataFile> {
 
 function checked(response: Response, path: string) {
   if (!response.ok) throw new Error(`The model output couldn't be loaded (${response.status} for ${path}).`);
+  // (Vite's dev server answers a missing file with index.html, as if it were there.)
+  if (response.headers.get("content-type")?.includes("text/html")) throw new Error(`The model output isn't there (${path}): not built yet; see scripts/build-model.py.`);
   return response;
 }
 
