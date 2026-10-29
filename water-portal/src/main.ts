@@ -344,6 +344,8 @@ function fitRange() {
 }
 const rangeObserver = new ResizeObserver(fitRange);
 for (const el of [...graphPanes, rangePane]) rangeObserver.observe(el);
+// (Hidden a while after it's dimmed: toolbar.ts setTimeless.)
+new MutationObserver(fitRange).observe(rangePane, { attributes: true, attributeFilter: ["class"] });
 window.addEventListener("resize", fitRange);
 
 const layersMenu = initLayersMenu(setLayerVisible);

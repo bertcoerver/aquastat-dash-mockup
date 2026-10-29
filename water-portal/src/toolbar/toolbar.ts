@@ -5,7 +5,7 @@
  * range-rules.ts) and shows when the system, not the user, moved an end. The tabs sit
  * at the top of the view's own pane (its .tabs-slot): the statistics panel, or in the
  * Local view the point pane. Where no map on screen has time (the Local view with only
- * GAEZ's maps or the dams), the range is hidden (setTimeless).
+ * GAEZ's maps or the dams), the range is dimmed, then hidden if it stays so (setTimeless).
  */
 import type { PlaybackState } from "../map/wapor-player";
 import {
@@ -24,6 +24,9 @@ import { initDatePicker } from "./date-picker";
 import { initLengthPicker } from "./length-picker";
 import { initRangeSlider, type Grip } from "./range-slider";
 import { slideSelection } from "../panels/segmented";
+
+/** How long the range stays dimmed, without time on the map, before it's hidden. */
+const TIMELESS_HIDE_MS = 2000;
 
 export interface ToolbarState {
   view: View;
@@ -107,6 +110,7 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
   }
 
   const pane = document.getElementById("pane-range")!;
+  let hideTimer: ReturnType<typeof setTimeout> | undefined; // (setTimeless)
   const play = document.getElementById("play-button")!;
   play.addEventListener("click", () => onPlay?.());
 
@@ -172,10 +176,15 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
       fitLimit("basin");
     },
     setTimeless(timeless) {
-      // (Fading out, see toolbar.css. Inert: no clicks, drags or keys meanwhile, and its
-      // calendars close as they lose the focus.)
+      // Dimmed first, and hidden only if still so a moment later (see toolbar.css): a
+      // quick switch between layers doesn't make it flicker. Inert: no clicks, drags or
+      // keys meanwhile, and its calendars close as they lose the focus.
+      if (timeless === pane.inert) return;
       pane.inert = timeless;
-      pane.classList.toggle("timeless", timeless);
+      pane.classList.toggle("dimmed", timeless);
+      clearTimeout(hideTimer);
+      if (timeless) hideTimer = setTimeout(() => pane.classList.add("timeless"), TIMELESS_HIDE_MS);
+      else pane.classList.remove("timeless");
     },
   };
 }

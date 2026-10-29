@@ -19,10 +19,14 @@
   backdrop-filter: blur(12px) saturate(1.2);
   box-shadow: 0 4px 16px rgb(0 0 0 / 0.1);
 }
-/* No map on screen has time (toolbar.ts setTimeless; it's inert then): it fades out as it
-   sinks a little, and is gone once it has (visibility, after the fade); back, at once. */
+/* No map on screen has time (toolbar.ts setTimeless; it's inert then): it dims at once,
+   and if it stays so for a while, fades out as it sinks a little, and is gone once it
+   has (visibility, after the fade). Back, it brightens again. */
 .range-pane {
   transition: opacity 0.25s ease, translate 0.25s ease, visibility 0s;
+}
+.range-pane.dimmed {
+  opacity: 0.4;
 }
 .range-pane.timeless {
   opacity: 0;
