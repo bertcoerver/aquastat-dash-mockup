@@ -160,8 +160,14 @@
 .ch-hit.em {
   fill: color-mix(in srgb, var(--ink) 12%, transparent);
 }
-.ch-row:hover .ch-hit {
+.ch-row:hover .ch-hit,
+.ch-row.ch-focus .ch-hit {
   fill: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+/* The keyboard's place along a chart (map-drivers.ts): outlined too. */
+.ch-focus > .ch-hit {
+  stroke: var(--accent);
+  stroke-width: 1.5;
 }
 /* The row, point or series a card is pinned on. */
 .ch-pin {
@@ -211,7 +217,8 @@ svg.ch-pin {
   stroke: var(--muted);
   stroke-dasharray: 2 2;
 }
-.ch-col:hover .ch-cursor {
+.ch-col:hover .ch-cursor,
+.ch-col.ch-focus .ch-cursor {
   opacity: 1;
 }
 .ch-equal {
@@ -223,6 +230,7 @@ svg.ch-pin {
   stroke-width: 2;
 }
 .ch-point:hover .ch-dot,
+.ch-point.ch-focus .ch-dot,
 .ch-point.em .ch-dot {
   stroke: var(--ink);
   stroke-width: 1.5;
@@ -311,7 +319,8 @@ span.cp-swatch {
   stroke: transparent;
   stroke-width: 1.5;
 }
-.ch-cell:hover rect {
+.ch-cell:hover rect,
+.ch-cell.ch-focus rect {
   stroke: var(--ink);
 }
 .ch-cell.pinned-sub rect {

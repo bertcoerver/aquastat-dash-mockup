@@ -522,6 +522,10 @@ water-portal/
 - **What nothing else reports** (an error thrown outside any handler, a promise rejected
   with nothing to catch it, the map's WebGL context lost) shows in the corner
   (`src/panels/crash-warning.ts`), the last with a button to reload.
+- **Keyboard and screen readers**: the charts are focusable (Tab), the arrow keys step
+  along a chart's rows, steps or points (shown as hovered, with the tooltip), Enter pins
+  the chart or selects the step, Escape unpins; every SVG chart has a description
+  (`role="img"`), and the panels' messages are announced (`role="status"`).
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
 - **The URL keeps the state** (`src/url-state.ts`), so a view can be shared as a link: the

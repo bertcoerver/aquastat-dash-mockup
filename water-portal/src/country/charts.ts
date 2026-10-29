@@ -29,6 +29,17 @@ import { fmt } from "../basin/variables";
 import { esc } from "../lib/html";
 import { niceTicks } from "../lib/scale";
 
+/** An SVG chart's description (role="img"): what it is of, and its first rows or series with their values. */
+const described = (label: string) => `role="img" aria-label="${esc(label)}"`;
+const ROWS_READ = 8;
+/** "A 1.2, B 3.4, and 5 more". */
+function rowsRead(rows: { label: string; values: number[]; gap?: boolean }[]) {
+  const read = rows.filter((r) => !r.gap);
+  const text = read.slice(0, ROWS_READ).map((r) => `${r.label.replace(/^\d+\. /, "")} ${r.values.map(fmt).join(" / ")}`).join(", ");
+  return read.length > ROWS_READ ? `${text}, and ${read.length - ROWS_READ} more` : text;
+}
+const ofWhat = (axis: string | undefined, unit: string) => (axis ? `${axis}${unit ? ` (${unit})` : ""}` : unit);
+
 export interface Series {
   label: string;
   /** CSS colour (a var() from country.css). */
@@ -148,7 +159,8 @@ export function bars({ series, rows, unit, axis, width }: { series: Series[]; ro
     })
     .join("");
   const zero = lo < 0 ? `<line class="ts-zero" x1="${x(0)}" x2="${x(0)}" y1="0" y2="${plotH}"/>` : "";
-  return legend(series) + `<svg class="ch" width="${width}" height="${h}">${grid}${zero}${body}</svg>`;
+  const about = `Bar chart of ${ofWhat(axis, unit)}${n > 1 ? `, ${series.map((s) => s.label).join(" / ")}` : ""}: ${rowsRead(rows)}`;
+  return legend(series) + `<svg class="ch" width="${width}" height="${h}" ${described(about)}>${grid}${zero}${body}</svg>`;
 }
 
 /**
@@ -198,7 +210,8 @@ export function shares({ parts, rows, unit, axis, width }: { parts: (Series & { 
         rowLabel(row.label, y0 + 12, row.emphasis) + marks + "</g>";
     })
     .join("");
-  return legend(parts) + `<svg class="ch" width="${width}" height="${h}">${grid}${body}</svg>`;
+  const about = `Stacked bar chart of ${ofWhat(axis, unit)}, ${parts.map((p) => p.label).join(" / ")}: ${rowsRead(rows)}`;
+  return legend(parts) + `<svg class="ch" width="${width}" height="${h}" ${described(about)}>${grid}${body}</svg>`;
 }
 
 const LINE_M = { left: 40, right: 12, top: 8, bottom: 20 };
@@ -242,6 +255,9 @@ export function lines({
 }) {
   const all = series.flatMap((s) => [...s.values].filter(([y, v]) => y >= from && y <= to && Number.isFinite(v)).map(([, v]) => v));
   if (!all.length) return legend(series) + `<p class="ch-empty">No data</p>`;
+  const linesAbout = () =>
+    `Line chart of ${ofWhat(axis, unit)} from ${label(from)} to ${label(to)}: ` +
+    series.map((s) => `${s.label}${Number.isFinite(s.values.get(selected)) ? ` ${fmt(s.values.get(selected)!)} at ${label(selected)}` : ""}`).join(", ");
   const lo = Math.min(0, ...all);
   const ticks = niceTicks(lo, Math.max(...all, lo + 1e-9), 4);
   const [y0, y1] = [ticks[0], ticks[ticks.length - 1]];
@@ -310,7 +326,7 @@ export function lines({
     })
     .join("");
   return legend(series) +
-    `<svg class="ch" width="${w}" height="${h}">${grid}${mark}${paths}${xTicks}${cols}</svg>`;
+    `<svg class="ch" width="${w}" height="${h}" ${described(linesAbout())}>${grid}${mark}${paths}${xTicks}${cols}</svg>`;
 }
 
 /**
@@ -392,7 +408,8 @@ export function columns({
       `<rect class="ch-hit" x="${x(i) - step / 2}" y="${LM.top}" width="${step}" height="${plotH}"/>` +
       `<g class="ch-cursor"><line x1="${x(i)}" x2="${x(i)}" y1="${LM.top}" y2="${LM.top + plotH}"/></g></g>`;
   }
-  return `<svg class="ch" width="${width}" height="${h}">${grid}${marks}${cols}</svg>`;
+  const about = `Column chart of ${ofWhat(axis, unit)} from ${label(from)} to ${label(to)}${ghost ? `, against ${ghostLabel}` : ""}`;
+  return `<svg class="ch" width="${width}" height="${h}" ${described(about)}>${grid}${marks}${cols}</svg>`;
 }
 
 /** An axis of a bubble chart: its quantity and unit, log or linear, and a line across at `at` (a threshold). */
@@ -509,7 +526,8 @@ export function bubbles({
         pinAt(cx - 5, cy - rr - 12) + "</g>";
     })
     .join("");
-  return legend(series) + `<svg class="ch" width="${width}" height="${height}">${grid}${lines}${quadrants}${arrows}${dots}</svg>`;
+  const about = `Scatter chart of ${yAxis.name} (${yAxis.unit}) against ${xAxis.name} (${xAxis.unit}), sized by ${size.name}: ${ok.slice(0, ROWS_READ).map((p) => p.label).join(", ")}${ok.length > ROWS_READ ? `, and ${ok.length - ROWS_READ} more` : ""}`;
+  return legend(series) + `<svg class="ch" width="${width}" height="${height}" ${described(about)}>${grid}${lines}${quadrants}${arrows}${dots}</svg>`;
 }
 
 /**
@@ -561,5 +579,6 @@ export function heatmap({
         `style="fill:${fill ?? "transparent"}"${fill ? "" : ` class="ch-cell-none"`}/></g>`;
     });
   });
-  return `<svg class="ch" width="${width}" height="${h}">${head}${cells}</svg>`;
+  const about = `Heat map of ${name} (${unit}): ${rows.length} rows (${rows.slice(0, 3).map((r) => r.label).join(", ")}…) by ${cols.length} columns (${cols[0].label} to ${cols[cols.length - 1].label})`;
+  return `<svg class="ch" width="${width}" height="${h}" ${described(about)}>${head}${cells}</svg>`;
 }

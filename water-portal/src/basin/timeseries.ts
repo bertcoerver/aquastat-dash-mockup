@@ -20,6 +20,7 @@ import type { DekadRange } from "../toolbar/range-rules";
 import { mean } from "./model";
 import { fmt } from "./variables";
 import { compactNumber } from "../lib/format";
+import { esc } from "../lib/html";
 import { niceExtent, ticksWithin as niceTicks } from "../lib/scale";
 
 export interface TimeseriesData {
@@ -129,7 +130,7 @@ export function initTimeseries(
     const band = range
       ? `<rect class="ts-band" x="${x(range.start)}" y="0" width="${Math.max(2, x(range.end + 1) - x(range.start))}" height="${plotH}"/>`
       : "";
-    overview.innerHTML = `<svg width="${w}" height="${h}" class="ts-overview">
+    overview.innerHTML = `<svg width="${w}" height="${h}" class="ts-overview" role="img" aria-label="${esc(`The whole record of ${data.yLabel ?? data.unit}, with the selected period as a band: drag to choose another`)}">
       ${years.join("")}${band}
       <path d="${line}" fill="none" stroke="${color}" stroke-width="1.2"/>
       <rect class="ts-frame" x="${M.left}" y="0" width="${w - M.left - M.right}" height="${plotH}"/>
@@ -259,7 +260,7 @@ export function initTimeseries(
     } else {
       yTitle = `<text class="ts-axis" transform="translate(11 ${(M.top + h - M.bottom) / 2}) rotate(-90)" text-anchor="middle">${yLabel}</text>`;
     }
-    plot.innerHTML = `<svg width="${w}" height="${h}" class="ts-zoom">
+    plot.innerHTML = `<svg width="${w}" height="${h}" class="ts-zoom" role="img" aria-label="${esc(`${data.yLabel ?? data.unit} over the selected period, dekad by dekad, against the ${data.seasonal ? "same dekads' average over the years" : "long-term mean"}`)}">
       ${yTitle}${yTicks}${zero}${spreadBand}${meanLine}
       <path d="${path(pts)}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round"/>
       ${dots}${xTicks}<g class="ts-hover"></g>

@@ -12,7 +12,10 @@
  *   legend series) is passed along, so the map can pick out that area or series;
  * - data-tip on a chart mark is shown as a tooltip, data-x (a year or month on a
  *   line chart) and data-csv (a download button) are clicked through to the owner
- *   (data-x with its driver, so a chart can say what its steps are: years, months, dekads).
+ *   (data-x with its driver, so a chart can say what its steps are: years, months, dekads);
+ * - the keyboard does the same: Tab to a driver previews it, Enter or Space pins it,
+ *   the arrow keys step along its chart's marks (those with a tooltip: rows, steps,
+ *   points), each shown as hovered, and Enter on a step selects it.
  *
  * Where the pins are kept (one per topic, say) is up to the owner.
  */
@@ -118,13 +121,48 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
     const d = driverAt(e.target);
     if (d) setPreview(d);
   });
-  root.addEventListener("focusout", () => setPreview(null));
+  root.addEventListener("focusout", () => {
+    clearCursor();
+    setPreview(null);
+  });
+
+  // The keyboard's place along a focused driver's chart: one of its marks, shown as
+  // hovered (.ch-focus, its tooltip, what it stands for on the map).
+  let cursor: { card: HTMLElement; marks: HTMLElement[]; at: number } | null = null;
+  function moveCursor(card: HTMLElement, step: 1 | -1) {
+    const marks = [...card.querySelectorAll<HTMLElement>("[data-tip]")];
+    if (!marks.length) return;
+    const at = cursor?.card === card ? cursor.at : step > 0 ? -1 : marks.length;
+    clearCursor();
+    cursor = { card, marks, at: (at + step + marks.length) % marks.length };
+    const mark = marks[cursor.at];
+    mark.classList.add("ch-focus");
+    const box = mark.getBoundingClientRect();
+    showTip(mark.dataset.tip ?? null, { clientX: box.left + box.width / 2, clientY: box.top + box.height / 2 });
+    const sub = mark.closest<HTMLElement>("[data-sub]")?.dataset.sub ?? null;
+    setPreview({ id: card.dataset.driver!, sub });
+  }
+  function clearCursor() {
+    cursor?.marks[cursor.at]?.classList.remove("ch-focus");
+    cursor = null;
+    tooltip.hidden = true;
+  }
+
   root.addEventListener("keydown", (e) => {
     const d = driverAt(e.target);
-    if (d && (e.key === "Enter" || e.key === " ") && (e.target as Element).matches("[data-driver]")) {
+    const card = e.target as HTMLElement;
+    if (!d || !card.matches("[data-driver]")) return;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowUp") {
       e.preventDefault();
-      pin(d);
+      return moveCursor(card, e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : -1);
     }
+    if (e.key !== "Enter" && e.key !== " ") return;
+    e.preventDefault();
+    // On a step of the chart: select it (as clicking it does); else the driver is pinned.
+    const mark = cursor?.card === card ? cursor.marks[cursor.at] : null;
+    const x = mark?.closest<HTMLElement>("[data-x]")?.dataset.x;
+    if (x !== undefined && onX) return onX(Number(x), d);
+    pin(mark ? { id: d.id, sub: mark.closest<HTMLElement>("[data-sub]")?.dataset.sub ?? null } : d);
   });
   document.addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || !enabled() || !pinned()) return;

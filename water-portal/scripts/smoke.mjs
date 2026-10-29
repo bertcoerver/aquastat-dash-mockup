@@ -32,9 +32,13 @@ try {
   const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"] });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   page.on("console", (m) => {
-    // (deck.gl's GeoTIFF worker logs "Unimplemented type" under software rendering.)
-    if (m.type() === "error" && !m.text().includes("Unimplemented type")) errors.push(`console.error: ${m.text()}`);
-    else if (m.type() === "warning") warnings.push(`console.warn: ${m.text()}`);
+    const text = m.text();
+    const url = m.location().url ?? "";
+    // (deck.gl's GeoTIFF worker logs "Unimplemented type" under software rendering; a tile
+    // pyramid has no tile where there's nothing, so FAO's bucket answers 404 for those.)
+    if (text.includes("Unimplemented type") || (text.startsWith("Failed to load resource") && !url.startsWith(base))) return;
+    if (m.type() === "error") errors.push(`console.error: ${text} (${url})`);
+    else if (m.type() === "warning") warnings.push(`console.warn: ${text}`);
   });
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}\n${e.stack ?? ""}`));
   page.on("requestfailed", (r) => {
@@ -79,6 +83,30 @@ try {
     await hoverCard("#cp-cards [data-driver]");
     await page.mouse.move(700, 450);
     await page.waitForTimeout(300);
+  });
+  await step("keyboard: Tab to a chart, arrows along it, Enter selects a year", async () => {
+    // (Focus in the pane's heading unfolds it; Tab then reaches the tiles and cards.)
+    await page.focus("#country-input");
+    await page.waitForTimeout(900);
+    for (let i = 0; i < 40; i++) {
+      await page.keyboard.press("Tab");
+      if (await page.evaluate(() => document.activeElement?.matches("#cp-cards [data-driver]:has([data-x])"))) break;
+    }
+    if (!(await page.evaluate(() => document.activeElement?.matches("#cp-cards [data-driver]")))) throw new Error("Tab didn't reach a chart");
+    const before = await page.$eval("#start-label", (e) => e.textContent);
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press("ArrowRight");
+      await page.waitForTimeout(60);
+      if (await page.evaluate(() => document.querySelector("#cp-cards .ch-focus")?.closest("[data-x]"))) break;
+    }
+    if (!(await page.evaluate(() => !!document.querySelector("#cp-cards .ch-focus") && !document.getElementById("cp-tooltip").hidden))) throw new Error("no mark focused with its tooltip");
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(600);
+    const after = await page.$eval("#start-label", (e) => e.textContent);
+    if (after === before) throw new Error(`Enter didn't select the year (${before})`);
+    await page.keyboard.press("Escape");
+    await page.mouse.move(700, 450);
+    await page.waitForTimeout(500);
   });
   await step("drag the slider's start handle", async () => {
     const box = await page.locator("#start-handle").boundingBox();

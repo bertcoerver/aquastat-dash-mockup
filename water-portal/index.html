@@ -201,8 +201,8 @@
       </header>
       <div class="wb-body" id="cp-body">
         <div class="wb-vars cp-topics" id="cp-topics" role="tablist" aria-label="Topic"></div>
-        <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
-        <p class="wb-message" id="cp-message"></p>
+        <p class="cp-hint">Hover a chart to see its map; click to pin it (keyboard: Tab to a chart, arrows along it, Enter).</p>
+        <p class="wb-message" id="cp-message" role="status"></p>
         <div class="wb-stats cp-stats" id="cp-stats"></div>
         <div id="cp-cards"></div>
       </div>
@@ -237,8 +237,8 @@
             <button role="tab" data-scope="sub" aria-selected="true">The sub-basin</button>
             <button role="tab" data-scope="catchment" aria-selected="false">With everything upstream</button>
           </div>
-          <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
-          <p class="wb-message" id="bs-message" hidden></p>
+          <p class="cp-hint">Hover a chart to see its map; click to pin it (keyboard: Tab to a chart, arrows along it, Enter).</p>
+          <p class="wb-message" id="bs-message" role="status" hidden></p>
           <div class="wb-stats cp-stats" id="bs-stats"></div>
           <div id="bs-cards"></div>
         </section>
@@ -282,7 +282,7 @@
       </header>
       <div class="wb-body" id="lp-body">
         <!-- Charts for the point (src/local/local-panel.ts). -->
-        <p class="wb-message" id="lp-message"></p>
+        <p class="wb-message" id="lp-message" role="status"></p>
         <!-- A ratio of totals (water productivity): the same days in every year (src/local/year-bars.ts). -->
         <!-- Cards: a click pins one, so it stays when the panel folds (as in the other views). -->
         <!-- A GAEZ map on the map: the harvested area by crop at the point (src/local/crop-card.ts). -->
@@ -290,7 +290,7 @@
           <h3><span class="cc-title">Harvested area by crop</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin
                 type="button" title="Remove pin" aria-label="Remove pin">×</button></span></h3>
           <p class="ch-empty cc-empty">Click the map, or the title to type coordinates, to see the crops harvested there.</p>
-          <p class="wb-message error cc-message" hidden></p>
+          <p class="wb-message error cc-message" role="status" hidden></p>
           <div class="cc-head" hidden></div>
           <div class="cc-chart" hidden></div>
           <p class="cc-caption" hidden></p>
