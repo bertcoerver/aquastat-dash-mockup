@@ -19,7 +19,8 @@
  * can't be read isn't an error if the API has it. See docs/point-timeseries.md.
  */
 import type { LngLat } from "../map/places";
-import { pixelArea, waporAvailable, waporDekadUrl, waporVariable, type WaporLevel, type WaporVariable } from "../map/layers/wapor";
+import { waporAvailable } from "../map/layers/wapor-period";
+import { pixelArea, waporDekadUrl, waporVariable, type WaporLevel, type WaporVariable } from "../map/layers/wapor-variables";
 import { MAX_DK, WAPOR_MIN_YEAR, mk } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";
 import { cogPixel, cogPixelSize } from "./cog-pixel";

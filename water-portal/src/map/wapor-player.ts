@@ -13,7 +13,8 @@
  */
 import { MAX_DAY } from "../toolbar/dekads";
 import type { DayRange } from "../toolbar/range-rules";
-import { bufferWapor, checkedWaporPeriod, onWaporView, waporBuffered, type CheckedWaporPeriod, type WaporVariable } from "./layers/wapor";
+import type { WaporVariable } from "./layers/wapor-variables";
+import { bufferWapor, checkedWaporPeriod, onWaporView, waporBuffered, type CheckedWaporPeriod } from "./layers/wapor";
 
 export interface PlaybackSettings {
   stepDays: number; // how far each frame moves the range

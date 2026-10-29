@@ -34,7 +34,7 @@
  * Also the ticks of a colour ramp, for the WaPOR legend and the water balance's (ticksHtml).
  */
 import { drag } from "../lib/drag";
-import type { WaporStretch } from "../map/layers/wapor";
+import type { WaporStretch } from "../map/layers/wapor-variables";
 import { fmtStop, initRampMenu, type RampMenu } from "./ramp-menu";
 import { initTitleMenu, type MenuOption } from "./title-menu";
 import { esc } from "../lib/html";

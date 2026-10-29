@@ -15,7 +15,7 @@
  * ever pinned by a click.
  */
 import { initTimeseries } from "../basin/timeseries";
-import { fmtArea, unitFactor, waporUnit, waporUnitsFor, waporVariable, type WaporUnits, type WaporVariable } from "../map/layers/wapor";
+import { fmtArea, unitFactor, waporUnit, waporUnitsFor, waporVariable, type WaporUnits, type WaporVariable } from "../map/layers/wapor-variables";
 import type { LngLat } from "../map/places";
 import type { Selection } from "../selection";
 import { MAX_DAY, MAX_DK, WAPOR_MIN_YEAR, addYears, dayDk, dkFirstDay, dkLastDay, dkY, fmtDay, fmtEnd, fmtStart, mk } from "../toolbar/dekads";

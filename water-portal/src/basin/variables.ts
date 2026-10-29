@@ -8,7 +8,7 @@
  * by orders of magnitude from headwaters to the outlet. Storage change is centred on
  * zero (red: storage falls, blue: it rises).
  */
-import type { WaporStretch } from "../map/layers/wapor";
+import type { WaporStretch } from "../map/layers/wapor-variables";
 import type { Color } from "../map/theme";
 import { DEFAULT_STRETCH } from "../panels/ramp-menu";
 import type { Variable } from "./model";

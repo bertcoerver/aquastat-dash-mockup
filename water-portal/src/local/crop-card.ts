@@ -17,7 +17,7 @@
  */
 import { fmt } from "../basin/variables";
 import { GAEZ_CROPS, GAEZ_HARVEST_PIXEL, GAEZ_MAPS, gaezCrop, gaezCropIn, gaezHarvestUrl, type GaezMap, type GaezSupply } from "../map/layers/gaez";
-import { fmtArea, pixelArea } from "../map/layers/wapor";
+import { fmtArea, pixelArea } from "../map/layers/wapor-variables";
 import type { LngLat } from "../map/places";
 import { setProgress } from "../panels/load-bar";
 import { cogPixel } from "./cog-pixel";

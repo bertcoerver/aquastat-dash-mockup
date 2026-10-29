@@ -14,20 +14,8 @@ import { DEFAULT_STRETCH, initRampMenu, type RampChoice } from "../panels/ramp-m
 import { initTitleMenu } from "../panels/title-menu";
 import { fmtDay } from "../toolbar/dekads";
 import { flash } from "../toolbar/toolbar";
-import {
-  PER_DAYS,
-  WAPOR_UNITS,
-  fitUnits,
-  waporUnitsFor,
-  fmtArea,
-  unitFactor,
-  waporUnit,
-  waporPixel,
-  type WaporLevel,
-  type WaporPeriod,
-  type WaporUnits,
-  type WaporVariable,
-} from "./layers/wapor";
+import type { WaporPeriod } from "./layers/wapor-period";
+import { PER_DAYS, WAPOR_UNITS, fitUnits, waporUnitsFor, fmtArea, unitFactor, waporUnit, waporPixel, type WaporLevel, type WaporUnits, type WaporVariable } from "./layers/wapor-variables";
 import type { WaporRamp } from "./layers/wapor-shader";
 import { byId as $ } from "../lib/dom";
 

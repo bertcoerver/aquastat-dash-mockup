@@ -30,7 +30,10 @@
  * the panel's series) stays as checked.
  */
 import type { WaterMap } from "../map/map";
-import { WAPOR_VARIABLES, openWapor, waporPixel, waporValueAt, waporVariable, type RasterSum, type WaporPixelValue, type WaporVariable } from "../map/layers/wapor";
+import type { RasterSum } from "../map/layers/wapor-period";
+import { openWapor } from "../map/layers/wapor-tiles";
+import { WAPOR_VARIABLES, waporPixel, waporVariable, type WaporVariable } from "../map/layers/wapor-variables";
+import { waporValueAt, type WaporPixelValue } from "../map/layers/wapor";
 import { GAEZ_CROPS, GAEZ_MAPS, GAEZ_UNIT, gaezCrop, gaezSum, type GaezMap } from "../map/layers/gaez";
 import { rampColor, type WaporRamp } from "../map/layers/wapor-shader";
 import type { Bar } from "../map/layers/bars";

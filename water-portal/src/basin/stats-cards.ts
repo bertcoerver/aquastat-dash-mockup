@@ -27,7 +27,7 @@
  */
 import { bars, bubbles, columns, heatmap, lines, type BarRow, type Bubble, type LineSeries } from "../country/charts";
 import type { SubBasin } from "../map/sub-basin-network";
-import { perDays, waporVariable, type WaporPer } from "../map/layers/wapor";
+import { perDays, waporVariable, type WaporPer } from "../map/layers/wapor-variables";
 import { LOADING, unlessLoading } from "../panels/load-bar";
 import { MONTHS, MIN_YEAR, dkM, dkY, mk, startDay, endDay } from "../toolbar/dekads";
 import type { DekadRange } from "../toolbar/range-rules";

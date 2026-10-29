@@ -15,7 +15,8 @@
  * Catalogue: https://data.apps.fao.org/gismgr/api/v2/catalog/workspaces/GAEZ-V5/mapsets/LR-LCC
  * (RES06-HAR). Model documentation: https://github.com/un-fao/gaezv5/wiki
  */
-import type { WaporVariable, RasterSum } from "./wapor";
+import type { RasterSum } from "./wapor-period";
+import type { WaporVariable } from "./wapor-variables";
 import type { WaporRamp } from "./wapor-shader";
 
 const BUCKET = "https://storage.googleapis.com/fao-gismgr-gaez-v5-data/DATA/GAEZ-V5/MAPSET";

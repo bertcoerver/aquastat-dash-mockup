@@ -2,26 +2,10 @@ import { initBasinStats } from "./basin/basin-stats";
 import { loadModelFiles } from "./basin/model";
 import { initWaterBalance } from "./basin/water-balance";
 import { initCountryPanel, type CountryInfo } from "./country/country-panel";
-import {
-  WAPOR_UNITS,
-  WAPOR_VARIABLES,
-  checkedWaporPeriod,
-  onWaporLevel,
-  onWaporTile,
-  pixelArea,
-  unitFactor,
-  waporPeriod,
-  waporPixel,
-  waporShownLevel,
-  waporStyleRamp,
-  waporUnit,
-  waporValueAt,
-  waporViewRange,
-  type CheckedWaporPeriod,
-  type WaporLevel,
-  type WaporPeriod,
-  type WaporUnits,
-} from "./map/layers/wapor";
+import { waporPeriod, waporStyleRamp, type WaporPeriod } from "./map/layers/wapor-period";
+import { onWaporTile } from "./map/layers/wapor-tiles";
+import { WAPOR_UNITS, WAPOR_VARIABLES, pixelArea, unitFactor, waporPixel, waporUnit, type WaporLevel, type WaporUnits } from "./map/layers/wapor-variables";
+import { checkedWaporPeriod, onWaporLevel, waporShownLevel, waporValueAt, waporViewRange, type CheckedWaporPeriod } from "./map/layers/wapor";
 import type { WaporRamp } from "./map/layers/wapor-shader";
 import { unionBox, type Box } from "./map/fly-to";
 import { createMap } from "./map/map";

@@ -14,7 +14,7 @@
  * once a minute: a big tile can be slow on a slow line too); and while the warning
  * shows, every minute, to see it go.
  */
-import { BUCKET } from "../map/layers/wapor";
+import { BUCKET } from "../map/layers/wapor-variables";
 import { cornerWarning } from "./corner-warning";
 import { quietFetch } from "./load-bar";
 

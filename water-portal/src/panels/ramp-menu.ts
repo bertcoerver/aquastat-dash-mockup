@@ -12,7 +12,7 @@
  *
  * Also the legends' tick labels (fmtStop).
  */
-import type { WaporStretch } from "../map/layers/wapor";
+import type { WaporStretch } from "../map/layers/wapor-variables";
 import { initTitleMenu } from "./title-menu";
 
 /** The menu's settings, as a % cut at either end. */
