@@ -127,31 +127,55 @@ const keptPoint = (): Pick<Selection, "lngLat" | "feature"> =>
 // the major basin, and only within the major basin already selected its sub-basin (its
 // sub-basins are on the map then), so a sub-basin takes two clicks from the World.
 // A point of a vector map (a dam: `feature`) is selected at its own coordinates.
+// What the map shows there (`drawn`, as clicked) is selected at once; the rest (the
+// country in the Basin view, say) once looked up in the tiles, which can take a while
+// when much else is loading.
 let pointWanted: LngLat | null = null;
-async function selectPoint(lngLat: LngLat | null, source: SelectionSource, feature: SelectedFeature | null = null) {
+async function selectPoint(lngLat: LngLat | null, source: SelectionSource, feature: SelectedFeature | null = null, drawn: Place | null = null) {
   pointWanted = lngLat;
   if (!lngLat) return selection.set({ ...NOTHING, ...keptPoint() });
-  const place = await placeAt(lngLat);
-  if (pointWanted !== lngLat) return;
   const before = selection.get();
   const precise = source !== "map" || view === "local";
-  const sameMajor = !!place.majorBasin && place.majorBasin.id === before.majorBasin?.id;
-  selection.set({
-    ...NOTHING,
-    ...place,
-    source,
-    ...(view === "local" ? { lngLat, feature } : keptPoint()),
-    subBasin: precise || sameMajor ? place.subBasin : null,
-  });
+  const select = (place: Place) => {
+    const sameMajor = !!place.majorBasin && place.majorBasin.id === before.majorBasin?.id;
+    selection.set({
+      ...NOTHING,
+      ...place,
+      source,
+      ...(view === "local" ? { lngLat, feature } : keptPoint()),
+      subBasin: precise || sameMajor ? place.subBasin : null,
+    });
+  };
   // A click on another country (Country view), major basin or sub-basin (Basin view; a
   // sub-basin's with all upstream of it) flies to it, as picking it by name does.
-  if (source !== "map" || !boxes) return;
-  const { country, majorBasin, subBasin } = selection.get();
-  let box: Box | undefined;
-  if (view === "country" && country && country.m49 !== before.country?.m49) box = boxes.country.get(country.m49);
-  if (view === "basin" && majorBasin && majorBasin.id !== before.majorBasin?.id) box = boxes.major.get(majorBasin.id);
-  if (view === "basin" && subBasin && subBasin.id !== before.subBasin?.id) box = catchmentBox(subBasin.id);
-  if (box) showBox(box);
+  const flyTo = () => {
+    if (source !== "map" || !boxes) return;
+    const { country, majorBasin, subBasin } = selection.get();
+    let box: Box | undefined;
+    if (view === "country" && country && country.m49 !== before.country?.m49) box = boxes.country.get(country.m49);
+    if (view === "basin" && majorBasin && majorBasin.id !== before.majorBasin?.id) box = boxes.major.get(majorBasin.id);
+    if (view === "basin" && subBasin && subBasin.id !== before.subBasin?.id) box = catchmentBox(subBasin.id);
+    if (box) showBox(box);
+  };
+  const quick = !!drawn && !precise;
+  if (quick) {
+    select(drawn);
+    flyTo();
+  }
+  const found = await placeAt(lngLat);
+  if (pointWanted !== lngLat) return;
+  if (!quick) {
+    select(found);
+    return flyTo();
+  }
+  // (What's drawn wins: it's what was clicked on.)
+  const place: Place = {
+    country: drawn.country ?? found.country,
+    majorBasin: drawn.majorBasin ?? found.majorBasin,
+    subBasin: drawn.majorBasin ? drawn.subBasin : found.subBasin,
+  };
+  const now = selection.get();
+  if (place.country?.m49 !== now.country?.m49 || place.majorBasin?.id !== now.majorBasin?.id) select(place);
 }
 // Outlines to fly to (once loaded).
 let boxes: { country: Map<number, Box>; major: Map<number, Box>; sub: Map<number, Box> } | null = null;
@@ -162,10 +186,10 @@ const waterMap = createMap(
     dark,
     // A click on the ocean (no country or basin) clears the selection.
     // (A click on a dam in the Local view: the dam, where it is.)
-    onClick(lngLat, onArea, symbol) {
+    onClick(lngLat, onArea, symbol, drawn) {
       const hit = symbol ? localMaps?.featureAt(symbol) : null;
       if (hit) selectPoint(hit.lngLat, "map", hit.feature);
-      else selectPoint(onArea ? lngLat : null, "map");
+      else selectPoint(onArea ? lngLat : null, "map", null, drawn);
     },
     onMarkerDrop: (lngLat) => selectPoint(lngLat, "map"),
     onHover: showHover,

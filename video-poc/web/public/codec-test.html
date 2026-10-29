@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Codec test</title>
+    <style>
+      body { margin: 24px; font: 15px/1.5 system-ui, sans-serif; background: #0b1020; color: #e8ecf4; }
+      td, th { padding: 4px 12px 4px 0; text-align: left; }
+      .ok { color: #7fdc8a; } .bad { color: #ff8080; }
+    </style>
+  </head>
+  <body>
+    <h1>Video alpha test</h1>
+    <p>
+      Plays one Nile Delta tile (32E30.5N, 24.4 % of it sea = nodata) in each format and counts
+      the transparent pixels of its first frame. Alpha works if that is 24.4 %.
+    </p>
+    <p id="ua"></p>
+    <table>
+      <thead><tr><th>File</th><th>canPlayType</th><th>Result</th></tr></thead>
+      <tbody id="results"></tbody>
+    </table>
+    <script type="module">
+      const NODATA = 24.4;
+      const files = [
+        ["nile-delta/videos/32E30.5N.2022.webm", 'video/webm; codecs="vp09.00.10.08"'],
+        ["nile-delta/videos/32E30.5N.2022.mov", 'video/mp4; codecs="hvc1.1.6.L93.B0"'],
+      ];
+      document.querySelector("#ua").textContent = navigator.userAgent;
+      const tbody = document.querySelector("#results");
+      for (const [src, type] of files) {
+        const row = tbody.insertRow();
+        row.insertCell().textContent = src.split("/").pop();
+        row.insertCell().textContent = `"${document.createElement("video").canPlayType(type)}"`;
+        const cell = row.insertCell();
+        cell.textContent = "…";
+        const video = Object.assign(document.createElement("video"), { muted: true, src });
+        const loaded = await new Promise((r) => {
+          video.onloadeddata = () => r(true);
+          video.onerror = () => r(false);
+          setTimeout(() => r(false), 15000);
+        });
+        if (!loaded) {
+          cell.textContent = `doesn't play${video.error ? ` (${video.error.message || video.error.code})` : ""}`;
+          cell.className = "bad";
+          continue;
+        }
+        // Draw a presented frame: right after loadeddata the frame can still be empty.
+        video.currentTime = 0.1;
+        await new Promise((r) => (video.requestVideoFrameCallback ? video.requestVideoFrameCallback(() => r()) : (video.onseeked = r), setTimeout(r, 5000)));
+        const canvas = Object.assign(document.createElement("canvas"), { width: video.videoWidth, height: video.videoHeight });
+        const g = canvas.getContext("2d");
+        g.drawImage(video, 0, 0);
+        const d = g.getImageData(0, 0, canvas.width, canvas.height).data;
+        let clear = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i] < 128) clear++;
+        const pct = (clear / (d.length / 4)) * 100;
+        const ok = Math.abs(pct - NODATA) < 1;
+        cell.textContent = `plays, ${pct.toFixed(1)} % transparent → ${ok ? "alpha works" : "no alpha"}`;
+        cell.className = ok ? "ok" : "bad";
+      }
+    </script>
+  </body>
+</html>

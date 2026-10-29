@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WaPOR video tiles</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="map"></div>
+    <div id="controls">
+      <button id="play" type="button" aria-label="Play" disabled>▶</button>
+      <span id="date">Loading…</span>
+      <input id="frame" type="range" min="0" value="0" step="1" aria-label="Dekad" />
+      <select id="speed" aria-label="Playback speed">
+        <option value="0.25">¼×</option>
+        <option value="0.5">½×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+      <label><input id="edges" type="checkbox" /> Tile edges</label>
+      <select id="region" aria-label="Region"></select>
+    </div>
+    <div id="attribution">
+      ET: <a href="https://data.apps.fao.org/wapor">FAO WaPOR v3</a> · Basemap © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

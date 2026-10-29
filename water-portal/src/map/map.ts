@@ -162,9 +162,10 @@ interface MapOptions {
   /**
    * A click anywhere: the point on the globe (null off the globe), and whether it hit
    * a country or basin (whichever is shown) rather than the ocean; in the Local view,
-   * the circle or bar clicked (its `id`; null: none).
+   * the circle or bar clicked (its `id`; null: none); and what's drawn there, as for
+   * onHover (null: nothing).
    */
-  onClick?: (lngLat: LngLat | null, onArea: boolean, symbol: string | null) => void;
+  onClick?: (lngLat: LngLat | null, onArea: boolean, symbol: string | null, place: Place | null) => void;
   /**
    * The pointer moved: the point under it, or null off the globe or off the map; and
    * what's drawn there (picked from the map as shown, so at once: no tiles to load),
@@ -495,7 +496,15 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 
   function handleClick(info: PickingInfo) {
     const symbol = state.view === "local" && info.layer && SYMBOL_LAYERS.includes(info.layer.id) ? (info.object as { id?: string } | null)?.id ?? null : null;
-    onClick?.(toLngLat(info.coordinate), Boolean(info.object), symbol);
+    onClick?.(toLngLat(info.coordinate), Boolean(info.object), symbol, areaAt(info));
+  }
+
+  // deck.gl's own pick, unless it's of something over the areas (a circle, a bar):
+  // then a second one, of the areas only (each waits on the GPU).
+  function areaAt(info: PickingInfo): Place | null {
+    const isArea = (id: string | undefined) => !!id && AREA_LAYERS.some((a) => id.startsWith(a));
+    const picked = !info.coordinate || !info.object ? null : isArea(info.layer?.id) ? info : overlay.pickObject({ x: info.x, y: info.y, layerIds: AREA_LAYERS });
+    return picked ? placeOf(picked.layer?.id ?? "", picked.object?.properties) : null;
   }
 
   const overlay = new MapboxOverlay({
@@ -508,11 +517,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         const symbol = info.layer && SYMBOL_LAYERS.includes(info.layer.id) ? (info.object as { id?: string } | null)?.id ?? null : null;
         onSymbolHover?.(symbol, info.x + container.getBoundingClientRect().left, info.y + container.getBoundingClientRect().top, lngLat);
       }
-      // deck.gl's own pick, unless it's of something over the areas (a circle, a bar):
-      // then a second one, of the areas only (each waits on the GPU).
-      const isArea = (id: string | undefined) => !!id && AREA_LAYERS.some((a) => id.startsWith(a));
-      const picked = !lngLat || !info.object ? null : isArea(info.layer?.id) ? info : overlay.pickObject({ x: info.x, y: info.y, layerIds: AREA_LAYERS });
-      onHover?.(lngLat, picked ? placeOf(picked.layer?.id ?? "", picked.object?.properties) : null);
+      onHover?.(lngLat, lngLat ? areaAt(info) : null);
     },
   });
   map.addControl(overlay);
