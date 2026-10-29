@@ -34,7 +34,14 @@ export function initSlowServerCheck() {
   let recheck = 0;
 
   async function check() {
-    if (checking || document.hidden) return;
+    if (checking) return;
+    if (document.hidden) {
+      // (Not timed in the background, where requests are slowed; the warning shown is
+      // checked again once the page is back.)
+      clearTimeout(recheck);
+      if (!warning.hidden) recheck = window.setTimeout(check, WHILE_SHOWN_MS);
+      return;
+    }
     checking = true;
     lastCheck = performance.now();
     const ms = await typical();
@@ -55,6 +62,9 @@ export function initSlowServerCheck() {
   }
 
   void check();
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && !warning.hidden) void check();
+  });
   // (Cross-origin, a request's duration is all the browser tells: start to last byte.)
   new PerformanceObserver((list) => {
     if (checking || !warning.hidden || performance.now() - lastCheck < MIN_GAP_MS) return;

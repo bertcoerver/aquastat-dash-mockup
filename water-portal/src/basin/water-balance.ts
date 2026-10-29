@@ -102,6 +102,9 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     button.addEventListener("click", () => download(button.dataset.csv as "map" | "timeseries" | "flows"));
   }
 
+  /** A sub-basin's name (its id if unknown). */
+  const nameOf = (id: number) => byId.get(id)?.name ?? String(id);
+
   // The tooltip follows the pointer over the map.
   const mapEl = map.map.getContainer();
   mapEl.addEventListener("pointermove", (e) => {
@@ -161,6 +164,8 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
   }
 
   function draw() {
+    // (A Sankey still waiting for the range to rest would be of the last network.)
+    clearTimeout(sankeyTimer);
     const basinView = state.view === "basin";
     panel.hidden = !basinView;
     legend.hidden = true;
@@ -203,6 +208,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
     }
 
     const { result } = status;
+    const name = nameOf(result.outlet);
     const range = coveredRange(result, state.range);
     $("wb-subtitle").textContent = subtitle(result);
     $("wb-results").hidden = false;
@@ -342,7 +348,7 @@ export function initWaterBalance({ map, subBasins, upstreamOf, setRange }: Optio
   function download(what: "map" | "timeseries" | "flows") {
     if (!current) return;
     const { result, range, means } = current;
-    const outletName = byId.get(result.outlet)?.name ?? String(result.outlet);
+    const outletName = nameOf(result.outlet);
     const period = [isoStart(range.start), isoEnd(range.end)];
     let rows: (string | number)[][];
     if (what === "map") {

@@ -357,6 +357,11 @@ const TILE_CACHE_BYTES = 64 * 2 ** 20;
 const tiles = new Map<string, Promise<ArrayBuffer | null>>();
 const tileSizes = new Map<string, number>();
 let tileBytes = 0;
+/**
+ * A tile being read is shared by whoever asks for it (a series at a nearby point reads
+ * the same tiles): the read is given up only once every one of them has.
+ */
+const reading = new Map<string, { controller: AbortController; waiting: number }>();
 
 function compressedTile(image: Image, index: number, signal?: AbortSignal): Promise<ArrayBuffer | null> {
   const key = `${index} ${image.url}`;
@@ -364,27 +369,44 @@ function compressedTile(image: Image, index: number, signal?: AbortSignal): Prom
   if (tile) {
     tiles.delete(key);
     tiles.set(key, tile);
-    return tile;
+  } else {
+    const controller = new AbortController();
+    const read = { controller, waiting: 0 };
+    reading.set(key, read);
+    const started = (tile = readTile(image, index, controller.signal));
+    tiles.set(key, tile);
+    tile
+      .then(
+        (bytes) => {
+          if (tiles.get(key) !== started) return;
+          const size = bytes?.byteLength ?? 0;
+          tileSizes.set(key, size);
+          tileBytes += size;
+          for (const old of tiles.keys()) {
+            if (tileBytes <= TILE_CACHE_BYTES) break;
+            if (!tileSizes.has(old)) continue; // still loading
+            tiles.delete(old);
+            tileBytes -= tileSizes.get(old)!;
+            tileSizes.delete(old);
+          }
+        },
+        () => tiles.get(key) === started && tiles.delete(key),
+      )
+      .finally(() => reading.get(key) === read && reading.delete(key));
   }
-  tile = readTile(image, index, signal);
-  tiles.set(key, tile);
-  tile.then(
-    (bytes) => {
-      if (tiles.get(key) !== tile) return;
-      const size = bytes?.byteLength ?? 0;
-      tileSizes.set(key, size);
-      tileBytes += size;
-      for (const old of tiles.keys()) {
-        if (tileBytes <= TILE_CACHE_BYTES) break;
-        if (!tileSizes.has(old)) continue; // still loading
-        tiles.delete(old);
-        tileBytes -= tileSizes.get(old)!;
-        tileSizes.delete(old);
-      }
-    },
-    () => tiles.get(key) === tile && tiles.delete(key),
-  );
-  return tile;
+  const read = reading.get(key);
+  if (!signal || !read) return tile;
+  const shared = tile;
+  read.waiting++;
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      if (--read.waiting === 0) read.controller.abort(signal.reason);
+      reject(signal.reason);
+    };
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    shared.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 /** A tile's bytes as stored; null for a sparse tile (no data at all). */

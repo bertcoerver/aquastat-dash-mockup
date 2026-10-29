@@ -42,6 +42,7 @@ import { clearMapTip, initMapTips } from "./panels/map-tip";
 import { initLoadBar, setProgress } from "./panels/load-bar";
 import { initSlowServerCheck } from "./panels/slow-server";
 import { initCorsCheck } from "./panels/cors-check";
+import { cornerWarning } from "./panels/corner-warning";
 import { initThemeSwitch } from "./panels/theme-switch";
 import { mk } from "./toolbar/dekads";
 import { initPlacePicker, type Country, type MajorBasin } from "./toolbar/place-picker";
@@ -212,7 +213,13 @@ const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<MajorBasin>("major-basins"),
   loadList<SubBasin>("sub-basins"),
   loadData<CountryInfo>("country-info"),
-]);
+]).catch((err: Error) => {
+  // (Without them there's no top bar or panel: say so, rather than leave a bare globe.)
+  const warning = cornerWarning();
+  warning.textContent = `⚠ The page's data couldn't be loaded (${err.message}). Reload to try again.`;
+  warning.hidden = false;
+  throw err;
+});
 boxes = {
   country: new Map(countries.map((c) => [c.m49, c.bbox])),
   major: new Map(basins.map((b) => [b.id, b.bbox])),
@@ -320,6 +327,7 @@ function loadList<T>(name: string): Promise<T[]> {
 
 async function loadData<T>(name: string): Promise<T> {
   const response = await fetch(`${import.meta.env.BASE_URL}data/${name}.json`);
+  if (!response.ok) throw new Error(`${name}.json: ${response.status} ${response.statusText}`);
   return response.json();
 }
 

@@ -39,7 +39,7 @@ export interface Flow {
 }
 
 export type Hovered = { country: number } | { major: number } | { sub: number; flow: boolean; upstream: Set<number>; downstream: Set<number> };
-const hoverKey = (h: Hovered | null) => (!h ? "" : "country" in h ? `c${h.country}` : "major" in h ? `m${h.major}` : `s${h.sub}`);
+const hoverKey = (h: Hovered | null) => (!h ? "" : "country" in h ? `c${h.country}` : "major" in h ? `m${h.major}` : `s${h.sub}:${h.flow ? 1 : 0}`);
 const NONE = new Set<number>();
 
 /** The views with statistics maps of their own: circles, bars and the order they're drawn in. */

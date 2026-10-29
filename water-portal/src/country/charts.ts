@@ -421,15 +421,18 @@ const BUBBLE_R = 15;
 /** An axis's scale: from value to pixels [a, b], with its ticks (powers of ten when log). */
 function axisScale(axis: BubbleAxis, values: number[], a: number, b: number) {
   const ok = values.filter((v) => Number.isFinite(v) && (!axis.log || v > 0));
+  // (The line across may have no value: `??` would let NaN through.)
+  const at = Number.isFinite(axis.at) && (!axis.log || axis.at! > 0) ? axis.at : undefined;
+  if (!ok.length && at === undefined) return { ticks: [] as number[], at: () => NaN, ok: () => false };
   if (axis.log) {
-    const lo = Math.floor(Math.log10(Math.min(...ok, axis.at ?? Infinity)));
-    const hi = Math.ceil(Math.log10(Math.max(...ok, axis.at ?? 0)));
+    const lo = Math.floor(Math.log10(Math.min(...ok, at ?? Infinity)));
+    const hi = Math.ceil(Math.log10(Math.max(...ok, at ?? 0)));
     const [l0, l1] = [lo, Math.max(hi, lo + 1)];
     const ticks: number[] = [];
     for (let k = l0; k <= l1; k++) ticks.push(10 ** k);
     return { ticks, at: (v: number) => a + ((Math.log10(v) - l0) / (l1 - l0)) * (b - a), ok: (v: number) => Number.isFinite(v) && v > 0 };
   }
-  const ticks = niceTicks(Math.min(0, ...ok, axis.at ?? 0), Math.max(...ok, axis.at ?? 0, 1e-9), 4);
+  const ticks = niceTicks(Math.min(0, ...ok, at ?? 0), Math.max(...ok, at ?? 0, 1e-9), 4);
   const [t0, t1] = [ticks[0], ticks[ticks.length - 1]];
   return { ticks, at: (v: number) => a + ((v - t0) / (t1 - t0 || 1)) * (b - a), ok: Number.isFinite };
 }

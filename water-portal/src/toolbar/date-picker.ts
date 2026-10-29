@@ -247,9 +247,15 @@ export function initDatePicker(getState: () => PickerState, onPick: (next: DayRa
     for (const el of grid.querySelectorAll(".dk-hover")) el.classList.remove("dk-hover");
   });
 
-  document.addEventListener("keydown", (e) => {
-    if (open && e.key === "Escape") hide(true);
-  });
+  // (On the calendar and its buttons, not the page: Escape elsewhere unpins the map.)
+  for (const el of [pop, labels.start, labels.end]) {
+    el.addEventListener("keydown", (e) => {
+      if (!open || e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      hide(true);
+    });
+  }
   document.addEventListener(
     "pointerdown",
     (e) => {

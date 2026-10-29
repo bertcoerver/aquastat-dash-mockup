@@ -194,7 +194,7 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
         `<input class="legend-quality-input" id="bs-p-${key}" data-key="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${tune[key]}" /></div>`,
     ).join("") +
     '<div><label class="legend-quality-head" for="bs-p-color">Particle colour</label><select class="particle-tuning-select" id="bs-p-color">' +
-    Object.entries(PARTICLE_COLORS).map(([key, { label }]) => `<option value="${key}">${label}</option>`).join("") +
+    Object.entries(PARTICLE_COLORS).map(([key, { label }]) => `<option value="${key}"${key === tune.color ? " selected" : ""}>${label}</option>`).join("") +
     "</select></div>" +
     '<button type="button" class="particle-tuning-copy" title="Copy the settings">Copy settings</button>';
   const tuningBody = tuningSection("Discharge particles", "Draw the discharge map as particles to tune them.");
@@ -229,7 +229,6 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
   }
   input.addEventListener("input", () => {
     if (!drawnScheme) return;
-    simplify(drawnScheme.lines, share() * drawnScheme.extent);
     showSimplify();
     drawn = "";
     onChange();
@@ -242,7 +241,6 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       Promise.all([loadRivers(major), loadMiddles()])
         .then(([net, middles]) => {
           const scheme = buildScheme(net, major, subBasins, middles);
-          simplify(scheme.lines, share() * scheme.extent);
           schemes.set(major, { kind: "ready", scheme, net });
         })
         .catch((err: Error) => schemes.set(major, { kind: "error", message: err.message }))
@@ -318,6 +316,8 @@ export function initSchemeMap({ map, subBasins, legend, onChange, onHover }: Opt
       if (mapKey === drawn) return drawnKeys;
       drawn = mapKey;
       showSimplify();
+      // (At the slider's tolerance, whichever basin it was last drawn at.)
+      simplify(scheme, share() * scheme.extent);
 
       const theme = map.theme;
       const only = q?.only ?? null;

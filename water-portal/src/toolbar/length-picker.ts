@@ -138,9 +138,15 @@ export function initLengthPicker(
     });
   }
 
-  document.addEventListener("keydown", (e) => {
-    if (openView && e.key === "Escape") hide(true);
-  });
+  // (On the popup and its button, not the page: Escape elsewhere unpins the map.)
+  for (const el of [pop, label]) {
+    el.addEventListener("keydown", (e) => {
+      if (!openView || e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      hide(true);
+    });
+  }
   document.addEventListener(
     "pointerdown",
     (e) => {

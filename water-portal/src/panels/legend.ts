@@ -33,6 +33,7 @@
  *
  * Also the ticks of a colour ramp, for the WaPOR legend and the water balance's (ticksHtml).
  */
+import { drag } from "../lib/drag";
 import type { WaporStretch } from "../map/layers/wapor";
 import { fmtStop, initRampMenu, type RampMenu } from "./ramp-menu";
 import { initTitleMenu, type MenuOption } from "./title-menu";
@@ -376,10 +377,13 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
     const startY = e.clientY;
     const grab = e.clientY - p.el.getBoundingClientRect().top;
     let dragging = false;
-    const shown = () => order.map((id) => [...sections.values()].find((q) => q.layer?.id === id)!).filter(Boolean);
+    const shown = () => order.map((id) => [...sections.values()].find((q) => q.layer?.id === id)!);
     // (On the window, not captured: the section moving in the page would lose the capture.)
+    drag(window, e, move, () => {
+      p.el.classList.remove("dragging");
+      p.el.style.transform = "";
+    });
     function move(ev: PointerEvent) {
-      if (ev.pointerId !== e.pointerId) return;
       if (!dragging && Math.abs(ev.clientY - startY) < 4) return;
       dragging = true;
       p.el.classList.add("dragging");
@@ -400,17 +404,6 @@ export function initLayerLegend(aside: HTMLElement, { slots, options, onToggle, 
       }
       p.el.style.transform = `translateY(${ev.clientY - grab - p.el.getBoundingClientRect().top}px)`;
     }
-    function end(ev: PointerEvent) {
-      if (ev.pointerId !== e.pointerId) return;
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", end);
-      window.removeEventListener("pointercancel", end);
-      p.el.classList.remove("dragging");
-      p.el.style.transform = "";
-    }
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", end);
-    window.addEventListener("pointercancel", end);
   }
 
   function showSection(p: Parts, layer: LegendLayer | null) {

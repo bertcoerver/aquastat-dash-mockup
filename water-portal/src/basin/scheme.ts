@@ -64,6 +64,8 @@ export interface Scheme {
   atDot: Map<number, number[]>;
   /** The basin's size (degrees of latitude), which the simplification is a share of. */
   extent: number;
+  /** The tolerance the lines' paths are simplified to (none yet: full detail). */
+  simplifiedAt?: number;
 }
 
 /** A run of an arc's vertices, [from, to] inclusive. */
@@ -290,9 +292,11 @@ export function lineQ(line: SchemeLine, q: (id: number) => number, scheme: Schem
   return joined * keep + Math.max(0, out - qin);
 }
 
-/** Simplify every river line to `tolerance` degrees (of latitude). */
-export function simplify(lines: SchemeLine[], tolerance: number) {
-  for (const line of lines) line.path = line.kind === "river" && tolerance > 0 ? douglasPeucker(line.raw, tolerance) : line.raw;
+/** Simplify every river line to `tolerance` degrees (of latitude); nothing to do if they are already. */
+export function simplify(scheme: Scheme, tolerance: number) {
+  if (scheme.simplifiedAt === tolerance) return;
+  scheme.simplifiedAt = tolerance;
+  for (const line of scheme.lines) line.path = line.kind === "river" && tolerance > 0 ? douglasPeucker(line.raw, tolerance) : line.raw;
 }
 
 function douglasPeucker(points: LonLat[], tolerance: number): LonLat[] {

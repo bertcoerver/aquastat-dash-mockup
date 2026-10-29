@@ -7,6 +7,8 @@
  * After a resize, "panes-moved" is dispatched on window.
  */
 
+import { drag } from "../lib/drag";
+
 const STORAGE_KEY = "water-portal:widths";
 
 const panes = new Map<string, HTMLElement[]>();
@@ -39,7 +41,6 @@ function resizeFrom(down: PointerEvent, pane: HTMLElement, key: string, grip: HT
     for (const p of panes.get(key) ?? []) setWidth(p, width);
   };
   const end = () => {
-    grip.removeEventListener("pointermove", move);
     pane.classList.remove("resizing");
     widths[key] = pane.offsetWidth;
     for (const p of panes.get(key) ?? []) setWidth(p, widths[key]);
@@ -50,9 +51,7 @@ function resizeFrom(down: PointerEvent, pane: HTMLElement, key: string, grip: HT
     }
     window.dispatchEvent(new Event("panes-moved"));
   };
-  grip.addEventListener("pointermove", move);
-  grip.addEventListener("pointerup", end, { once: true });
-  grip.addEventListener("pointercancel", end, { once: true });
+  drag(grip, down, move, end);
 }
 
 function setWidth(pane: HTMLElement, width: number) {

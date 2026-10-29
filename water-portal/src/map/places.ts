@@ -50,8 +50,14 @@ const tiles = new Map<string, Promise<Feature[]>>();
 async function featureAt({ url, zoom }: { url: string; zoom: number }, [lng, lat]: LngLat) {
   const { x, y } = tileIndex(lng, lat, zoom);
   const tileUrl = url.replace("{z}", String(zoom)).replace("{x}", String(x)).replace("{y}", String(y));
-  if (!tiles.has(tileUrl)) tiles.set(tileUrl, loadTile(tileUrl, { x, y, z: zoom }));
-  const features = await tiles.get(tileUrl)!;
+  let tile = tiles.get(tileUrl);
+  if (!tile) {
+    tile = loadTile(tileUrl, { x, y, z: zoom });
+    tiles.set(tileUrl, tile);
+    // (A failed read isn't kept: it's tried again next time.)
+    tile.catch(() => tiles.get(tileUrl) === tile && tiles.delete(tileUrl));
+  }
+  const features = await tile;
   return features.find((f) => contains(f, [lng, lat])) ?? null;
 }
 

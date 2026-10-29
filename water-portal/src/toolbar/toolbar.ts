@@ -152,15 +152,16 @@ export function initToolbar(onChange: (state: ToolbarState) => void, onPlay?: ()
   }
 
   render();
+  function setDays(days: DayRange) {
+    if (days.start === state.range.start && days.end === state.range.end) return;
+    update(days, {}); // the user chose it (elsewhere), so no highlight
+  }
   return {
-    state: current(),
-    setRange(range) {
-      this.setDays(daysOfDekads(range));
+    get state() {
+      return current();
     },
-    setDays(days) {
-      if (days.start === state.range.start && days.end === state.range.end) return;
-      update(days, {}); // the user chose it (elsewhere), so no highlight
-    },
+    setRange: (range) => setDays(daysOfDekads(range)),
+    setDays,
     setPlayback({ status, bufferedTo }) {
       play.dataset.status = status;
       play.setAttribute("aria-label", status === "stopped" ? "Play" : "Pause");

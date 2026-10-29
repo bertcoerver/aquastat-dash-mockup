@@ -5,6 +5,8 @@
  * hides while its map isn't drawn that way: the section then says how to show it.
  */
 
+import { drag } from "../lib/drag";
+
 let pane: HTMLElement | null = null;
 
 function thePane(): HTMLElement {
@@ -53,9 +55,6 @@ function dragBy(handle: HTMLElement, el: HTMLElement) {
       el.style.top = `${Math.min(innerHeight - 30, Math.max(0, top + e.clientY - down.clientY))}px`;
       el.style.right = "auto";
     };
-    const end = () => handle.removeEventListener("pointermove", move);
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", end, { once: true });
-    handle.addEventListener("pointercancel", end, { once: true });
+    drag(handle, down, move);
   });
 }

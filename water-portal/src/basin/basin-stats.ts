@@ -1078,6 +1078,8 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       state.view = view;
       tellTimed();
       forgetFailedFluxes();
+      // (A failed load is tried again on coming back to the view.)
+      if (state.status.kind === "error") state.status = { kind: "idle" };
       load();
       render();
     },
@@ -1089,7 +1091,12 @@ export function initBasinStats({ map, majorBasins, subBasins, setMapOverride, se
       const majorBefore = state.selection?.majorBasin?.id;
       state.selection = selection;
       forgetFailedFluxes();
-      if (selection.majorBasin?.id !== majorBefore) drivers.clearPreview();
+      if (selection.majorBasin?.id !== majorBefore) {
+        drivers.clearPreview();
+        // (A pin is of a basin's chart: another basin's map starts unpinned.)
+        state.pinned.delete("major");
+        state.dropped.delete("major");
+      }
       render();
     },
     hover(place) {

@@ -257,6 +257,7 @@ export function initTreeCombobox<D>(
       if (!list.hidden && active) pick(active);
     } else if (e.key === "Escape" && !list.hidden) {
       e.preventDefault();
+      e.stopPropagation(); // (Escape elsewhere unpins the map)
       close();
       show(value);
       input.select();
