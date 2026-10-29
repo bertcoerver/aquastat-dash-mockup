@@ -84,16 +84,14 @@ function showHover(lngLat: LngLat | null, place: Place | null) {
   countryPanel.hover(view === "country" ? (country?.m49 ?? null) : null);
   basinStats.hover(view === "basin" ? hovered.place : null);
   const inSelected = !!majorBasin && majorBasin.id === selection.get().majorBasin?.id;
-  // The selected sub-basin's catchment is never picked out up- or downstream: not when
-  // hovering in it, nor as part of another's.
-  const own = selectedCatchment();
-  const outside = (ids: Set<number>) => (own.size ? new Set([...ids].filter((id) => !own.has(id))) : ids);
-  const inOwn = !!subBasin && own.has(subBasin.id);
+  // Up- and downstream are picked out only while no sub-basin is selected (a click
+  // outside its catchment clears it: see selectPoint).
+  const flow = !selection.get().subBasin;
   setHovered(
     view === "country" && country ? { country: country.m49 }
     : view !== "basin" || !majorBasin ? null
     : inSelected && subBasin
-      ? { sub: subBasin.id, flow: !inOwn, upstream: inOwn ? NONE : outside(upstreamOf(subBasin.id)), downstream: inOwn ? NONE : outside(downstreamOf(subBasin.id)) }
+      ? { sub: subBasin.id, flow, upstream: flow ? upstreamOf(subBasin.id) : NONE, downstream: flow ? downstreamOf(subBasin.id) : NONE }
     : { major: majorBasin.id },
   );
 }
@@ -136,14 +134,18 @@ async function selectPoint(lngLat: LngLat | null, source: SelectionSource, featu
   if (!lngLat) return selection.set({ ...NOTHING, ...keptPoint() });
   const before = selection.get();
   const precise = source !== "map" || view === "local";
+  // With a sub-basin selected, a click elsewhere in its major basin than its catchment
+  // goes back to the major basin.
+  const own = selectedCatchment();
   const select = (place: Place) => {
     const sameMajor = !!place.majorBasin && place.majorBasin.id === before.majorBasin?.id;
+    const inOwn = !own.size || (!!place.subBasin && own.has(place.subBasin.id));
     selection.set({
       ...NOTHING,
       ...place,
       source,
       ...(view === "local" ? { lngLat, feature } : keptPoint()),
-      subBasin: precise || sameMajor ? place.subBasin : null,
+      subBasin: precise || (sameMajor && inOwn) ? place.subBasin : null,
     });
   };
   // A click on another country (Country view), major basin or sub-basin (Basin view; a
