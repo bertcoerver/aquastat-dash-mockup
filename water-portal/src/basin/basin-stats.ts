@@ -431,7 +431,7 @@ export function initBasinStats({ map, majorBasins, subBasins, upstreamOf, setRan
   const ownSwitch = (spec: BasinMapSpec, ctx: BasinCtx) => !!(spec.scheme || spec.effect) && ctx.major !== null;
 
   // The map tooltip follows the pointer (to its right).
-  const mapEl = map.map.getContainer();
+  const mapEl = map.container;
   mapEl.addEventListener("pointermove", (e) => {
     tooltip.style.left = `${e.clientX + 14}px`;
     tooltip.style.top = `${e.clientY + 14}px`;

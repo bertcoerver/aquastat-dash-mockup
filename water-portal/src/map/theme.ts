@@ -4,6 +4,7 @@ export type Color = [number, number, number, number];
 
 export interface MapTheme {
   ocean: string; // CSS colour: MapLibre paints the globe with it
+  oceanColor: Color; // the same, for the flat map's ocean polygon
   land: Color;
   noData: Color; // Country view: a country without a value on the map
   selected: Color; // the selected country or basin
@@ -38,6 +39,7 @@ export interface MapTheme {
 export const THEMES: Record<"light" | "dark", MapTheme> = {
   light: {
     ocean: "#d4e1e7",
+    oceanColor: [212, 225, 231, 255],
     land: [250, 250, 247, 255],
     noData: [222, 226, 228, 255],
     selected: [215, 228, 230, 255],
@@ -66,6 +68,7 @@ export const THEMES: Record<"light" | "dark", MapTheme> = {
   },
   dark: {
     ocean: "#0a1317",
+    oceanColor: [10, 19, 23, 255],
     land: [29, 43, 50, 255],
     noData: [44, 58, 65, 255],
     selected: [41, 77, 90, 255],

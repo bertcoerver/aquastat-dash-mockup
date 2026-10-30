@@ -22,6 +22,7 @@ import { Layer, project32, type DefaultProps, type LayerContext, type UpdatePara
 import type { Buffer, Framebuffer, Texture } from "@luma.gl/core";
 import { Model } from "@luma.gl/engine";
 import type { ShaderModule } from "@luma.gl/shadertools";
+import { reprojectModule, reprojectUniforms } from "../flat/reproject-extension";
 import { OVERWRITE, PREMULTIPLIED, uniformBlock } from "./effects-common";
 
 /** The rivers the particles follow (basin/rivers.ts's RiverNetwork is one). */
@@ -87,9 +88,10 @@ void main() {
   vArc = texelFetch(uArcs, texel, 0);
   vArc2 = texelFetch(uArcs, texel + ivec2(1, 0), 0);
 
-  vec4 common0;
-  vec4 c0 = project_position_to_clipspace(vec3(aStart, 0.0), vec3(0.0), vec3(0.0), common0);
-  vec4 c1 = project_position_to_clipspace(vec3(aEnd, 0.0), vec3(0.0), vec3(0.0));
+  // (In the map's projection, flat: reproject-extension.ts.)
+  vec4 common0 = rp_reprojected(vec4(project_position(vec3(aStart, 0.0)), 1.0), aStart);
+  vec4 c0 = project_common_position_to_clipspace(common0);
+  vec4 c1 = rp_project_to_clipspace(vec3(aEnd, 0.0));
   vec2 half_ = 0.5 * riverField.viewportSize;
   vec2 s0 = c0.xy / c0.w * half_;
   vec2 s1 = c1.xy / c1.w * half_;
@@ -311,7 +313,7 @@ export class RiverParticlesLayer extends Layer<RiverParticlesLayerProps> {
     const arcTexture = device.createTexture({ format: "rgba32float", width: ARC_ROW * 2, height: arcRows, sampler: { minFilter: "nearest", magFilter: "nearest" } });
 
     const fieldModel = new Model(device, {
-      ...this.getShaders({ vs: FIELD_VS, fs: FIELD_FS, modules: [project32, fieldUniforms] }),
+      ...this.getShaders({ vs: FIELD_VS, fs: FIELD_FS, modules: [project32, reprojectModule, fieldUniforms] }),
       id: `${this.props.id}-field`,
       bufferLayout: [
         {
@@ -458,6 +460,7 @@ export class RiverParticlesLayer extends Layer<RiverParticlesLayerProps> {
       for (const disc of [1, 0]) {
         s.fieldModel.shaderInputs.setProps({
           riverField: { widthScale: p.widthScale * dpr, minWidth: 1.5 * dpr, disc, viewportSize: [width, height] },
+          reproject: reprojectUniforms(),
         });
         s.fieldModel.draw(pass);
       }

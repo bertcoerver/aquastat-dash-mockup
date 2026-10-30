@@ -1,22 +1,26 @@
 /*
  * The page's state in the URL's hash, so a link opens where it was: the map's place
- * and zoom (MapLibre's own: `map=zoom/lat/lng`), the view, what is selected (a country
- * or region, a basin or sub-basin, a point and the dam at it), the date range, and the
- * view's panel: its topic or scope, the chart pinned and the maps checked.
+ * and zoom (MapLibre's form, `map=zoom/lat/lng`, written by map.ts as the map moves),
+ * its projection if not the globe, the view, what is selected (a country or region, a
+ * basin or sub-basin, a point and the dam at it), the date range, and the view's panel:
+ * its topic or scope, the chart pinned and the maps checked.
  *
- *   #map=6/42.1/19.5&view=basin&sub=4031009&days=2024-01-01..2024-12-31&scope=catchment&pin=Q-years&maps=t-pcp,monthly
+ *   #map=6/42.1/19.5&projection=robinson&view=basin&sub=4031009&days=2024-01-01..2024-12-31&scope=catchment&pin=Q-years&maps=t-pcp,monthly
  *
  * Written as the state changes, replacing the history entry (the back button isn't a
- * way back through every click), and read once on load (main.ts). MapLibre keeps the
- * other parameters when it writes its own.
+ * way back through every click), and read once on load (main.ts).
  */
 import type { Driver } from "./panels/map-drivers";
+import { isProjectionId, type MapProjection } from "./map/flat/projections";
+import type { Camera } from "./map/host";
 import type { LngLat } from "./map/places";
 import { dayOf, ymd } from "./toolbar/dekads";
 import type { DayRange, View } from "./toolbar/range-rules";
 
 export interface UrlState {
   view?: View;
+  /** The map's projection (none: the globe). */
+  projection?: MapProjection;
   /** The selection: one of these (a sub-basin implies its major basin). */
   country?: number;
   region?: number;
@@ -35,7 +39,7 @@ export interface UrlState {
 }
 
 const VIEWS: View[] = ["country", "basin", "local"];
-const KEYS = ["view", "country", "region", "basin", "sub", "point", "dam", "days", "topic", "scope", "pin", "pinsub", "maps"];
+const KEYS = ["view", "projection", "country", "region", "basin", "sub", "point", "dam", "days", "topic", "scope", "pin", "pinsub", "maps"];
 
 const isoDay = (day: number) => {
   const { y, m, d } = ymd(day);
@@ -59,6 +63,8 @@ export function readUrlState(): UrlState {
   };
   const view = p.get("view");
   if (view && VIEWS.includes(view as View)) out.view = view as View;
+  const projection = p.get("projection");
+  if (projection && isProjectionId(projection)) out.projection = projection;
   out.country = int("country");
   out.region = int("region");
   out.basin = int("basin");
@@ -77,12 +83,13 @@ export function readUrlState(): UrlState {
   return out;
 }
 
-/** Write the state to the URL (keeping the map's place, which MapLibre writes). */
+/** Write the state to the URL (keeping the map's place, see writeMapHash). */
 export function writeUrlState(state: UrlState) {
   const p = params();
   for (const key of KEYS) p.delete(key);
   const set = (key: string, value: string | number | undefined | null) => value !== undefined && value !== null && value !== "" && p.set(key, String(value));
   set("view", state.view);
+  set("projection", state.projection === "globe" ? undefined : state.projection);
   set("country", state.country);
   set("region", state.region);
   set("basin", state.basin);
@@ -96,9 +103,34 @@ export function writeUrlState(state: UrlState) {
   set("pinsub", state.pin?.sub);
   if (state.maps) p.set("maps", state.maps.join(","));
   // (Not encoded: the hash isn't sent to a server, and "/" and "," read better.)
+  replaceHash(p);
+}
+
+/** The hash's parameters written back, as they are (not encoded: the hash isn't sent to a server, and "/" and "," read better). */
+function replaceHash(p: URLSearchParams) {
   const hash = p.toString().replace(/%2F/g, "/").replace(/%2C/g, ",").replace(/%3A/g, ":").replace(/%7E/g, "~");
   if (`#${hash}` === window.location.hash) return;
   window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}#${hash}`);
+}
+
+/** The map's place in the hash (`map=zoom/lat/lng`, MapLibre's form; a bearing and pitch after it are left to the map). */
+export function readMapHash(): Pick<Camera, "center" | "zoom"> | null {
+  const parts = params().get("map")?.split("/").map(Number);
+  if (!parts || parts.length < 3 || !parts.slice(0, 3).every(Number.isFinite)) return null;
+  const [zoom, lat, lng] = parts;
+  if (Math.abs(lat) > 90) return null;
+  return { center: [lng, lat], zoom };
+}
+
+/** Write the map's place (as MapLibre does: the zoom to 2 decimals, the place to as many as the zoom needs; a tilt or turn after). */
+export function writeMapHash({ center: [lng, lat], zoom, bearing, pitch }: Camera) {
+  const decimals = Math.max(0, Math.ceil((zoom * Math.LN2 + Math.log(512 / 360 / 512)) / Math.LN10));
+  // (The flat map's centre can lie a little off the map; kept where the globe can open it.)
+  const place = `${Math.round(zoom * 100) / 100}/${Math.max(-90, Math.min(90, lat)).toFixed(decimals)}/${(((lng + 540) % 360) - 180).toFixed(decimals)}`;
+  const turned = Math.round(bearing) !== 0 || Math.round(pitch) !== 0 ? `/${Math.round(bearing * 10) / 10}/${Math.round(pitch)}` : "";
+  const p = params();
+  p.set("map", place + turned);
+  replaceHash(p);
 }
 
 /** MapLibre once kept the place as the whole hash (#zoom/lat/lng): now its `map` parameter, so the others fit. */

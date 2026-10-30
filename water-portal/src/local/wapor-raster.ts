@@ -59,7 +59,7 @@ export interface WaporRaster {
 }
 
 export function initWaporRaster({ map: waterMap, getView, onVariable, onUnits, setDays, onPlayback, lockLegend, unlockLegend }: Options): WaporRaster {
-  const { map, setWapor, setWaporMaxGap } = waterMap;
+  const { setWapor, setWaporMaxGap } = waterMap;
   let waporVariable = WAPOR_VARIABLES[0];
   let waporOn = true; // checked in the Local legend (it can be taken off the map)
   // The WaPOR raster's colours, as the map has them (for a pixel's tooltip).
@@ -194,7 +194,7 @@ export function initWaporRaster({ map: waterMap, getView, onVariable, onUnits, s
     }, 150);
   }
   onWaporTile(stretchWapor);
-  map.on("moveend", stretchWapor);
+  waterMap.on("moveend", stretchWapor);
 
   // Values over a pixel in the legend: a pixel's area at the centre of the view (it
   // changes with latitude, and is L2's when zoomed in where it has it). Only the latest
@@ -203,12 +203,12 @@ export function initWaporRaster({ map: waterMap, getView, onVariable, onUnits, s
   const shownLevel = () => (waporShown ? waporShownLevel(waporShown) : "L1");
   function showPixelArea() {
     if (getView() !== "local") return;
-    const lat = map.getCenter().lat;
+    const lat = waterMap.getCenter()[1];
     const level = shownLevel();
     const wanted = (areaWanted = `${waporVariable.id} ${lat} ${level}`);
     void waporPixelArea(waporVariable, lat, level).then((area) => areaWanted === wanted && waporLegend.pixelArea(area, lat));
   }
-  map.on("moveend", showPixelArea);
+  waterMap.on("moveend", showPixelArea);
 
   // The legend's pixel size follows the level the map shows.
   function showWaporLevel() {

@@ -4,10 +4,10 @@
  * WebMercatorViewport plays for a Mercator map: the camera (view and projection
  * matrices), picking (pixel → lon/lat), tile selection (getBounds) and panning.
  *
- * To deck.gl's shaders it still looks like a Web Mercator viewport (projectionMode 1):
- * every layer's vertex shader projects to Mercator, and ReprojectExtension moves the
- * vertex to where this projection puts it. Both agree on common space, so the camera's
- * centre (projectFlat, below) and the drawn geometry line up.
+ * To deck.gl's shaders it still looks like a Web Mercator viewport: every layer's vertex
+ * shader projects to Mercator, and ReprojectExtension moves the vertex to where this
+ * projection puts it. Both agree on common space, so the camera's centre (projectFlat,
+ * below) and the drawn geometry line up.
  *
  * `resolution` is set, as GlobeViewport sets it: MVTLayer then decodes tiles to lon/lat
  * (not tile-local coordinates), and polygons, paths and bitmaps are subdivided every
@@ -49,10 +49,12 @@ export interface ProjectedViewportOptions {
 
 const RAD = Math.PI / 180;
 const DEG = 180 / Math.PI;
+const EPS = 1e-4;
 
 /**
  * A viewport class for a blend of projections (a class, as deck.gl's View makes
- * viewports from a class: `new ViewportType(opts)`).
+ * viewports from a class: `new ViewportType(opts)`). Its statics project without a
+ * viewport (the camera moves, map.ts).
  */
 export function viewportClass(blend: Blend) {
   const { from, to, t } = blend;
@@ -75,10 +77,12 @@ export function viewportClass(blend: Blend) {
   // the pole. So a drag that starts above the map still pans, and the camera can be
   // centred off the map (a point past the pole has a latitude beyond ±90°).
   const yPole = rawForward(0, Math.PI / 2)[1] * SCALE;
-  const slope = Math.max(1e-6, (yPole - rawForward(0, 89 * RAD)[1] * SCALE) / 1); // common units per degree
-  const EPS = 1e-4;
+  /** Common units per degree of latitude, at the pole. */
+  const slope = Math.max(1e-6, yPole - rawForward(0, 89 * RAD)[1] * SCALE);
+  /** x at 180° on the equator: the map's half width, for all but Mercator (where every parallel is as wide). */
+  const xEquator = rawForward(Math.PI, 0)[0] * SCALE;
 
-  /** Degrees → common space (y up). */
+  /** Degrees → common space (y up). Off the map's sides (|lon| > 180°) the formulas run on. */
   function forward(lon: number, lat: number): [number, number] {
     if (Math.abs(lat) <= 90) {
       const [x, y] = rawForward(lon * RAD, lat * RAD);
@@ -92,34 +96,36 @@ export function viewportClass(blend: Blend) {
   /** Common space → degrees (longitude beyond ±180° off the map's sides, latitude beyond ±90° past the poles). */
   function invert(x: number, y: number): [number, number] {
     const s = Math.sign(y) || 1;
-    if (Math.abs(y) >= yPole - EPS) {
-      const edge = rawInvert(x / SCALE, (s * (yPole - EPS)) / SCALE) ?? rawInvert(0, (s * (yPole - EPS)) / SCALE) ?? [0, (s * Math.PI) / 2];
-      const lon = edgeLongitude(x, edge[0] * DEG, s);
-      return [lon, s * (90 + (Math.abs(y) - yPole) / slope)];
+    if (Math.abs(y) < yPole - EPS) {
+      const p = rawInvert(x / SCALE, y / SCALE);
+      if (p) return [p[0] * DEG, p[1] * DEG];
+      // The inverse gave up (outside a map whose poles are points, say): the latitude
+      // from the central meridian, the longitude by the map's width there.
+      const lat = (rawInvert(0, y / SCALE)?.[1] ?? 0) * DEG;
+      return [offLongitude(x, lat), lat];
     }
-    const p = rawInvert(x / SCALE, y / SCALE);
-    if (p) return [p[0] * DEG, p[1] * DEG];
-    // Off the map where the inverse gives up (Winkel Tripel far out): by the x scale
-    // at this latitude.
-    const lat = rawInvert(0, y / SCALE)?.[1] ?? 0;
-    return [edgeLongitude(x, 180, s, lat * DEG), lat * DEG];
+    // Past a pole.
+    return [offLongitude(x, s * 89.9), s * (90 + (Math.abs(y) - yPole) / slope)];
   }
-  /** A longitude for x where the pole is a point: by the x scale at `lat` (the equator's: never 0). */
-  function edgeLongitude(x: number, fallback: number, _s: number, lat = 0): number {
-    if (Number.isFinite(fallback) && fallback !== 0) return fallback;
-    const xAt180 = forward(180, lat)[0] || forward(180, 0)[0];
+  /** A longitude for x off the map, by the map's width at `lat` (at least a quarter of the equator's: the poles can be points). */
+  function offLongitude(x: number, lat: number): number {
+    const xAt180 = Math.max(forward(180, lat)[0], xEquator / 4);
     return (x / xAt180) * 180;
   }
 
-  /** The map's extent in common space: its widest (the equator's ends) and its poles. */
-  const xMax = Math.max(forward(180, 0)[0], forward(180, 89.9)[0]);
-
-  const key = `${from.id}>${to.id}@${t.toFixed(3)}`;
+  /** The map's extent in common space: its widest (the equator's ends, or the poles' for Mercator) and its poles. */
+  const xMax = Math.max(xEquator, forward(180, 89.9)[0]);
 
   class ProjectedViewport extends Viewport {
     static displayName = "ProjectedViewport";
-    static key = key;
+    /** Degrees → common space, and back (as projectFlat / unprojectFlat, without a viewport). */
+    static forward = forward;
+    static invert = invert;
+    /** The common-space box the map fills: [xMin, yMin, xMax, yMax]. */
+    static extent: [number, number, number, number] = [-xMax, -yPole, xMax, yPole];
 
+    /** Marks it among deck.gl's viewports (see isProjectedViewport). */
+    readonly projected = true;
     longitude: number;
     latitude: number;
     pitch: number;
@@ -144,7 +150,9 @@ export function viewportClass(blend: Blend) {
     }
 
     get projectionMode() {
-      return WEB_MERCATOR;
+      // Web Mercator to the shaders; zoomed in, deck.gl's offset mode (positions
+      // relative to the view's centre, for precision), which the extension follows.
+      return this.zoom < 12 ? WEB_MERCATOR : WEB_MERCATOR + 1;
     }
 
     projectFlat(xyz: number[]): [number, number] {
@@ -163,12 +171,15 @@ export function viewportClass(blend: Blend) {
         [0, this.height],
         [this.width, this.height],
       ].map((p) => pixelsToWorld(p, this.pixelUnprojectionMatrix));
+      // (A corner above the horizon of a tilted map is infinitely far: the map's edge then.)
       const finite = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback);
       const x0 = Math.max(-xMax, Math.min(...corners.map((c) => finite(c[0], -xMax))));
       const x1 = Math.min(xMax, Math.max(...corners.map((c) => finite(c[0], xMax))));
       const y0 = Math.max(-yPole + EPS, Math.min(...corners.map((c) => finite(c[1], -yPole))));
       const y1 = Math.min(yPole - EPS, Math.max(...corners.map((c) => finite(c[1], yPole))));
       if (x0 >= x1 || y0 >= y1) return [0, 0, 0, 0];
+      // The meridians curve: the westernmost longitude of the box's left side is at
+      // whichever of its latitudes the map is narrowest.
       let west = 180;
       let east = -180;
       const ROWS = 24;
@@ -200,3 +211,7 @@ export function viewportClass(blend: Blend) {
 }
 
 export type ProjectedViewportClass = ReturnType<typeof viewportClass>;
+export type ProjectedViewport = InstanceType<ProjectedViewportClass>;
+
+/** Whether a deck.gl viewport is the flat map's (not MapLibre's globe or Mercator). */
+export const isProjectedViewport = (viewport: Viewport): viewport is ProjectedViewport => (viewport as { projected?: boolean }).projected === true;

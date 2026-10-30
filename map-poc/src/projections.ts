@@ -1,12 +1,13 @@
 /*
- * The projections the map can be drawn in. Each has the same forward formula twice: in
- * JavaScript (d3-geo's "raw" projections, for the camera, picking and tile selection)
- * and in GLSL (for the vertex shader, see reproject-extension.ts). Both take radians
- * and return the projected point in d3's units (the equator is 2π long).
+ * The projections the flat map can be drawn in (the globe is MapLibre's: map.ts). Each
+ * has the same forward formula twice: in JavaScript (d3-geo's "raw" projections, for
+ * the camera, picking and tile selection) and in GLSL (for the vertex shaders, see
+ * reproject-extension.ts). Both take radians and return the point in d3's units (the
+ * equator is 2π long).
  *
  * Common space (what deck.gl's camera looks at) is these units times SCALE, so the
  * world is about 512 units wide at zoom 0, like deck.gl's Web Mercator world; zoom
- * levels then mean roughly the same thing as on the globe.
+ * levels then mean roughly the same as on the globe.
  */
 import { geoEqualEarthRaw, geoEquirectangularRaw, geoMercatorRaw, geoNaturalEarth1Raw, type GeoRawProjection } from "d3-geo";
 import { geoMollweideRaw, geoRobinsonRaw, geoWinkel3Raw } from "d3-geo-projection";
@@ -16,7 +17,10 @@ export const SCALE = 512 / (2 * Math.PI);
 /** Web Mercator cuts off at this latitude. */
 export const MAX_MERCATOR_LAT = 85.051129;
 
-export type ProjectionId = "mercator" | "robinson" | "equalEarth" | "naturalEarth" | "winkelTripel" | "mollweide" | "equirectangular";
+export type ProjectionId = "robinson" | "equalEarth" | "naturalEarth" | "winkelTripel" | "mollweide" | "equirectangular" | "mercator";
+
+/** What the map is drawn as: MapLibre's globe, or flat in one of the projections. */
+export type MapProjection = "globe" | ProjectionId;
 
 export interface Projection {
   id: ProjectionId;
@@ -24,9 +28,8 @@ export interface Projection {
   /** What the shader's switch picks it by (0 is Web Mercator: deck.gl's own). */
   glslId: number;
   raw: GeoRawProjection;
-  /** The pole is a line, not a point (the x factor at 90° is not 0). */
-  flatPoles: boolean;
-  note: string;
+  /** One line about it, for the picker. */
+  description: string;
 }
 
 const clampedMercator: GeoRawProjection = Object.assign(
@@ -38,15 +41,16 @@ const clampedMercator: GeoRawProjection = Object.assign(
 );
 
 export const PROJECTIONS: Projection[] = [
-  { id: "robinson", name: "Robinson", glslId: 1, raw: geoRobinsonRaw, flatPoles: true, note: "Compromise; FAO's and National Geographic's (1988–98) world map." },
-  { id: "equalEarth", name: "Equal Earth", glslId: 2, raw: geoEqualEarthRaw, flatPoles: true, note: "Equal-area (2018); Mapbox has it, MapLibre doesn't." },
-  { id: "naturalEarth", name: "Natural Earth", glslId: 3, raw: geoNaturalEarth1Raw, flatPoles: true, note: "Compromise, like Robinson with rounder corners." },
-  { id: "winkelTripel", name: "Winkel Tripel", glslId: 4, raw: geoWinkel3Raw, flatPoles: true, note: "Compromise; National Geographic since 1998. Meridians curve, so x depends on both λ and φ." },
-  { id: "mollweide", name: "Mollweide", glslId: 5, raw: geoMollweideRaw, flatPoles: false, note: "Equal-area; the poles are points." },
-  { id: "equirectangular", name: "Equirectangular", glslId: 6, raw: geoEquirectangularRaw, flatPoles: true, note: "Plate carrée: the WaPOR and GAEZ rasters' own grid (EPSG:4326)." },
-  { id: "mercator", name: "Web Mercator", glslId: 0, raw: clampedMercator, flatPoles: true, note: "deck.gl's own flat projection, for comparison; cut at ±85°." },
+  { id: "robinson", name: "Robinson", glslId: 1, raw: geoRobinsonRaw, description: "Compromise projection; FAO's world maps, National Geographic's 1988–98." },
+  { id: "equalEarth", name: "Equal Earth", glslId: 2, raw: geoEqualEarthRaw, description: "Equal-area (2018): countries keep their relative sizes." },
+  { id: "naturalEarth", name: "Natural Earth", glslId: 3, raw: geoNaturalEarth1Raw, description: "Compromise projection, like Robinson with rounder corners." },
+  { id: "winkelTripel", name: "Winkel Tripel", glslId: 4, raw: geoWinkel3Raw, description: "Compromise projection; National Geographic since 1998." },
+  { id: "mollweide", name: "Mollweide", glslId: 5, raw: geoMollweideRaw, description: "Equal-area; the poles are points, the map an ellipse." },
+  { id: "equirectangular", name: "Equirectangular", glslId: 6, raw: geoEquirectangularRaw, description: "Plate carrée: the WaPOR and GAEZ rasters' own grid." },
+  { id: "mercator", name: "Web Mercator", glslId: 0, raw: clampedMercator, description: "Web maps' usual projection, cut at ±85°; the poles are far away." },
 ];
 
+export const isProjectionId = (id: string): id is ProjectionId => PROJECTIONS.some((p) => p.id === id);
 export const projectionById = (id: ProjectionId) => PROJECTIONS.find((p) => p.id === id)!;
 
 /** Robinson's table (d3-geo-projection's, y already times 1.5934…), for the GLSL copy. */

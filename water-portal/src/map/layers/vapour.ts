@@ -120,8 +120,8 @@ void main() {
   float density = pow(clamp(here.x / vapour.reference, 0.0, 1.0), vapour.gamma);
   // Fewer the further from the camera, where the ground is squeezed on the screen, so the
   // puffs per pixel follow the water going up and not the tilt.
-  float wNear = project_position_to_clipspace(vec3(vapour.near, 0.0), vec3(0.0), vec3(0.0)).w;
-  float wHere = project_position_to_clipspace(vec3(lngLat, 0.0), vec3(0.0), vec3(0.0)).w;
+  float wNear = rp_project_to_clipspace(vec3(vapour.near, 0.0)).w;
+  float wHere = rp_project_to_clipspace(vec3(lngLat, 0.0)).w;
   density *= min(1.0, pow(wNear / wHere, 2.0));
   if (random(key, 3u) >= density || !facing(lngLat)) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
@@ -133,11 +133,11 @@ void main() {
   vec2 drift = vapour.wind / vec2(111320.0 * cos(radians(lngLat.y)), 111320.0);
   float phase = random(key, 6u) * 2.0 * VAPOUR_PI;
   float rise = riseAt(progress);
-  vec4 clip = project_position_to_clipspace(puffAt(lngLat, drift, rise), vec3(0.0), vec3(0.0));
+  vec4 clip = rp_project_to_clipspace(puffAt(lngLat, drift, rise));
   vec2 head = toScreen(clip, vapour.viewportSize) + vec2(swayAt(progress, rise, phase), 0.0);
   // Its trail: where it was a moment ago (long while it's quick, gone once it hangs).
   float before = max(progress - ${TRAIL}, 0.0);
-  vec4 clipBefore = project_position_to_clipspace(puffAt(lngLat, drift, riseAt(before)), vec3(0.0), vec3(0.0));
+  vec4 clipBefore = rp_project_to_clipspace(puffAt(lngLat, drift, riseAt(before)));
   vec2 tail = toScreen(clipBefore, vapour.viewportSize) + vec2(swayAt(before, riseAt(before), phase), 0.0);
 
   // A quad on the screen around the head and its trail.

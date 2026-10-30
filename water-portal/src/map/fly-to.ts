@@ -26,7 +26,7 @@ const MAX_SPAN = 170;
  */
 export function flyTo(map: WaterMap, own: Extent[], extra: Extent | null) {
   if (!own.length) return;
-  const showGlobe = (center: [number, number]) => map.showPoint(center, Math.min(map.map.getZoom(), GLOBE_ZOOM));
+  const showGlobe = (center: [number, number]) => map.showPoint(center, Math.min(map.getZoom(), GLOBE_ZOOM));
   const region = unionBox(own.map((x) => x.box));
   const both = extra === null ? region : unionBox([region, extra.box]);
   if (fits(both)) return map.showBox(both);

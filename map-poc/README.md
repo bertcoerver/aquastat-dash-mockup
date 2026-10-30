@@ -6,6 +6,15 @@ same deck.gl layers and the same tiles the water portal uses: FAO's M49 countrie
 UN boundary lines, the SDG 6 major basins, HydroLAKES, the rivers, a WaPOR raster. The
 projection can be changed while the map is shown: it morphs from one to the next.
 
+**Now in the portal.** The four modules below live on in
+[../water-portal/src/map/flat/](../water-portal/src/map/flat/) (the same code; the
+copies here are kept in step), behind the Layers menu's "Map" dropdown: the globe, or a
+flat map in any of these projections. What the portal added: a host interface
+(`water-portal/src/map/host.ts`) so MapLibre's globe and the flat `Deck` are
+interchangeable at the same place and zoom, the effect layers (rain, vapour, haze,
+particles) projecting through the same shader module, labels as HTML elements placed by
+either host, and the map's own zoom, compass and credits controls.
+
 ```bash
 npm install
 npm run dev        # http://localhost:5174  (#robinson, #equalEarth, … in the URL)
@@ -60,12 +69,23 @@ is yes, with three small pieces that need no change to deck.gl itself.
    same shader mixing two projections (`t` from 0 to 1), with the viewport blending
    the same two on the JavaScript side.
 
-And one workaround in [src/layers.ts](src/layers.ts): deck.gl's tileset picks tiles
-by walking the tile tree and testing each tile's box, in Mercator common space,
+And one workaround, [src/box-tileset.ts](src/box-tileset.ts): deck.gl's tileset picks
+tiles by walking the tile tree and testing each tile's box, in Mercator common space,
 against the camera's frustum. With a camera in another projection the two don't
 match and it keeps one tile. `BoxTileset` picks the tiles under the viewport's
 lon/lat bounds instead (the portal's WaPOR layer already picks its own tiles this
-way for the globe).
+way for the globe). As deck.gl's, it loads nothing below a layer's `minZoom` (the
+rivers from zoom 5), rather than the whole world at that zoom.
+
+Since the first version: zoomed in from zoom 12, deck.gl keeps positions relative to
+the view's centre for precision (its "offset mode"); the extension now takes the same
+difference relative to the centre, so the map stays sharp as far in as zoom 15 (it used to
+drift past zoom 12). The viewport's inverse off the map is one rule (the latitude from the
+central meridian, the longitude by the map's width there, with a floor where the poles are
+points) rather than three special cases, and its class carries `forward` / `invert` as
+statics so the camera can be moved without a viewport. The view's props are typed from
+deck.gl's exports rather than a path into `node_modules`. The morph only replaces the view
+each frame; the layers stay, and their shaders read the blend.
 
 ## What the POC shows working
 
@@ -111,10 +131,10 @@ way for the globe).
   one dependency) rather than hook after it.
 - **Sizes in metres** (`lineWidthUnits: "meters"`, bar heights) use Mercator's scale
   at the centre latitude. Pixel units are exact.
-- **Precision at high zoom**: the extension works in deck.gl's "no offset" Mercator
-  mode (common space is 32-bit float). Up to about zoom 12 that's sub-pixel; the
-  portal's Local view zooms further, and there the globe (or plain Web Mercator) is
-  the right projection anyway: Robinson is a world map.
+- **Precision at high zoom**: common space is 32-bit float in the shader. Relative to
+  the view's centre (deck.gl's offset mode, from zoom 12) that's within a pixel up to
+  about zoom 15; the portal caps the flat map there, and the globe goes further. Robinson
+  is a world map anyway.
 - **The seam**: a Robinson map has an edge at ±180°, where the globe has none; Mercator
   tiles are already cut there, so nothing crosses it. Russia's Chukotka and Fiji's
   eastern islands sit at the left edge.

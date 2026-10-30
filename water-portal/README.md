@@ -1,6 +1,8 @@
 # Water Portal
 
-A map of the world (MapLibre globe + deck.gl) under a top bar for choosing the view
+A map of the world (MapLibre globe + deck.gl, or deck.gl alone as a flat map in a
+projection chosen in the Layers menu: Robinson, Equal Earth, Natural Earth, Winkel Tripel,
+Mollweide, equirectangular or Web Mercator) under a top bar for choosing the view
 (Country / Basin / Local) and a date range. The map has no basemap: it shows FAO's
 M49 countries (or, in the Basin view, the SDG 6 major basins), with lakes and rivers
 on top. In the Local view, the map shows a WaPOR variable (actual or reference evapotranspiration and its parts, precipitation, NPP, …) for any
@@ -103,7 +105,19 @@ water-portal/
     │   ├── drag.ts         A pointer drag, its listeners taken off at the end
     │   └── popover.ts      What closes a popup: Escape, a press elsewhere, the focus leaving, a resize
     ├── map/
-    │   ├── map.ts          MapLibre globe + deck.gl overlay; layer order, view, clicks
+    │   ├── map.ts          The layers (order, view, clicks) on a host; the projection switch
+    │   ├── host.ts         What draws the layers: the globe or the flat map (the interface)
+    │   ├── globe-host.ts   MapLibre's globe with deck.gl's layers drawn into it
+    │   ├── controls.ts     Zoom, compass and credits, for either host
+    │   ├── spin.ts         The globe's spin button
+    │   ├── flat/           The flat map in any projection (from ../map-poc)
+    │   │   ├── flat-host.ts  deck.gl alone, in a ProjectedView; the morph between projections; camera moves
+    │   │   ├── projections.ts  Robinson, Equal Earth, …: d3-geo's formulas, and the same in GLSL
+    │   │   ├── projected-viewport.ts  The camera, picking, tile bounds and panning in a projection
+    │   │   ├── projected-view.ts  The view and its controller (held still while the marker is dragged)
+    │   │   ├── reproject-extension.ts  Moves every layer's vertices from Web Mercator to the projection
+    │   │   ├── box-tileset.ts  Which tiles to load: those under the view's lon/lat bounds
+    │   │   └── world-layers.ts  The ocean (the map's outline) and Antarctica's last degrees
     │   ├── theme.ts        Map colours (light and dark)
     │   ├── places.ts       What's at a point: country, major basin, sub-basin
     │   ├── sub-basin-network.ts  Sub-basins upstream of a sub-basin
@@ -164,7 +178,7 @@ water-portal/
     │   ├── cards.ts        Per topic: the number tiles and charts, and each one's map
     │   └── country-panel.ts  The panel, preview / pin, the map colours, legend and tooltips
     ├── panels/
-    │   ├── layers-menu.ts  The "Layers" button: switch rivers and lakes on/off
+    │   ├── layers-menu.ts  The "Layers" button: the map's projection, rivers and lakes on/off, the theme
     │   ├── map-drivers.ts  Chart cards that drive the map: hover previews, click pins (both panels)
     │   ├── stat-panel.ts   The Country and Basin panels' core: the preview, the pin, the legend's checklist, the maps on the map
     │   ├── legend.ts       The Basin and Country legends: a checklist of maps, a section per layer
@@ -201,6 +215,25 @@ water-portal/
 
 ## Notes
 
+- **Globe or flat map** ([src/map/host.ts](src/map/host.ts)): the Layers menu's "Map" picks the
+  globe (MapLibre, with deck.gl's layers drawn into it) or a flat map in one of seven projections,
+  drawn by deck.gl alone ([src/map/flat/](src/map/flat/), from [../map-poc](../map-poc)). MapLibre has
+  no projection but Mercator and the globe, so the flat map is a `Deck` of its own: a `Viewport`
+  subclass does what `WebMercatorViewport` does for a Mercator map (the camera, picking, which tiles
+  to load, panning) with d3-geo's projection formulas, and a `LayerExtension` on every layer moves
+  each vertex, in the vertex shader, from where Web Mercator put its anchor to where the projection
+  does, so deck.gl's layers draw unchanged (offsets in pixels, a circle's radius or a line's width, come
+  along). The layers that project in shaders of their own (rain, vapour, haze, particles) include the
+  same module. From one flat projection to another the map morphs (the shader mixes the two
+  formulas over 0.8 s); to or from the globe it switches hosts at the same place and zoom, the new
+  one taking over once it has drawn. The map's controls (zoom, compass, credits,
+  [src/map/controls.ts](src/map/controls.ts)) are the portal's own, so they work on both; the spin
+  button is the globe's. Labels (the graticule's longitudes, a dam's name) are HTML elements either
+  host places. Zoomed in past zoom 12, deck.gl keeps positions relative to the view's centre and the
+  extension follows, so the flat map stays sharp up to its zoom 15; the globe goes further. Known
+  limits: wide lines near a map's sides lean a little (a path's joints are laid out in Mercator before
+  the vertex is moved), sizes in metres use Mercator's scale at the centre, and a box across 180°
+  can't be framed in one piece (its bigger part is). The projection is in the URL (`projection=`).
 - **Country statistics** come from FAO's AQUASTAT dissemination table
   (`fao-maps.fao_aquastat_dissemination.mvw_aquastat`) through the same BigQuery proxy as the
   Basin view's model, one query per topic (~300 KB, a few seconds), from 2010. Years after
@@ -530,10 +563,10 @@ water-portal/
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
 - **The URL keeps the state** (`src/url-state.ts`), so a view can be shared as a link: the
-  map's place and zoom (`map=zoom/lat/lon`, MapLibre's), the view, what is selected (a
-  country or region, a basin or sub-basin, the Local view's point and dam), the date
-  range, and the view's panel: its topic or scope, the chart pinned and the maps checked.
-  Written as the state changes, read once on load.
+  map's place and zoom (`map=zoom/lat/lon`, MapLibre's form, written for either host), its
+  projection if not the globe, the view, what is selected (a country or region, a basin or
+  sub-basin, the Local view's point and dam), the date range, and the view's panel: its topic
+  or scope, the chart pinned and the maps checked. Written as the state changes, read once on load.
 
 Data: FAO M49 boundaries (`boundaries:m49_geom` on FAO's GeoServer); FAO SDG 6 major
 basins and sub-basins; HydroLAKES v1.0; rivers from HydroSHEDS; FAO WaPOR v3. Boundaries do not

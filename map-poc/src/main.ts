@@ -130,14 +130,14 @@ for (const p of PROJECTIONS) {
   select.append(option);
 }
 select.value = start.id;
-note.textContent = start.note;
+note.textContent = start.description;
 
 const MORPH_MS = 800;
 let morph = 0;
 function switchTo(id: ProjectionId) {
   const to = projectionById(id);
   const from = state.blend.to;
-  note.textContent = to.note;
+  note.textContent = to.description;
   window.location.hash = id;
   if (from === to) return;
   const started = performance.now();
@@ -148,7 +148,8 @@ function switchTo(id: ProjectionId) {
     const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2; // ease in-out
     state.blend = { from, to, t: e };
     setReprojection(to, from, e);
-    deck.setProps({ views: [view()], layers: layers() });
+    // (A new view redraws the layers, whose shaders read the blend: the layers stay.)
+    deck.setProps({ views: [view()] });
     if (t < 1) requestAnimationFrame(frame);
   };
   frame();

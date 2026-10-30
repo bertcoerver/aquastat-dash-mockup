@@ -172,6 +172,9 @@ const waterMap = createMap(
   document.getElementById("map")!,
   {
     dark,
+    // The globe, or flat in the URL's projection (the Layers menu switches).
+    projection: opened.projection,
+    onProjection: () => syncUrl(),
     // A click on the ocean (no country or basin) clears the selection.
     // (A click on a dam in the Local view: the dam, where it is.)
     onClick(lngLat, onArea, symbol, drawn) {
@@ -185,8 +188,8 @@ const waterMap = createMap(
     onSymbolHover: (id, x, y, lngLat) => localMaps?.hover(id, x, y, lngLat),
   },
 );
-const { map, setView, setLayerVisible, setSelection, showBox, showPoint, setHovered } = waterMap;
-initCrashWarning(map);
+const { setView, setLayerVisible, setSelection, showBox, showPoint, setHovered } = waterMap;
+initCrashWarning(waterMap);
 
 const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadList<Country>("countries"),
@@ -275,12 +278,12 @@ const picker = initPlacePicker({
   },
   onPoint(lngLat) {
     void selectPoint(lngLat, "coordinates");
-    if (lngLat) showPoint(lngLat, Math.max(map.getZoom(), 5), "ease");
+    if (lngLat) showPoint(lngLat, Math.max(waterMap.getZoom(), 5), "ease");
   },
   // A dam by name: it, where it is (closer in than a point by coordinates).
   onFeature(feature, lngLat) {
     void selectPoint(lngLat, "coordinates", feature);
-    showPoint(lngLat, Math.max(map.getZoom(), 8), "fly");
+    showPoint(lngLat, Math.max(waterMap.getZoom(), 8), "fly");
   },
   onDropFeature: () => void selectPoint(selection.get().lngLat, "coordinates"),
   onDamCountry: (box) => showBox(box),
@@ -313,6 +316,7 @@ function syncUrl() {
     const panel = view === "country" ? countryPanel.picks() : view === "basin" ? basinStats.picks() : null;
     writeUrlState({
       view,
+      projection: waterMap.getProjection(),
       country: s.country?.m49,
       region: s.region?.code,
       basin: s.subBasin ? undefined : s.majorBasin?.id,
@@ -351,12 +355,8 @@ for (const id of ["cp-panel", "wb-panel", "lp-panel"]) {
   makeFoldable($(id));
 }
 
-// The Layers button goes with the map's controls, above zoom (MapLibre stacks later
-// bottom controls on top).
-const layersBox = document.createElement("div");
-layersBox.className = "maplibregl-ctrl maplibregl-ctrl-group";
-layersBox.append($("layers-menu"));
-waterMap.map.addControl({ onAdd: () => layersBox, onRemove: () => layersBox.remove() }, "bottom-right");
+// The Layers button goes with the map's controls, on top.
+waterMap.addControl($("layers-menu"));
 
 // The date range goes in the middle of the strip along the bottom between the graph
 // pane (when it reaches down there, folded) and the map's controls. (Not the credits:
@@ -394,7 +394,8 @@ for (const el of [...graphPanes, rangePane]) rangeObserver.observe(el);
 new MutationObserver(fitRange).observe(rangePane, { attributes: true, attributeFilter: ["class"] });
 window.addEventListener("resize", fitRange);
 
-const layersMenu = initLayersMenu(setLayerVisible);
+const layersMenu = initLayersMenu(setLayerVisible, (projection) => waterMap.setProjection(projection));
+layersMenu.setProjection(waterMap.getProjection());
 
 // Local view: a WaPOR variable (picked in the legend) for the selected range, on the map
 // (local/wapor-raster.ts, which owns its legend and playback).

@@ -5,9 +5,10 @@
  */
 import type { Color, Layer } from "@deck.gl/core";
 import { PathStyleExtension } from "@deck.gl/extensions";
-import { MVTLayer, _Tileset2D as Tileset2D } from "@deck.gl/geo-layers";
+import { MVTLayer } from "@deck.gl/geo-layers";
 import { BitmapLayer, ColumnLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import type { Feature } from "geojson";
+import { BoxTileset } from "./box-tileset";
 
 export const THEME = {
   ocean: [212, 225, 231, 255] as Color,
@@ -26,36 +27,6 @@ const FAO_TILES = (name: string) => `https://storage.googleapis.com/fao-cog-data
 const ignoreMissingTile = () => {};
 /** All layers lie in one plane: no depth test (the bars are the exception). */
 const FLAT = { depthCompare: "always" as const };
-
-/**
- * Which tiles to load: those under the viewport's lon/lat bounds (ProjectedViewport's
- * getBounds). deck.gl's own tileset walks the tile tree testing each tile's box, in
- * Web Mercator's common space, against the camera's frustum; with the camera in
- * another projection the two don't match and it keeps one tile. (The portal's WaPOR
- * layer picks its own tiles the same way, for the globe.)
- */
-class BoxTileset extends Tileset2D {
-  getTileIndices({ viewport, maxZoom, minZoom, zoomOffset = 0 }: Parameters<Tileset2D["getTileIndices"]>[0]) {
-    let z = Math.round(viewport.zoom + zoomOffset);
-    if (minZoom !== undefined && z < minZoom) z = minZoom;
-    if (maxZoom !== undefined && z > maxZoom) z = maxZoom;
-    const [west, south, east, north] = viewport.getBounds();
-    if (west >= east || south >= north) return [];
-    const n = 2 ** z;
-    const tileX = (lon: number) => ((lon + 180) / 360) * n;
-    const tileY = (lat: number) => {
-      const r = (lat * Math.PI) / 180;
-      return ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n;
-    };
-    const x0 = Math.max(0, Math.floor(tileX(west)));
-    const x1 = Math.min(n - 1, Math.ceil(tileX(east)) - 1);
-    const y0 = Math.max(0, Math.floor(tileY(north)));
-    const y1 = Math.min(n - 1, Math.ceil(tileY(south)) - 1);
-    const indices = [];
-    for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) indices.push({ x, y, z });
-    return indices;
-  }
-}
 
 /** What every tile layer shares. */
 const TILES = { TilesetClass: BoxTileset, onTileError: ignoreMissingTile, parameters: FLAT };

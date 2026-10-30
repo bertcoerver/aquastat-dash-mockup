@@ -118,8 +118,8 @@ void main() {
     float zTail = zHead + rain.lengthM;
     vec3 head = vec3(lngLat + drift * zHead, zHead);
     vec3 tail = vec3(lngLat + drift * zTail, zTail);
-    vec4 c0 = project_position_to_clipspace(head, vec3(0.0), vec3(0.0));
-    vec4 c1 = project_position_to_clipspace(tail, vec3(0.0), vec3(0.0));
+    vec4 c0 = rp_project_to_clipspace(head);
+    vec4 c1 = rp_project_to_clipspace(tail);
     vec2 s0 = toScreen(c0, rain.viewportSize);
     vec2 s1 = toScreen(c1, rain.viewportSize);
     vec2 d = s1 - s0;
@@ -139,7 +139,7 @@ void main() {
     float r = rain.splashM * (0.3 + 0.7 * splash);
     vec2 offset = vec2(side, corner * 2.0 - 1.0) * r;
     vec2 degreesOffset = offset / vec2(111320.0 * cos(radians(lngLat.y)), 110540.0);
-    gl_Position = project_position_to_clipspace(vec3(lngLat + degreesOffset, 0.0), vec3(0.0), vec3(0.0));
+    gl_Position = rp_project_to_clipspace(vec3(lngLat + degreesOffset, 0.0));
     vAlpha = 1.0 - splash;
   }
 }`;

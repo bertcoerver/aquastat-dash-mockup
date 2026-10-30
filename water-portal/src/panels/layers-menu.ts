@@ -1,7 +1,8 @@
 /*
- * The Layers button and its small menu of on/off switches and the theme.
- * The markup lives in index.html; each layer checkbox names its layer in data-layer.
- * main.ts puts it among the map's controls.
+ * The Layers button and its small menu: the map's projection (the globe, or flat in one
+ * of flat/projections.ts's), on/off switches for the layers, and the theme. The markup
+ * lives in index.html; each layer checkbox names its layer in data-layer, the
+ * projection's options are made here. main.ts puts it among the map's controls.
  *
  * Each view keeps its own switches: rivers and lakes start off in the Local view (they'd
  * cover the WaPOR raster), on in the others. The graticule starts off everywhere. The
@@ -10,6 +11,7 @@
  * The outlines of countries, basins and sub-basins: the view's own (FIXED) stay on and
  * can't be switched; the others start as they were drawn before there were switches.
  */
+import { PROJECTIONS, type MapProjection } from "../map/flat/projections";
 import type { ToggleableLayer } from "../map/map";
 import type { View } from "../toolbar/range-rules";
 
@@ -29,12 +31,26 @@ const FIXED: Record<View, ToggleableLayer[]> = {
 export interface LayersMenu {
   /** Show a view's switches, and its layers on the map. */
   setView(view: View): void;
+  /** Show the map's projection as chosen (the URL's, at the start). */
+  setProjection(projection: MapProjection): void;
 }
 
-export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boolean) => void): LayersMenu {
+export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boolean) => void, onProjection: (projection: MapProjection) => void): LayersMenu {
   const menu = document.getElementById("layers-menu")!;
   const button = document.getElementById("layers-button")!;
   const panel = document.getElementById("layers-panel")!;
+
+  // The projection: the globe, then the flat maps (each option says what it's good for).
+  const projection = document.getElementById("projection-select") as HTMLSelectElement;
+  const option = (value: string, text: string, title: string) => {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = text;
+    o.title = title;
+    return o;
+  };
+  projection.append(option("globe", "Globe", "The Earth as it is: no distortion, one side at a time."), ...PROJECTIONS.map((p) => option(p.id, p.name, p.description)));
+  projection.addEventListener("change", () => onProjection(projection.value as MapProjection));
 
   function setOpen(open: boolean) {
     panel.hidden = !open;
@@ -65,6 +81,9 @@ export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boole
   }
 
   return {
+    setProjection(next) {
+      projection.value = next;
+    },
     setView(next) {
       if (next === view) return;
       view = next;

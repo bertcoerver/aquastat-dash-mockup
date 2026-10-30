@@ -297,7 +297,7 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   const styleOf = (spec: MapSpec, slot: Shape) => styles.get(spec.title, initialStyle(spec, slot), signed(spec));
 
   // The map tooltip follows the pointer (to its right).
-  const mapEl = map.map.getContainer();
+  const mapEl = map.container;
   mapEl.addEventListener("pointermove", (e) => {
     tooltip.style.left = `${e.clientX + 14}px`;
     tooltip.style.top = `${e.clientY + 14}px`;

@@ -130,6 +130,25 @@ try {
     // (Its cards need the model output, which a checkout doesn't have.)
     if (await page.locator("#bs-cards [data-driver]").count()) await hoverCard("#bs-cards [data-driver]");
   });
+  await step("flat map: Robinson, a morph to Equal Earth, back to the globe", async () => {
+    const pick = async (value) => {
+      await page.click("#layers-button");
+      await page.selectOption("#projection-select", value);
+      await page.keyboard.press("Escape");
+    };
+    await pick("robinson");
+    await page.waitForFunction(() => !!document.querySelector(".map-flat canvas"), null, { timeout: 10000 });
+    await page.waitForTimeout(3000);
+    await pick("equalEarth");
+    await page.waitForTimeout(1500);
+    await page.mouse.move(640, 430);
+    await page.mouse.wheel(0, -300);
+    await page.waitForTimeout(1500);
+    if (!/projection=equalEarth/.test(await page.evaluate(() => window.location.hash))) throw new Error("the projection isn't in the URL");
+    await pick("globe");
+    await page.waitForFunction(() => !!document.querySelector(".map-globe canvas") && !document.querySelector(".map-flat"), null, { timeout: 10000 });
+    await page.waitForTimeout(2000);
+  });
   await step("hover the globe", async () => {
     for (let i = 0; i < 8; i++) {
       await page.mouse.move(600 + i * 15, 400 + i * 5);

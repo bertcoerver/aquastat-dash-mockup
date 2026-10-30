@@ -44,6 +44,7 @@
  * need only the first two.
  */
 import type { Viewport } from "@deck.gl/core";
+import { isProjectedViewport } from "../flat/projected-viewport";
 import { type DayRange } from "../../toolbar/range-rules";
 import type { LngLat } from "../places";
 import type { WaporLayerProps } from "./wapor-layer";
@@ -197,6 +198,12 @@ export function visibleBox(viewport: Viewport): Box | null {
   return box;
 }
 function visibleBoxOnce(viewport: Viewport): Box | null {
+  // The flat map: its viewport knows its bounds (the plane goes on past its edges, so
+  // the globe's test below would find no edge).
+  if (isProjectedViewport(viewport)) {
+    const [west, south, east, north] = viewport.getBounds();
+    return west < east && south < north ? { west, south, east, north } : null;
+  }
   const { width, height } = viewport;
   const longitude = viewport.unproject([width / 2, height / 2])[0];
   // Off the globe, unproject gives the nearest point on the horizon instead; that

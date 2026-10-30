@@ -149,3 +149,25 @@
   accent-color: var(--accent);
   margin: 0;
 }
+/* The projection: a dropdown in the panel's own type. */
+.layers-panel .layers-select {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  cursor: default;
+}
+.layers-panel .layers-select:hover {
+  background: none;
+}
+.layers-panel select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 3px 6px;
+  cursor: pointer;
+}

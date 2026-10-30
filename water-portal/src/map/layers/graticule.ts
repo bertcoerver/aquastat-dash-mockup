@@ -1,6 +1,6 @@
 import { PathStyleExtension, type PathStyleExtensionProps } from "@deck.gl/extensions";
 import { PathLayer } from "@deck.gl/layers";
-import maplibregl from "maplibre-gl";
+import type { MapHost } from "../host";
 import type { Color } from "../theme";
 
 /** Meridians every this many degrees of longitude. */
@@ -67,28 +67,27 @@ export function graticuleLayer({ color, visible }: { color: Color; visible: bool
 }
 
 /**
- * The meridians' longitudes, as MapLibre markers (HTML, styled in map.css): deck.gl's
+ * The meridians' longitudes, as the host's markers (HTML, styled in map.css): deck.gl's
  * TextLayer draws nothing on this globe (deck.gl inside MapLibre's), and MapLibre knows
  * when a marker is on the far side.
  */
-export function graticuleLabels(map: maplibregl.Map) {
+export function graticuleLabels(host: MapHost, visible: boolean) {
   const markers = LABELS.map(({ position, text }) => {
     const element = document.createElement("div");
     element.className = "graticule-label";
     element.textContent = text;
     // Beside the line, above it.
-    // (Hidden, not faded, on the far side.)
-    return new maplibregl.Marker({ element, anchor: "bottom-left", offset: [3, -1], opacityWhenCovered: "0" }).setLngLat(position);
+    return { marker: host.marker(element, { anchor: "bottom-left", offset: [3, -1] }), position };
   });
   let shown = false;
-  return {
-    show(visible: boolean) {
-      if (visible === shown) return;
-      shown = visible;
-      for (const marker of markers) {
-        if (visible) marker.addTo(map);
-        else marker.remove();
-      }
-    },
+  const show = (on: boolean) => {
+    if (on === shown) return;
+    shown = on;
+    for (const { marker, position } of markers) {
+      if (on) marker.show(position);
+      else marker.hide();
+    }
   };
+  show(visible);
+  return { show };
 }

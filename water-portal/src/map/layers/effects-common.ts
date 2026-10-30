@@ -4,11 +4,16 @@
  * parameters, GLSL for random numbers, the globe's far side, Web Mercator and the grid's
  * texture coordinates, a uniform block declared once (from its types), and the layer
  * itself: one model drawn with the grid's texture, made and freed the same way.
+ *
+ * These layers project in shaders of their own, so they draw in the flat map's
+ * projection by including its module (flat/reproject-extension.ts) and projecting
+ * through rp_project_to_clipspace; on the globe it leaves positions as they are.
  */
 import { Layer, project32, type LayerContext, type UpdateParameters, type Viewport } from "@deck.gl/core";
 import type { Device, Texture } from "@luma.gl/core";
 import { Model, type ModelProps } from "@luma.gl/engine";
 import type { ShaderModule } from "@luma.gl/shadertools";
+import { reprojectModule, reprojectUniforms } from "../flat/reproject-extension";
 
 /** A grid of values: row 0 north, `channels` bytes a cell (0–255, relative to the layer's reference). */
 export interface EffectGrid {
@@ -177,7 +182,7 @@ export abstract class GridEffectLayer<P extends { grid: EffectGrid }> extends La
 
   initializeState(context: LayerContext) {
     const { vs, fs, modules, ...rest } = this.shaders();
-    const model = new Model(context.device, { ...this.getShaders({ vs, fs, modules: [project32, ...modules] }), id: `${this.props.id}-model`, ...rest });
+    const model = new Model(context.device, { ...this.getShaders({ vs, fs, modules: [project32, reprojectModule, ...modules] }), id: `${this.props.id}-model`, ...rest });
     this.setState({ model, texture: null });
   }
 
@@ -198,11 +203,12 @@ export abstract class GridEffectLayer<P extends { grid: EffectGrid }> extends La
     this.state.texture?.destroy();
   }
 
-  /** This frame's view of the grid (null: none of it is in view, or there's no texture yet). */
+  /** This frame's view of the grid (null: none of it is in view, or there's no texture yet); the map's projection set for the shaders. */
   protected frame(): Frame | null {
     const viewport = this.context.viewport;
     const region = viewRegion(viewport, this.props.grid.bounds);
     if (!region || !this.state.texture) return null;
+    this.state.model.shaderInputs.setProps({ reproject: reprojectUniforms() });
     return { viewport, region, dpr: this.context.device.getDefaultCanvasContext().cssToDeviceRatio(), metresPerPixel: viewport.metersPerPixel };
   }
 }

@@ -1,13 +1,22 @@
 /*
- * The map: a MapLibre globe with deck.gl layers drawn into it (interleaved), so
- * deck.gl uses a GlobeView that moves with MapLibre's camera. There is no basemap:
- * MapLibre only paints the ocean, and all data are deck.gl layers.
+ * The map: deck.gl layers on a host (host.ts) that draws them: MapLibre's globe with the
+ * layers drawn into it (globe-host.ts), or deck.gl alone, flat, in a chosen projection
+ * (flat/flat-host.ts). There is no basemap: the ocean is painted, and all data are
+ * deck.gl layers. The host can be switched while the map is shown (setProjection): the
+ * new one takes over at the same place, with the same layers.
  */
 import type { Layer, PickingInfo } from "@deck.gl/core";
-import { MapboxOverlay } from "@deck.gl/mapbox";
-import maplibregl from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import { MVTLayer } from "@deck.gl/geo-layers";
 import type { View } from "../toolbar/range-rules";
+import { readMapHash, writeMapHash } from "../url-state";
+import { attributionControl, navigationControl } from "./controls";
+import { BoxTileset } from "./flat/box-tileset";
+import { createFlatHost, type FlatHost } from "./flat/flat-host";
+import { isProjectionId, type MapProjection } from "./flat/projections";
+import { ReprojectExtension, setReprojection } from "./flat/reproject-extension";
+import { oceanLayer, polarCapLayer } from "./flat/world-layers";
+import { createGlobeHost } from "./globe-host";
+import { canvasPoint, facing, type Camera, type HostOptions, type MapHost } from "./host";
 import { basinOutlinesLayer, majorBasinsLayers, subBasinOutlinesLayer, subBasinsLayers, type BasinFills } from "./layers/basins";
 import { bordersLayer } from "./layers/borders";
 import { graticuleLabels, graticuleLayer } from "./layers/graticule";
@@ -23,9 +32,11 @@ import { onWaporLevel, prepareWapor, waporLayer, waporReady, waporShownLevel } f
 import type { WaporRamp } from "./layers/wapor-shader";
 import { lakesLayer, riversLayer } from "./layers/water";
 import type { LngLat, Place } from "./places";
-import { spinControl } from "./spin";
 import { THEMES, type Color, type MapTheme } from "./theme";
 import { animate as ease, createFade, createTween, easeOut, linear, type Fade, type Timing } from "./tween";
+
+export { facing } from "./host";
+export type { MapProjection } from "./flat/projections";
 
 /** Layers the user can switch on and off (see the layers menu). */
 /** Map layers with a switch in the Layers menu (upstream, downstream: what hovering a sub-basin picks out). */
@@ -48,7 +59,19 @@ const NONE = new Set<number>();
 export type StatView = "country" | "basin" | "local";
 
 export interface WaterMap {
-  map: maplibregl.Map;
+  /** The map's element (#map), where the tooltips follow the pointer. */
+  container: HTMLElement;
+  getZoom(): number;
+  getCenter(): LngLat;
+  /** The camera moved (every frame), or stopped. */
+  on(event: "move" | "moveend", listener: () => void): void;
+  /** The map's graphics context was lost (crash-warning.ts). */
+  onContextLost(listener: () => void): void;
+  /** Put an element at the top of the map's controls (bottom right), in a group of its own. */
+  addControl(element: HTMLElement): void;
+  /** Draw the map as the globe, or flat in a projection (flat/projections.ts); from one flat projection to another it morphs. */
+  setProjection(projection: MapProjection): void;
+  getProjection(): MapProjection;
   /** Show the areas for a toolbar view: basins in the Basin view, else countries. */
   setView(view: View): void;
   setLayerVisible(layer: ToggleableLayer, visible: boolean): void;
@@ -153,6 +176,10 @@ interface MapSelection {
 
 interface MapOptions {
   dark: boolean;
+  /** How the map opens: the globe unless told otherwise (the URL's). */
+  projection?: MapProjection;
+  /** The projection changed (setProjection). */
+  onProjection?: (projection: MapProjection) => void;
   /**
    * A click anywhere: the point on the globe (null off the globe), and whether it hit
    * a country or basin (whichever is shown) rather than the ocean; in the Local view,
@@ -184,10 +211,14 @@ const EASE_MS = 400;
 /** How near the marker a press picks it up, in pixels. */
 const MARKER_GRAB = 10;
 
-export function createMap(container: HTMLElement, { dark, onClick, onHover, onMarkerDrop, onSymbolHover }: MapOptions): WaterMap {
+/** Where the map opens without a place in the URL. */
+const HOME: Camera = { center: [20, 15], zoom: 1.6, pitch: 0, bearing: 0 };
+
+export function createMap(container: HTMLElement, { dark, projection = "globe", onProjection, onClick, onHover, onMarkerDrop, onSymbolHover }: MapOptions): WaterMap {
   const theme = dark ? THEMES.dark : THEMES.light;
   const state = {
     view: "country" as View,
+    projection,
     selection: { lngLat: null, feature: null, country: null, majorBasin: null, subBasin: null } as MapSelection,
     visible: { rivers: true, lakes: true, graticule: false, upstream: true, downstream: true, countries: true, basins: false, subBasins: false } as Record<ToggleableLayer, boolean>,
     wapor: null as WaporEntry | null,
@@ -241,52 +272,91 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     return { lines: shown(schemeTweens.lines), arrows: shown(schemeTweens.arrows), transition: timing() };
   };
 
-  const map = new maplibregl.Map({
-    container,
-    style: {
-      version: 8,
-      projection: { type: "globe" },
-      sources: {},
-      layers: [{ id: "ocean", type: "background", paint: { "background-color": theme.ocean } }],
-    },
-    center: [20, 15],
-    zoom: 1.6,
-    // (As a parameter among the page's others: see url-state.ts.)
-    hash: "map",
-    attributionControl: {
-      compact: true,
-      customAttribution: "FAO M49 &amp; SDG 6 basins · HydroLAKES · HydroSHEDS",
-    },
-  });
-  // The URL keeps the place and the zoom, not a tilt or turn (the bars' tilt, say):
-  // always opened flat, north up.
-  map.jumpTo({ pitch: 0, bearing: 0 });
-  // MapLibre skips its ResizeObserver's first report, taking it for the size the map was
-  // made at. Safari can lay the page out again in between (a tab opened in the
-  // background, a window being restored), and the map then stays at that first size —
-  // a small globe in the top-left — until reloaded. Catch it up whenever the two differ.
-  new ResizeObserver(() => {
-    const canvas = map.getCanvas();
-    if (canvas.clientWidth !== container.clientWidth || canvas.clientHeight !== container.clientHeight) map.resize();
-  }).observe(container);
-  // Let go mid-drag, the globe spins on for a while (MapLibre's own inertia stops short).
-  map.dragPan.enable({
-    linearity: 0.6,
-    easing: (t) => 1 - Math.pow(1 - t, 3),
-    maxSpeed: 20000,
-    deceleration: 60,
-  });
-  // The compass shows the tilt too: dragged, it turns and tilts the map; clicked, it
-  // puts it back flat, north up.
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "bottom-right");
-  // Above them, a button to set the globe spinning.
-  map.addControl(spinControl(map), "bottom-right");
-  // The graticule's longitudes: markers, shown with its lines.
-  const graticuleNames = graticuleLabels(map);
-  // The picked point's name (a dam's), beside its target: a marker too (deck.gl draws no text here).
+  // --- The host: the globe, or the flat map, drawing the layers (host.ts). ---------------------
+
+  // The map's controls, in its bottom-right corner, over whichever host (MapLibre's class
+  // names: its stylesheet lays them out; main.ts adds the Layers button on top).
+  const controls = document.createElement("div");
+  controls.className = "maplibregl-ctrl-bottom-right map-controls";
+  const navigation = navigationControl(() => host);
+  controls.append(navigation.element, attributionControl());
+  container.append(controls);
+
+  const listeners = { move: [] as (() => void)[], moveend: [] as (() => void)[], contextlost: [] as (() => void)[] };
+  // (Made at the end, once everything it draws with is set up.)
+  let host!: MapHost;
+
+  /** The place the URL opened with, else home; always opened flat, north up. */
+  function openingCamera(): Camera {
+    const opened = readMapHash();
+    return opened ? { ...HOME, center: opened.center, zoom: opened.zoom } : HOME;
+  }
+
+  function makeHost(projection: MapProjection, camera: Camera): MapHost {
+    // (Its callbacks only count while it's the host: the one before answers until it's gone.)
+    let made: MapHost | null = null;
+    const own = <A extends unknown[]>(fn: (...args: A) => void) => (...args: A) => made === host && fn(...args);
+    const options: HostOptions = {
+      container,
+      theme,
+      camera,
+      onClick: own(handleClick),
+      onHover: own(handleHover),
+      onPointerLeave: own(() => {
+        onHover?.(null, null);
+        onSymbolHover?.(null, 0, 0, null);
+      }),
+      onMove: own(handleMove),
+      onMoveEnd: own(() => {
+        writeMapHash(host.camera());
+        for (const listener of listeners.moveend) listener();
+      }),
+      onContextLost: own(() => listeners.contextlost.forEach((listener) => listener())),
+      cursor: () => markerCursor,
+    };
+    if (projection === "globe") {
+      setReprojection(null);
+      made = createGlobeHost(options);
+    } else made = createFlatHost({ ...options, projection });
+    return made;
+  }
+
+  // What's made for a host and goes with it: its controls, the labels on it.
+  let graticuleNames: ReturnType<typeof graticuleLabels> | null = null;
+  let featureMarker: ReturnType<MapHost["marker"]> | null = null;
+  function attach(next: MapHost) {
+    host = next;
+    barsZoom = Math.round(next.camera().zoom * 20) / 20;
+    for (const group of next.controls) controls.insertBefore(group, navigation.element);
+    graticuleNames = graticuleLabels(next, state.visible.graticule);
+    featureMarker = next.marker(featureLabel, { anchor: "left" });
+    featureShown = "";
+    next.canvas.addEventListener("pointerdown", grab, { capture: true });
+    next.canvas.addEventListener("pointermove", drag);
+    next.canvas.addEventListener("pointerup", drop);
+    next.canvas.addEventListener("pointercancel", drop);
+    navigation.update();
+    animate();
+    render();
+    showFeatureLabel();
+  }
+
+  /** Switch the host (the globe ↔ a flat map): the new one takes over once it has drawn. */
+  function switchHost(projection: MapProjection) {
+    const old = host;
+    const next = makeHost(projection, old.camera());
+    next.element.classList.add("map-host-waiting");
+    attach(next);
+    next.onFirstFrame(() => {
+      next.element.classList.remove("map-host-waiting");
+      for (const group of old.controls) group.remove();
+      old.destroy();
+    });
+  }
+
+  // The picked point's name (a dam's), beside its target: a label (deck.gl draws no text here).
   const featureLabel = document.createElement("div");
   featureLabel.className = "feature-label";
-  const featureMarker = new maplibregl.Marker({ element: featureLabel, anchor: "left", opacityWhenCovered: "0" });
   let featureShown = "";
   function showFeatureLabel() {
     const { lngLat, feature } = state.selection;
@@ -294,23 +364,9 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     const key = radius !== null && lngLat && feature ? `${feature.name} ${lngLat} ${radius}` : "";
     if (key === featureShown) return;
     featureShown = key;
-    if (!key) return void featureMarker.remove();
+    if (!key) return void featureMarker?.hide();
     featureLabel.textContent = feature!.name;
-    featureMarker.setOffset([radius! + 10, 0]).setLngLat(lngLat!).addTo(map);
-  }
-  // MapLibre spells the credits out at first, until the map is moved; keep them to the
-  // ⓘ from the start (they show on a click).
-  const attrib = container.querySelector(".maplibregl-ctrl-attrib")!;
-  const shut = () => {
-    if (!attrib.classList.contains("maplibregl-compact-show")) return false;
-    attrib.classList.remove("maplibregl-compact-show");
-    attrib.removeAttribute("open");
-    return true;
-  };
-  if (!shut()) {
-    // (not yet compact: it's opened when it becomes so)
-    const watch = new MutationObserver(() => shut() && watch.disconnect());
-    watch.observe(attrib, { attributeFilter: ["class"] });
+    featureMarker?.show(lngLat!, [radius! + 10, 0]);
   }
 
   /** A fading layer's copies, with `fills` as the ones to show (eased in by `t`). */
@@ -488,17 +544,20 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   function visibleSymbols() {
     const symbols = shownSymbols();
     if (!symbols) return (visible = null);
-    const { lng, lat } = map.getCenter();
-    const cut = 0.15 - Math.min(0.15, map.getZoom() * 0.03);
-    const near = symbols.items.filter((s) => facing(s.position, [lng, lat]) > cut);
+    const { center, zoom } = host.camera();
+    const cut = 0.15 - Math.min(0.15, zoom * 0.03);
+    // (Nothing is on a far side of a flat map.)
+    const near = host.kind === "flat" ? symbols.items : symbols.items.filter((s) => facing(s.position, center) > cut);
     const kept = visible !== null && near.length === visible.items.length && near.every((s, i) => s === visible!.items[i]);
     const key = `${symbols.key}:${near.length}:${near[0]?.position ?? ""}`;
     if (!kept || key !== visible!.key) visible = { key, items: kept ? visible!.items : near };
     return visible;
   }
-  map.on("move", () => {
+  function handleMove() {
+    navigation.update();
+    for (const listener of listeners.move) listener();
     // The bars keep their height in pixels: drawn again as the zoom changes.
-    const zoom = Math.round(map.getZoom() * 20) / 20;
+    const zoom = Math.round(host.camera().zoom * 20) / 20;
     if (shownBars() && zoom !== barsZoom) {
       barsZoom = zoom;
       return render();
@@ -506,22 +565,22 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     if (!shownSymbols()) return;
     const before = visible?.items;
     if (visibleSymbols()?.items !== before) render();
-  });
+  }
 
   const shownBars = () => barTweens[state.view]?.get() ?? null;
-  let barsZoom = Math.round(map.getZoom() * 20) / 20;
+  let barsZoom = 0;
   // Tilted for the bars (and back flat when they go), unless it was tilted already.
   const TILT = 40;
   let tilted = false;
   function tilt() {
     // (The bars set, not those still shrinking away.)
     const want = Boolean(state.bars[state.view]);
-    if (want && !tilted && map.getPitch() < 15) {
+    if (want && !tilted && host.camera().pitch < 15) {
       tilted = true;
-      map.easeTo({ pitch: TILT, duration: 800 });
+      host.easeTo({ pitch: TILT, duration: 800 });
     } else if (!want && tilted) {
       tilted = false;
-      map.easeTo({ pitch: 0, duration: 800 });
+      host.easeTo({ pitch: 0, duration: 800 });
     }
   }
 
@@ -534,31 +593,20 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   // then a second one, of the areas only (each waits on the GPU).
   function areaAt(info: PickingInfo): Place | null {
     const isArea = (id: string | undefined) => !!id && AREA_LAYERS.some((a) => id.startsWith(a));
-    const picked = !info.coordinate || !info.object ? null : isArea(info.layer?.id) ? info : overlay.pickObject({ x: info.x, y: info.y, layerIds: AREA_LAYERS });
+    const picked = !info.coordinate || !info.object ? null : isArea(info.layer?.id) ? info : host.pickObject({ x: info.x, y: info.y, layerIds: AREA_LAYERS });
     return picked ? placeOf(picked.layer?.id ?? "", picked.object?.properties) : null;
   }
 
-  const overlay = new MapboxOverlay({
-    interleaved: true,
-    layers: drawn(),
-    onClick: handleClick,
-    onHover: (info) => {
-      const lngLat = toLngLat(info.coordinate);
-      if (state.view === "local") {
-        const symbol = info.layer && SYMBOL_LAYERS.includes(info.layer.id) ? (info.object as { id?: string } | null)?.id ?? null : null;
-        onSymbolHover?.(symbol, info.x + container.getBoundingClientRect().left, info.y + container.getBoundingClientRect().top, lngLat);
-      }
-      onHover?.(lngLat, lngLat ? areaAt(info) : null);
-    },
-  });
-  map.addControl(overlay);
-  map.on("load", () => render());
-  map.getCanvasContainer().addEventListener("pointerleave", () => {
-    onHover?.(null, null);
-    onSymbolHover?.(null, 0, 0, null);
-  });
+  function handleHover(info: PickingInfo) {
+    const lngLat = toLngLat(info.coordinate);
+    if (state.view === "local") {
+      const symbol = info.layer && SYMBOL_LAYERS.includes(info.layer.id) ? (info.object as { id?: string } | null)?.id ?? null : null;
+      onSymbolHover?.(symbol, info.x + container.getBoundingClientRect().left, info.y + container.getBoundingClientRect().top, lngLat);
+    }
+    onHover?.(lngLat, lngLat ? areaAt(info) : null);
+  }
   function render() {
-    overlay.setProps({ layers: drawn() });
+    host.setLayers(drawn());
     showFeatureLabel();
   }
 
@@ -588,82 +636,73 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     for (const listener of flowListeners) listener(flow);
   }
 
-  // The scheme's particles, the rain and the vapour move every frame (deck.gl draws on each of MapLibre's repaints).
-  let animating = false;
+  // The scheme's particles, the rain and the vapour move every frame.
   function animate() {
-    if (animating) return;
-    const frame = () => {
-      animating = Boolean(state.scheme?.particles || state.effects) && state.view === "basin";
-      if (!animating) return;
-      map.triggerRepaint();
-      requestAnimationFrame(frame);
-    };
-    frame();
+    host.animate(Boolean(state.scheme?.particles || state.effects) && state.view === "basin");
   }
 
-  /** The layers as drawn: each hides the far side of the globe. */
-  function drawn() {
-    // (The particles are drawn off screen and pasted on, flat: no extensions. The rain
-    // and vapour hide the far side themselves.)
-    return layers().map((layer: Layer | null) =>
-      !layer || layer.id.startsWith(PARTICLES_ID) || layer.id.startsWith(EFFECTS_ID) ? layer : layer.clone({ extensions: [...layer.props.extensions, HORIZON] }),
-    );
+  /**
+   * The layers as drawn: on the globe each hides its far side; on the flat map each is
+   * drawn in the map's projection, and the tile layers pick their tiles by the view's
+   * bounds (the ocean and the last of Antarctica under them: world-layers.ts).
+   */
+  function drawn(): (Layer | null)[] {
+    // (The particles are drawn off screen and pasted on, flat, and the rain and vapour
+    // hide the far side and project themselves: no extensions.)
+    const own = (layer: Layer) => layer.id.startsWith(PARTICLES_ID) || layer.id.startsWith(EFFECTS_ID);
+    const globe = (layer: Layer) => layer.clone({ extensions: [...layer.props.extensions, HORIZON] });
+    const flat = (layer: Layer) => layer.clone({ extensions: [...layer.props.extensions, REPROJECT], ...(layer instanceof MVTLayer ? { TilesetClass: BoxTileset } : {}) });
+    const all: (Layer | null)[] = host.kind === "globe" ? layers() : [oceanLayer(theme.oceanColor), polarCapLayer(theme.land, state.view !== "basin"), ...layers()];
+    return all.map((layer) => (!layer || own(layer) ? layer : host.kind === "globe" ? globe(layer) : flat(layer)));
   }
 
-  // Dragging the marker: a press on it holds the map still (preventDefault keeps
-  // MapLibre from panning), the marker follows the pointer, and the drop is passed on.
-  const canvas = map.getCanvas();
-  function onMarker(point: maplibregl.Point) {
+  // Dragging the marker: a press on it holds the map still, the marker follows the
+  // pointer, and the drop is passed on. (On the host's canvas, whichever it is.)
+  let markerCursor: string | null = null; // the cursor while over or holding the marker (null: the host's)
+  function onMarker([x, y]: [number, number]) {
     const at = state.selection.lngLat;
     if (!at || state.view !== "local") return false; // (only shown in the Local view)
-    const { lng, lat } = map.getCenter();
-    if (facing(at, [lng, lat]) <= 0) return false; // on the far side of the globe
-    return map.project(at).dist(point) <= MARKER_GRAB;
+    const p = host.project(at);
+    return p !== null && Math.hypot(p[0] - x, p[1] - y) <= MARKER_GRAB;
   }
-  let grabbed = false;
-  function grab(e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) {
-    if (!onMarker(e.point)) return;
+  let grabbed: number | null = null; // the pointer holding it
+  function grab(e: PointerEvent) {
+    if (e.button !== 0 || !onMarker(canvasPoint(host.canvas, e))) return;
     e.preventDefault();
-    grabbed = true;
-    canvas.style.cursor = "grabbing";
+    grabbed = e.pointerId;
+    host.holdStill(true);
+    host.canvas.setPointerCapture(e.pointerId);
+    markerCursor = "grabbing";
   }
-  function drag(e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) {
-    if (!grabbed) {
+  function drag(e: PointerEvent) {
+    const point = canvasPoint(host.canvas, e);
+    if (grabbed === null) {
       // (mouse only: show that the marker can be picked up)
-      if (e.type === "mousemove") canvas.style.cursor = onMarker(e.point) ? "grab" : "";
+      if (e.pointerType === "mouse") markerCursor = onMarker(point) ? "grab" : null;
       return;
     }
-    state.dragged = toLngLat([e.lngLat.lng, e.lngLat.lat]);
+    if (e.pointerId !== grabbed) return;
+    const lngLat = host.unproject(point);
+    if (!lngLat) return; // (off the globe, or the map: it stays where it was)
+    state.dragged = lngLat;
     render();
   }
-  function drop(e: maplibregl.MapMouseEvent | maplibregl.MapTouchEvent) {
-    if (!grabbed) return;
-    grabbed = false;
-    canvas.style.cursor = onMarker(e.point) ? "grab" : "";
+  function drop(e: PointerEvent) {
+    if (grabbed === null || e.pointerId !== grabbed) return;
+    grabbed = null;
+    host.holdStill(false);
+    const point = canvasPoint(host.canvas, e);
+    markerCursor = onMarker(point) ? "grab" : null;
     const dropped = state.dragged;
     state.dragged = null;
     if (!dropped) return; // pressed without moving: a click
-    const onArea = Boolean(overlay.pickObject({ x: e.point.x, y: e.point.y }));
+    // Dropped on the ocean or off the map (a pointercancel), it goes back.
+    const onArea = e.type === "pointerup" && Boolean(host.pickObject({ x: point[0], y: point[1] }));
     // Keep it where it was dropped until the new selection comes in.
     if (onArea) state.selection = { ...state.selection, lngLat: dropped };
     render();
     if (onArea) onMarkerDrop?.(dropped);
   }
-  map.on("mousedown", grab);
-  map.on("mousemove", drag);
-  map.on("mouseup", drop);
-  map.on("touchstart", (e) => e.points.length === 1 && grab(e));
-  map.on("touchmove", drag);
-  map.on("touchend", drop);
-  map.on("touchcancel", drop);
-  // Released off the map: the marker goes back.
-  window.addEventListener("mouseup", () => {
-    if (!grabbed) return;
-    grabbed = false;
-    canvas.style.cursor = "";
-    state.dragged = null;
-    render();
-  });
 
   /**
    * A period's layers: L1 while the view asks for L1, L2 while it asks for L2 (and
@@ -755,9 +794,34 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
     state.waporFade = 1;
   }
 
+  attach(makeHost(projection, openingCamera()));
+
   return {
-    map,
+    container,
     theme,
+    getZoom: () => host.camera().zoom,
+    getCenter: () => host.camera().center,
+    on(event, listener) {
+      listeners[event].push(listener);
+    },
+    onContextLost(listener) {
+      listeners.contextlost.push(listener);
+    },
+    addControl(element) {
+      const group = document.createElement("div");
+      group.className = "maplibregl-ctrl maplibregl-ctrl-group";
+      group.append(element);
+      controls.prepend(group);
+    },
+    setProjection(projection) {
+      if (projection === state.projection) return;
+      const wasFlat = state.projection !== "globe";
+      state.projection = projection;
+      if (wasFlat && isProjectionId(projection)) (host as FlatHost).morphTo(projection);
+      else switchHost(projection);
+      onProjection?.(projection);
+    },
+    getProjection: () => state.projection,
     setView(view) {
       if (view === state.view) return;
       state.view = view;
@@ -770,20 +834,18 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       state.visible[layer] = visible;
       render();
       tellFlow();
-      if (layer === "graticule") graticuleNames.show(visible);
+      if (layer === "graticule") graticuleNames?.show(visible);
     },
     setSelection(selection) {
       state.selection = selection;
       render();
     },
-    showBox([west, south, east, north]) {
-      // MapLibre takes a box across 180° as east beyond 180.
-      const bounds: [number, number, number, number] = [west, south, east < west ? east + 360 : east, north];
-      // Padding given here only applies to this move: the globe stays put when a panel
+    showBox(bbox) {
+      // Padding given here only applies to this move: the map stays put when a panel
       // opens or closes later.
       const { top, bottom, left, right } = coveredEdges(container);
       const padding = { top: MARGIN + top, bottom: MARGIN + bottom, left: MARGIN + left, right: MARGIN + right };
-      map.fitBounds(bounds, { padding, maxZoom: 7, duration: 1200 });
+      host.fitBounds(bbox, { padding, maxZoom: 7, duration: 1200 });
     },
     showPoint(center, zoom, how = "fly") {
       // Centre the point in the part of the map left uncovered (an offset, unlike
@@ -797,9 +859,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
         return Math.max(-room, Math.min(room, shift));
       };
       const offset: [number, number] = [keep((left - right) / 2, container.clientWidth), keep((top - bottom) / 2, container.clientHeight)];
-      const options = { center, zoom, offset };
-      if (how === "fly") map.flyTo({ ...options, duration: 1200 });
-      else map.easeTo(options);
+      if (how === "fly") host.flyTo({ center, zoom, offset, duration: 1200 });
+      else host.easeTo({ center, zoom, offset });
     },
     setHovered(hovered) {
       if (hoverKey(hovered) === hoverKey(state.hovered)) return; // unchanged (or still none)
@@ -849,7 +910,7 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       if (bars?.key === state.bars[view]?.key) return;
       state.bars[view] = bars;
       barTweens[view].set(bars);
-      barsZoom = Math.round(map.getZoom() * 20) / 20;
+      barsZoom = Math.round(host.camera().zoom * 20) / 20;
       render();
       tilt();
     },
@@ -895,8 +956,10 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
   };
 }
 
-// Every layer hides the far side of the globe (tile layers pass it on to their tiles).
+// Every layer hides the far side of the globe (tile layers pass it on to their tiles)…
 const HORIZON = new HorizonExtension();
+// …or, flat, is drawn in the map's projection.
+const REPROJECT = new ReprojectExtension();
 
 /**
  * What floats over the map's edges, and so should be left out of the camera's frame:
@@ -955,12 +1018,6 @@ function coveredEdges(container: HTMLElement): Edges {
   return edges;
 }
 
-/** Cosine of the angle between two points on the globe (1: same point, < 0: opposite sides). */
-export function facing([lng1, lat1]: [number, number], [lng2, lat2]: [number, number]) {
-  const r = Math.PI / 180;
-  return Math.sin(lat1 * r) * Math.sin(lat2 * r) + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.cos((lng1 - lng2) * r);
-}
-
 // The layers of areas the pointer can be over (ids, as prefixes: their copies too), top first.
 const AREA_LAYERS = ["sub-basins", "major-basins", "m49-countries"];
 /** The circles' and bars' layers (countries.ts, bars.ts). */
@@ -976,8 +1033,10 @@ function placeOf(layerId: string, p: Record<string, unknown> | undefined): Place
   return place;
 }
 
-// deck.gl gives no coordinate (or NaN) for a point off the globe.
+// deck.gl gives no coordinate (or NaN) for a point off the globe; the flat map's plane
+// goes on past its edges (longitudes beyond ±180°, latitudes beyond ±90°).
 function toLngLat(coordinate: number[] | undefined): LngLat | null {
   if (!coordinate || !Number.isFinite(coordinate[0]) || !Number.isFinite(coordinate[1])) return null;
+  if (Math.abs(coordinate[0]) > 180 || Math.abs(coordinate[1]) > 90) return null;
   return [coordinate[0], coordinate[1]];
 }

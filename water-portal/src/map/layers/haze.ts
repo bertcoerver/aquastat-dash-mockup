@@ -52,7 +52,7 @@ void main() {
   vFacing = project.projectionMode == PROJECTION_MODE_GLOBE
     ? dot(normalize(project_position(position, vec3(0.0))), project.cameraPosition) - GLOBE_RADIUS
     : 1.0;
-  gl_Position = project_position_to_clipspace(position, vec3(0.0), vec3(0.0));
+  gl_Position = rp_project_to_clipspace(position);
 }`;
 
 const HAZE_FS = `\
