@@ -34,13 +34,13 @@
     <noscript>
       <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
     </noscript>
-    <script type="module" crossorigin src="/aquastat-dash-mockup/assets/index-C37FtFtE.js"></script>
+    <script type="module" crossorigin src="/aquastat-dash-mockup/assets/index-B2xeNT4m.js"></script>
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/rolldown-runtime-XKyaHtl9.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/deck-B44FGTmW.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/deck-CyF9-3Oz.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/wapor-shader-DVpCrcpi.js">
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/maplibre-BwHgV-eo.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/wapor-shader-DRvEvkoc.js">
     <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/maplibre-B2k4QVOw.css">
-    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/index-4SVYO6GY.css">
+    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/index-y38eTIpd.css">
   </head>
   <body>
     <div id="map"></div>
@@ -83,6 +83,10 @@
         </svg>
       </button>
       <div class="layers-panel" id="layers-panel" hidden>
+        <!-- The map: the globe, or flat in a projection (src/panels/layers-menu.ts fills the options). -->
+        <label class="layers-select">Map
+          <select id="projection-select" aria-label="Map projection"></select>
+        </label>
         <label><input type="checkbox" data-layer="rivers" checked /> Rivers</label>
         <label><input type="checkbox" data-layer="lakes" checked /> Lakes</label>
         <label><input type="checkbox" data-layer="graticule" /> Graticule</label>

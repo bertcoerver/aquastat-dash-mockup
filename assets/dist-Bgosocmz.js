@@ -1,0 +1,1 @@
+export{i as GeoTIFF,o as PerOriginSemaphore,r as defaultDecoderPool}from"./geotiff-BzsDeq4t.js";
