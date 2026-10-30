@@ -4,24 +4,43 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Water Portal</title>
+    <!-- The theme before the stylesheets apply (no flash of the wrong one): the saved
+      choice, else the system's (src/panels/theme-switch.ts keeps it up to date). -->
+    <script>
+      (function () {
+        var dark = matchMedia("(prefers-color-scheme: dark)").matches;
+        try {
+          var t = localStorage.getItem("water-portal:theme");
+          if (t === "light" || t === "dark") dark = t === "dark";
+        } catch (e) {}
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      })();
+    </script>
     <link rel="icon" href="data:," />
+    <!-- The lists the page starts with (src/main.ts): fetched alongside the script, not after it has run. -->
+    <link rel="preload" href="/aquastat-dash-mockup/data/sub-basins.json?v=5250b0a7" as="fetch" crossorigin />
+    <link rel="preload" href="/aquastat-dash-mockup/data/countries.json?v=5250b0a7" as="fetch" crossorigin />
+    <link rel="preload" href="/aquastat-dash-mockup/data/major-basins.json?v=5250b0a7" as="fetch" crossorigin />
+    <link rel="preload" href="/aquastat-dash-mockup/data/country-info.json?v=5250b0a7" as="fetch" crossorigin />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- (Loaded without holding up the first paint: the system font shows until they're in.) -->
     <link
       rel="stylesheet"
       href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      media="print"
+      onload="this.media='all'"
     />
-    <script type="module" crossorigin src="/aquastat-dash-mockup/assets/index-CoyMssBB.js"></script>
+    <noscript>
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" />
+    </noscript>
+    <script type="module" crossorigin src="/aquastat-dash-mockup/assets/index-C37FtFtE.js"></script>
     <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/rolldown-runtime-XKyaHtl9.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/array-utils-flat-BL8Cekj1.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/get-attribute-from-layouts-Dd2gixpo.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/webgl-device-DchxaUZB.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/expression-C4x9yiMU.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/buffer-transform-DyjAKu06.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/webgpu-DhR-Xd8M.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/preload-helper-x_aofTzv.js">
-    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/decode-kKOLXaTt.js">
-    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/index-DYLWnZQl.css">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/deck-B44FGTmW.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/maplibre-BwHgV-eo.js">
+    <link rel="modulepreload" crossorigin href="/aquastat-dash-mockup/assets/wapor-shader-DRvEvkoc.js">
+    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/maplibre-B2k4QVOw.css">
+    <link rel="stylesheet" crossorigin href="/aquastat-dash-mockup/assets/index-4SVYO6GY.css">
   </head>
   <body>
     <div id="map"></div>
@@ -127,22 +146,6 @@
       </div>
     </div>
 
-    <!-- Basin view: the water balance of the selected sub-basin (src/basin/water-balance.ts). -->
-    <aside class="legend wb-legend" id="wb-legend" hidden>
-      <!-- The variable shown; a menu of the others (src/panels/title-menu.ts). -->
-      <div class="legend-title">
-        <button class="title-menu" id="wb-variable" type="button" aria-haspopup="listbox" aria-expanded="false"
-          aria-label="Map variable"><span class="title-menu-label"></span><span class="title-caret" aria-hidden="true"></span></button>
-        <small id="wb-legend-note"></small>
-      </div>
-      <div class="legend-period"><span id="wb-legend-period"></span><span id="wb-legend-unit"></span></div>
-      <div class="legend-ramp" id="wb-legend-ramp"></div>
-      <div class="legend-ticks" id="wb-legend-ticks" aria-hidden="true"></div>
-      <div class="legend-status" id="wb-legend-status" role="status"></div>
-    </aside>
-
-    <div class="wb-tooltip" id="wb-tooltip" hidden></div>
-
     <!-- The maps' layers: a checklist of the charts' maps (src/panels/title-menu.ts); a
       section per layer on the map is added after the title (src/panels/legend.ts). -->
     <aside class="legend" id="bs-legend" hidden>
@@ -205,14 +208,15 @@
       </header>
       <div class="wb-body" id="cp-body">
         <div class="wb-vars cp-topics" id="cp-topics" role="tablist" aria-label="Topic"></div>
-        <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
-        <p class="wb-message" id="cp-message"></p>
+        <p class="cp-hint">Hover a chart to see its map; click to pin it (keyboard: Tab to a chart, arrows along it, Enter).</p>
+        <p class="wb-message" id="cp-message" role="status"></p>
         <div class="wb-stats cp-stats" id="cp-stats"></div>
         <div id="cp-cards"></div>
       </div>
     </aside>
 
-    <aside class="wb-panel" id="wb-panel" aria-label="Water balance" hidden>
+    <!-- Basin view: the panel (src/basin/basin-stats.ts). -->
+    <aside class="wb-panel" id="wb-panel" aria-label="Basin statistics" hidden>
       <header class="wb-head">
         <div class="wb-heading">
           <div class="tabs-slot" data-view="basin"></div>
@@ -232,41 +236,16 @@
         </div>
       </header>
       <div class="wb-body" id="wb-body">
-        <p class="wb-message" id="wb-message"></p>
-        <div id="wb-results" hidden>
-          <div class="wb-stats" id="wb-stats" role="radiogroup" aria-label="Variable"></div>
-
-          <section class="wb-section">
-            <h3>Map <button class="wb-csv" data-csv="map">CSV</button></h3>
-            <p id="wb-map-caption"></p>
-          </section>
-
-          <section class="wb-section">
-            <h3>Time series <button class="wb-csv" data-csv="timeseries">CSV</button></h3>
-            <p id="wb-ts-caption"></p>
-            <div class="wb-overview" id="wb-overview"></div>
-            <div class="wb-zoom" id="wb-zoom"></div>
-          </section>
-
-          <section class="wb-section">
-            <h3>Water balance <button class="wb-csv" data-csv="flows">CSV</button></h3>
-            <p id="wb-sankey-caption"></p>
-            <div class="wb-sankey" id="wb-sankey"></div>
-          </section>
-
-          <p class="wb-about">
-            Precipitation (PCP) and actual evapotranspiration (AETI): WaPOR v3 L1, dekadal means per
-            sub-basin. Runoff is routed downstream through the sub-basins as linear reservoirs (retention
-            factor 0.1 per month) to estimate discharge (Q) and storage change (ΔS); see Hoogeveen et al.
-            (2015). The model runs in the browser when a sub-basin is selected.
-          </p>
-        </div>
-
         <!-- Basin statistics: charts that each drive the map (src/basin/basin-stats.ts). -->
         <section class="bs-section" id="bs-section" hidden>
           <h3 class="bs-heading" id="bs-heading"></h3>
-          <p class="cp-hint">Hover a chart to see its map; click to pin it.</p>
-          <p class="wb-message" id="bs-message" hidden></p>
+          <!-- With a sub-basin selected: its statistics alone, or with everything upstream of it. -->
+          <div class="wb-vars cp-topics bs-scope" id="bs-scope" role="tablist" aria-label="Statistics of" hidden>
+            <button role="tab" data-scope="sub" aria-selected="true">The sub-basin</button>
+            <button role="tab" data-scope="catchment" aria-selected="false">With everything upstream</button>
+          </div>
+          <p class="cp-hint">Hover a chart to see its map; click to pin it (keyboard: Tab to a chart, arrows along it, Enter).</p>
+          <p class="wb-message" id="bs-message" role="status" hidden></p>
           <div class="wb-stats cp-stats" id="bs-stats"></div>
           <div id="bs-cards"></div>
         </section>
@@ -310,7 +289,7 @@
       </header>
       <div class="wb-body" id="lp-body">
         <!-- Charts for the point (src/local/local-panel.ts). -->
-        <p class="wb-message" id="lp-message"></p>
+        <p class="wb-message" id="lp-message" role="status"></p>
         <!-- A ratio of totals (water productivity): the same days in every year (src/local/year-bars.ts). -->
         <!-- Cards: a click pins one, so it stays when the panel folds (as in the other views). -->
         <!-- A GAEZ map on the map: the harvested area by crop at the point (src/local/crop-card.ts). -->
@@ -318,7 +297,7 @@
           <h3><span class="cc-title">Harvested area by crop</span><span class="cp-card-actions"><button class="cp-unpin" data-unpin
                 type="button" title="Remove pin" aria-label="Remove pin">×</button></span></h3>
           <p class="ch-empty cc-empty">Click the map, or the title to type coordinates, to see the crops harvested there.</p>
-          <p class="wb-message error cc-message" hidden></p>
+          <p class="wb-message error cc-message" role="status" hidden></p>
           <div class="cc-head" hidden></div>
           <div class="cc-chart" hidden></div>
           <p class="cc-caption" hidden></p>
