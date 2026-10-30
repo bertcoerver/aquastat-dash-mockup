@@ -231,6 +231,14 @@ const countryPanel = initCountryPanel({
   onLatestYear: (year) => toolbarApi?.setCountryLastYear(year),
   setYear: (year) => toolbarApi?.setRange({ start: mk(year, 0, 0), end: mk(year, 0, 0) + 35 }),
   onPicks: () => syncUrl(),
+  // A row pinned in a chart selects its area (the panel flies there itself), as picking it by name would.
+  onArea(picked) {
+    pointWanted = null;
+    const kept = keptPoint();
+    if (picked.kind === "world") selection.set({ ...NOTHING, ...kept });
+    else if (picked.kind === "region") selection.set({ ...NOTHING, ...kept, source: "country", region: { code: picked.code, name: picked.name } });
+    else selection.set({ ...NOTHING, ...kept, source: "country", country: { m49: picked.m49, name: picked.name } });
+  },
 });
 const picker = initPlacePicker({
   countries,

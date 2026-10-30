@@ -11,8 +11,8 @@
  * maps of all the topics, so maps of different topics can be shown together. Within a card,
  * hovering a row picks out that area's countries on the map, hovering a series in a
  * legend maps that series, and clicking a year on a line chart sets the year in the
- * top bar. For a range of years, every value is the mean of its yearly values. Clicking a row of a region (or country) also flies the map there, keeping
- * the selected country in view where both fit (see flyToArea).
+ * top bar. For a range of years, every value is the mean of its yearly values. Clicking a row of a region (or country) also selects
+ * it (onArea) and flies the map there, keeping the selected country in view where both fit (see flyToArea).
  * Hovering a country on the map shows its values (panels/map-tip.ts), each in its colour there. A switch in a map's legend section draws
  * it as the countries' colours, circles or 3D bars (panels/shape-switch.ts); the amounts'
  * maps are circles or bars. Their key of sizes is a menu of how they look
@@ -64,7 +64,12 @@ interface Options {
   onLatestYear: (year: number) => void;
   /** The pin or the maps checked changed (for the URL). */
   onPicks?: () => void;
+  /** A row of an area was pinned: select it (the World: nothing). */
+  onArea?: (picked: AreaPick) => void;
 }
+
+/** What a pinned row is about: a region, a country, or the World. */
+export type AreaPick = { kind: "region"; code: number; name: string } | { kind: "country"; m49: number; name: string } | { kind: "world" };
 
 export interface CountryPanel {
   setView(view: View): void;
@@ -102,7 +107,7 @@ const classIndex = (classes: MapClass[], v: number) => {
   return i < 0 ? classes.length - 1 : i;
 };
 
-export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, onLatestYear, onPicks }: Options): CountryPanel {
+export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, onLatestYear, onPicks, onArea }: Options): CountryPanel {
   const regionOf = new Map(Object.entries(info.countries).map(([m49, c]) => [Number(m49), c.region]));
   const centerOf = new Map(Object.entries(info.countries).map(([m49, c]) => [Number(m49), c.center]));
   const regions: Region[] = info.regions.map((r) => ({
@@ -179,7 +184,9 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
     shapesOf: (spec) => shapesOf(spec),
     onPin(d) {
       const area = areaOf(d);
-      if (area !== null && area !== WORLD) flyToArea(area);
+      if (area === null) return;
+      if (area !== WORLD) flyToArea(area);
+      onArea?.(pickOf(area));
     },
     onPicks,
     onChange: drawMap,
@@ -404,6 +411,11 @@ export function initCountryPanel({ map, info, names, boxes, setYear, canSelect, 
   }
 
   const areaOf = (d: Driver | null | undefined) => (d?.sub?.startsWith("area:") ? Number(d.sub.slice(5)) : null);
+  function pickOf(area: number): AreaPick {
+    if (area === WORLD) return { kind: "world" };
+    const region = regions.find((r) => r.code === area);
+    return region ? { kind: "region", code: region.code, name: region.name } : { kind: "country", m49: area, name: names.get(area) ?? String(area) };
+  }
 
   /**
    * A tile's or card's map and those it brings along, each in a shape of its own: one

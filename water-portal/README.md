@@ -27,8 +27,9 @@ selected one). Each tile and chart has its map, and the range ends at the model'
 its major basin. In the Country view, a panel
 shows FAO AQUASTAT statistics for the selected country (or the World) in four topics (SDG 6.4,
 water resources, water use, irrigation): number tiles and charts, each with a map that goes with
-it. Hovering a tile or chart previews its map, clicking pins it (Escape unpins), and hovering a
-row in a regional chart picks out that region's countries. Clicking a country or basin drops a marker; clicking the ocean removes it.
+it. Hovering a tile or chart previews its map, clicking pins it (Escape unpins). Hovering a
+row in a regional chart picks out that region's countries, and pinning a row of a region or country
+selects it (the World row: nothing). Clicking a country or basin drops a marker; clicking the ocean removes it.
 
 ## Getting started
 
