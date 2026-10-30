@@ -34,6 +34,7 @@ import "./styles/panels.css";
 import "./styles/legend.css";
 import "./styles/basin.css";
 import "./styles/country.css";
+import "./styles/touch.css"; // (last: a finger's rules win)
 import { byId as $ } from "./lib/dom";
 import { dataUrl } from "./lib/data-url";
 

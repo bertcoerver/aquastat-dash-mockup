@@ -50,7 +50,7 @@ Other commands:
 | `npm run typecheck` | Only check the TypeScript for errors |
 | `npm run lint` | ESLint, for what the type checker doesn't catch (`eslint.config.js`) |
 | `npm test` | The unit tests (`test/*.test.ts`, [Vitest](https://vitest.dev)): the date rules, the basin statistics' sums, the WaPOR rasters a range adds up, the sub-basin network, the axis and CSV helpers |
-| `npm run smoke` | Drive the built site through its three views in a headless browser and fail on any error (`scripts/smoke.mjs`; needs Playwright's Chromium: `npx playwright install chromium`) |
+| `npm run smoke` | Drive the built site through its three views in a headless browser, then with a finger through the pane's taps, and fail on any error (`scripts/smoke.mjs`; needs Playwright's Chromium: `npx playwright install chromium`) |
 | `npm run check` | Type-check, lint, test and build, as [the GitHub Actions workflow](../.github/workflows/ci.yml) does on every push |
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
@@ -101,7 +101,8 @@ water-portal/
     │   ├── memo.ts         A memoised promise that forgets a failure; keeping the last few entries of a map
     │   ├── schedule.ts     perFrame: a draw once per animation frame
     │   ├── drag.ts         A pointer drag, its listeners taken off at the end
-    │   └── popover.ts      What closes a popup: Escape, a press elsewhere, the focus leaving, a resize
+    │   ├── popover.ts      What closes a popup: Escape, a press elsewhere, the focus leaving, a resize
+    │   └── words.ts        "Hover" or "Tap", "click" or "tap": a caption's verbs for a mouse or a finger
     ├── map/
     │   ├── map.ts          MapLibre globe + deck.gl overlay; layer order, view, clicks
     │   ├── theme.ts        Map colours (light and dark)
@@ -171,7 +172,7 @@ water-portal/
     │   ├── tuning-pane.ts  Hidden pane of sliders for the particles, rain and vapour (triple-click a legend)
     │   ├── shape-switch.ts A map's switch: the areas' colours, circles or 3D bars
     │   ├── shape-style.ts  How circles and bars look: a menu on their key (colours, full size)
-    │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
+    │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover; on a touch screen, by taps and swipes
     │   ├── load-bar.ts     Load bar under the graph pane's heading while anything loads
     │   ├── corner-warning.ts The bottom-left corner's warnings, one above the other; their ⚠ copies a report
     │   ├── crash-warning.ts Warning there for an error nothing else reports, and the map's graphics context lost
@@ -196,7 +197,8 @@ water-portal/
         ├── panels.css      Layers menu and resizable panes
         ├── basin.css       Water balance panel, its legend and tooltips
         ├── country.css     Country panel, chart cards, chart colours, its legend
-        └── legend.css      Map legends: the WaPOR legend, layers, the checklist
+        ├── legend.css      Map legends: the WaPOR legend, layers, the checklist
+        └── touch.css       What a finger needs that a mouse doesn't, and what to say where nothing hovers
 ```
 
 ## Notes
@@ -529,6 +531,17 @@ water-portal/
   (`role="img"`), and the panels' messages are announced (`role="status"`).
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
+- **Touch** ([src/styles/touch.css](src/styles/touch.css)): a finger can't hover, so a tap
+  on the graph pane opens it and it stays open until a tap elsewhere; a tap on the heading
+  of the open pane (not on a control in it) or a swipe down on the heading folds it, a
+  swipe up opens it ([src/panels/foldable.ts](src/panels/foldable.ts)). A tap on a tile or
+  chart pins it (a tap on a mark shows its tooltip too, until the next tap) and a second
+  tap unpins it, with no preview left behind
+  ([src/panels/map-drivers.ts](src/panels/map-drivers.ts)); the hints and captions say
+  "Tap" rather than "Hover" and "click" where nothing hovers
+  ([src/lib/words.ts](src/lib/words.ts)), and the map's tooltip's empty box and zone
+  aren't shown there. The slider's handles are bigger, and reach further, for a finger,
+  and the fields' text is 16 px so iOS doesn't zoom in on them.
 - **The URL keeps the state** (`src/url-state.ts`), so a view can be shared as a link: the
   map's place and zoom (`map=zoom/lat/lon`, MapLibre's), the view, what is selected (a
   country or region, a basin or sub-basin, the Local view's point and dam), the date

@@ -1,6 +1,7 @@
 // Smoke test of the built site (`npm run build` first): serves dist/ and drives it in a
 // headless browser through the three views, a hover, a drag of the slider and the date
-// picker, and fails on any page error, console error or failed request to the site.
+// picker, then with a finger (touch) through the pane's taps, and fails on any page
+// error, console error or failed request to the site.
 // Usage: node scripts/smoke.mjs [url]   (without a URL it starts `vite preview` itself)
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
@@ -161,6 +162,37 @@ try {
     await page.click('.tab[data-view="country"]');
     await page.waitForSelector("#cp-panel:not([hidden])", { timeout: 10000 });
     await page.waitForTimeout(800);
+  });
+  // A finger (panels/foldable.ts, map-drivers.ts): a tap on the pane's heading opens it,
+  // a tap on a card pins the card and a second tap unpins it (with no preview left), and
+  // a tap on the heading of the open pane folds it.
+  await step("touch: the pane opens, pins, unpins and folds by taps", async () => {
+    const touch = await browser.newContext({ viewport: { width: 1400, height: 900 }, hasTouch: true });
+    const p = await touch.newPage();
+    p.on("pageerror", (e) => errors.push(`touch pageerror: ${e.message}`));
+    try {
+      await p.goto(base, { waitUntil: "load", timeout: 60000 });
+      await p.waitForSelector("#cp-panel.resting:not([hidden])", { timeout: 60000 });
+      await p.waitForFunction(() => document.querySelectorAll("#cp-cards [data-driver]").length > 0, null, { timeout: 30000 });
+      await p.waitForTimeout(500);
+      // (The heading's title row, right of the name: not the tabs, nor the name's search field.)
+      const tapHead = async () => {
+        const box = await p.locator("#cp-panel .wb-title").boundingBox();
+        await p.touchscreen.tap(box.x + box.width - 12, box.y + box.height / 2);
+      };
+      await tapHead();
+      await p.waitForSelector("#cp-panel:not(.folding)", { timeout: 5000 });
+      await p.tap("#cp-cards [data-driver]");
+      await p.waitForSelector("#cp-cards [data-driver].pinned", { timeout: 5000 });
+      await p.tap("#cp-cards [data-driver]");
+      await p.waitForFunction(() => !document.querySelector("#cp-cards [data-driver].pinned"), null, { timeout: 5000 });
+      await p.waitForTimeout(300);
+      if (await p.$("#cp-cards [data-driver].previewing")) throw new Error("a card is still previewed after the tap that unpinned it");
+      await tapHead();
+      await p.waitForSelector("#cp-panel.resting", { timeout: 5000 });
+    } finally {
+      await touch.close();
+    }
   });
   await browser.close();
 } finally {

@@ -28,6 +28,7 @@ import { initCropCard, type CropMap } from "./crop-card";
 import type { GaezMap } from "../map/layers/gaez";
 import type { Dams } from "./vector-maps";
 import { byId as $ } from "../lib/dom";
+import { byPointer } from "../lib/words";
 
 interface LocalPanelOptions {
   /** The WaPOR variable on the map (null: none, no map with time). */
@@ -258,7 +259,7 @@ export function initLocalPanel({ variable, setRange, setDays, onUnits, previewMa
         `Each bar is total ${num.short} over total ${den.short} for the same days in that year, in the ${variable.pixel} pixel at this point. ` +
         "The dashed line is the average of the years that are over, the band ± one standard deviation. " +
         (variable.ratioMin ? `None where ${den.short} averages under ${variable.ratioMin} ${den.unit}. ` : "") +
-        "Hover a bar to read it, click it to select its days.";
+        byPointer("Hover a bar to read it, click it to select its days.", "Tap a bar to select its days.");
     } else {
       updateBars(null);
     }

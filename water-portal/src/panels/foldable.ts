@@ -10,6 +10,10 @@
  * Classes on the pane: .folding while it has a height of its own (folded, or on the
  * way), .resting once fully folded; .has-kept with a pinned chart, whose element gets
  * .kept and its ancestors in the body .keep-path. --rest goes from 0 (open) to 1.
+ *
+ * A finger can't hover: a tap on the pane opens it, and it stays open until a tap
+ * elsewhere; a tap on the heading of the open pane (not on a control in it) folds it
+ * again, as does a swipe down on the heading, and a swipe up opens it.
  */
 import { reduceMotion } from "../lib/dom";
 
@@ -17,6 +21,9 @@ import { reduceMotion } from "../lib/dom";
 const OPEN_DELAY = 60; // ms; a pointer passing over doesn't unfold it
 const CLOSE_DELAY = 250; // ms; nor does one slipping off the edge fold it
 const DURATION = 280; // ms
+const SWIPE = 24; // px; how far a finger moves on the heading before it counts as a swipe
+/** A control in the heading (or a row of its search's list): a tap on one does its own thing, not fold the pane. */
+const CONTROL = "button, input, select, a, label, [role=tab], [role=treeitem], [role=option]";
 
 /** One of its menus or pickers, open (not a tree item, which keeps it when hidden). */
 const POPUP_OPEN = ':is([aria-haspopup], [role="combobox"])[aria-expanded="true"]';
@@ -154,6 +161,29 @@ export function makeFoldable(pane: HTMLElement) {
     touched = false;
     update();
   });
+  // A finger on the heading: a swipe opens or folds the pane; a tap on the open pane's
+  // heading folds it (the tap that opens it got here through pointerenter already).
+  let finger: { y: number; wasOpen: boolean } | null = null;
+  head.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") finger = { y: e.clientY, wasOpen: open };
+  });
+  head.addEventListener("pointermove", (e) => {
+    if (!finger || e.pointerType !== "touch") return;
+    const dy = e.clientY - finger.y;
+    if (Math.abs(dy) < SWIPE) return;
+    finger = null;
+    touched = dy < 0;
+    update();
+  });
+  head.addEventListener("pointerup", (e) => {
+    if (!finger || e.pointerType !== "touch") return;
+    const { wasOpen } = finger;
+    finger = null;
+    if (!wasOpen || (e.target as Element).closest(CONTROL)) return;
+    touched = false;
+    update();
+  });
+  head.addEventListener("pointercancel", () => (finger = null));
   // (focus moves after focusout: look once it has)
   pane.addEventListener("focusin", () => update());
   pane.addEventListener("focusout", () => setTimeout(() => update(CLOSE_DELAY)));

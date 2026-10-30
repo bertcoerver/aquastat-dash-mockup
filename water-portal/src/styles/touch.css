@@ -1,0 +1,53 @@
+/* What a finger needs that a mouse doesn't (a coarse pointer), and what to say where
+   nothing hovers. Loaded last (main.ts): its rules win over the others' at the same
+   specificity. The pointer's part is in panels/foldable.ts (taps and swipes open and fold
+   the graph pane), panels/map-drivers.ts (a tap pins, and shows a mark's tooltip) and
+   toolbar/range-slider.ts (the handles' reach); the wording in lib/words.ts. */
+
+/* --- A finger ----------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  /* The slider's handles are bigger (and reach further: range-slider.ts). */
+  .slider-handle {
+    top: -1px;
+    width: 14px;
+    height: 24px;
+    margin-left: -7px;
+    border-radius: 7px;
+  }
+  /* A swipe on the graph pane's heading opens or folds it (foldable.ts): the browser
+     doesn't take the touch for a scroll. */
+  .wb-head {
+    touch-action: none;
+  }
+  /* Text at 16 px in the fields: smaller, iOS zooms in on them when focused. */
+  .combobox input,
+  .coords input,
+  .lp-input,
+  .dp-nav select {
+    font-size: 16px;
+  }
+  /* A legend section's title scrolls the legend; the arrows move the section. */
+  .legend-layer-head {
+    touch-action: pan-y;
+  }
+}
+
+/* --- No hover ----------------------------------------------------------------------- */
+/* The hint under the topics says what a tap does, not what hovering would. */
+.hint-touch {
+  display: none;
+}
+@media (hover: none) {
+  .hint-hover {
+    display: none;
+  }
+  .hint-touch {
+    display: inline;
+  }
+  /* The map's tooltip never comes without a pointer that hovers: no empty box waiting
+     for it by the date range, nor the zone that pins it (panels/map-tip.ts). */
+  .map-tip-dock.mt-empty,
+  .map-tip-zone {
+    display: none;
+  }
+}

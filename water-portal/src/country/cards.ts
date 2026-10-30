@@ -29,6 +29,7 @@ import {
 } from "./data";
 import { bars, bubbles, lines, shares, type BarRow, type Bubble, type LineSeries } from "./charts";
 import { fmtNumber } from "../lib/format";
+import { Hover, click, hover } from "../lib/words";
 import type { Shape } from "../panels/shape-switch";
 
 
@@ -406,7 +407,7 @@ const SDG: TopicDef = {
     {
       id: "sdg-stress-regions",
       title: (c) => `Water stress per region, ${BASE_YEAR} and ${c.label}`,
-      caption: () => "Hover a row to pick out its countries on the map. Circles: their populations.",
+      caption: () => `${Hover()} a row to pick out its countries on the map. Circles: their populations.`,
       render(c) {
         const rows = areaRows(c, (a) => [val(c, a, "ws", BASE), val(c, a, "ws", c.period)]);
         return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: "%", axis: "Water stress", width: c.width }), csv: rowsCsv(rows, [`ws_${BASE_YEAR}`, `ws_${c.label}`]) };
@@ -443,7 +444,7 @@ const SDG: TopicDef = {
     {
       id: "sdg-stress-sectors",
       title: (c) => `What causes water stress in ${focusName(c)}`,
-      caption: () => "Each sector's withdrawal as a share of the available water; together they make up water stress. The map colours each country by its largest sector, under bars of its water stress; hover a sector in the legend for its share instead.",
+      caption: () => `Each sector's withdrawal as a share of the available water; together they make up water stress. The map colours each country by its largest sector, under bars of its water stress; ${hover()} a sector in the legend for its share instead.`,
       render(c) {
         const a = focus(c);
         const s: LineSeries[] = [
@@ -474,7 +475,7 @@ const SDG: TopicDef = {
     {
       id: "sdg-wue-sectors",
       title: (c) => `Water use efficiency by sector, ${c.label}`,
-      caption: (c) => `${c.selected?.name ?? "The World"}: value added per m³ in each sector, ${BASE_YEAR} and ${c.label}. Hover a row to map that sector, with circles of the water it withdraws.`,
+      caption: (c) => `${c.selected?.name ?? "The World"}: value added per m³ in each sector, ${BASE_YEAR} and ${c.label}. ${Hover()} a row to map that sector, with circles of the water it withdraws.`,
       render(c) {
         const a = focus(c);
         const rows: BarRow[] = [
@@ -509,7 +510,7 @@ const SDG: TopicDef = {
       id: "sdg-scarcity",
       title: (c) => `Little water, or using too much? ${c.label}`,
       caption: () =>
-        `Each dot a country, as big as its population. Left of ${fmtN(SCARCE)} m³ per person a country is short of water (Falkenmark); above ${STRESSED} % it withdraws enough to be stressed (SDG 6.4.2). Hover a dot to find it on the map.`,
+        `Each dot a country, as big as its population. Left of ${fmtN(SCARCE)} m³ per person a country is short of water (Falkenmark); above ${STRESSED} % it withdraws enough to be stressed (SDG 6.4.2). ${Hover()} a dot to find it on the map.`,
       render(c) {
         const points = c.countries.map((m): Bubble => ({
           ...bubbleOf(c, m),
@@ -660,7 +661,7 @@ const RESOURCES: TopicDef = {
     {
       id: "wr-regions",
       title: (c) => `Renewable water per person per region, ${BASE_YEAR} and ${c.label}`,
-      caption: () => `Falls as population grows. Hover a row to pick out its countries on the map: circles, their populations; bars, the change since ${BASE_YEAR}.`,
+      caption: () => `Falls as population grows. ${Hover()} a row to pick out its countries on the map: circles, their populations; bars, the change since ${BASE_YEAR}.`,
       render(c) {
         const rows = areaRows(c, (a) => [val(c, a, "trwrpc", BASE), val(c, a, "trwrpc", c.period)]);
         return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: "m³/inhab/yr", axis: "Renewable water per person", width: c.width }), csv: rowsCsv(rows, [`trwrpc_${BASE_YEAR}`, `trwrpc_${c.label}`]) };
@@ -764,7 +765,7 @@ const RESOURCES: TopicDef = {
       id: "wr-storage",
       title: (c) => `Dam storage against renewable water, ${c.label}`,
       caption: () =>
-        "Dam capacity as a share of the renewable water resources: how much of a year's water can be held back for dry years. Hover a row to pick out its countries; circles: the dam capacity.",
+        `Dam capacity as a share of the renewable water resources: how much of a year's water can be held back for dry years. ${Hover()} a row to pick out its countries; circles: the dam capacity.`,
       render(c) {
         const rows = areaRows(c, (a) => [storageOf(c, a)]);
         return { html: bars({ series: [{ label: "%", color: C.s1 }], rows, unit: "%", axis: "Of renewable water", width: c.width }), csv: rowsCsv(rows, [`dam_pct_of_trwr_${c.label}`]) };
@@ -868,7 +869,7 @@ const USE: TopicDef = {
     {
       id: "wu-volume",
       title: (c) => `Freshwater withdrawal per region, ${BASE_YEAR} and ${c.label}`,
-      caption: () => "Hover a row to pick out its countries on the map. Circles: the water withdrawn, over the water stress it causes.",
+      caption: () => `${Hover()} a row to pick out its countries on the map. Circles: the water withdrawn, over the water stress it causes.`,
       render(c) {
         const rows = areaRows(c, (a) => [val(c, a, "tfw", BASE), val(c, a, "tfw", c.period)]);
         return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: unitOf("tfw"), axis: "Freshwater withdrawal", width: c.width }), csv: rowsCsv(rows, [`tfw_${BASE_YEAR}`, `tfw_${c.label}`]) };
@@ -879,7 +880,7 @@ const USE: TopicDef = {
     {
       id: "wu-per-person",
       title: (c) => `Water withdrawal per person per region, ${BASE_YEAR} and ${c.label}`,
-      caption: () => "Hover a row to pick out its countries on the map. Circles: the total withdrawn (per person × people).",
+      caption: () => `${Hover()} a row to pick out its countries on the map. Circles: the total withdrawn (per person × people).`,
       render(c) {
         const rows = areaRows(c, (a) => [val(c, a, "twpc", BASE), val(c, a, "twpc", c.period)]);
         return { html: bars({ series: [{ label: String(BASE_YEAR), color: C.base }, { label: c.label, color: C.now }], rows, unit: unitOf("twpc"), axis: "Water withdrawal per person", width: c.width }), csv: rowsCsv(rows, [`twpc_${BASE_YEAR}`, `twpc_${c.label}`]) };
@@ -933,7 +934,7 @@ const USE: TopicDef = {
     {
       id: "wu-trend",
       title: (c) => `Water withdrawal per person in ${focusName(c)}`,
-      caption: () => "Total and per sector. Hover a series in the legend to map it, with circles of its volume; click a year to map that year.",
+      caption: () => `Total and per sector. ${Hover()} a series in the legend to map it, with circles of its volume; ${click()} a year to map that year.`,
       render(c) {
         const a = focus(c);
         const s: LineSeries[] = [
@@ -978,7 +979,7 @@ const USE: TopicDef = {
       id: "wu-drivers",
       title: (c) => `What changed since ${BASE_YEAR}, to ${c.label}`,
       caption: () =>
-        `Change in %: more people, more water withdrawn (in all, or per person), less renewable water per person. The map shows the change in water stress, with bars of the change in withdrawal. Hover a row to pick out its countries.`,
+        `Change in %: more people, more water withdrawn (in all, or per person), less renewable water per person. The map shows the change in water stress, with bars of the change in withdrawal. ${Hover()} a row to pick out its countries.`,
       render(c) {
         const change = (a: number, k: VarKey) => {
           const x = val(c, a, k, BASE);
