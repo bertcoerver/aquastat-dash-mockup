@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Map projection POC</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="map"></canvas>
+    <aside id="panel">
+      <h1>Flat map, any projection</h1>
+      <label class="row">Projection
+        <select id="projection"></select>
+      </label>
+      <p id="note" class="note"></p>
+      <fieldset id="layers">
+        <legend>Layers</legend>
+        <label><input type="checkbox" data-layer="choropleth" checked /> Countries coloured (demo values)</label>
+        <label><input type="checkbox" data-layer="borders" checked /> Borders</label>
+        <label><input type="checkbox" data-layer="basins" /> SDG 6 major basins</label>
+        <label><input type="checkbox" data-layer="lakes" checked /> Lakes</label>
+        <label><input type="checkbox" data-layer="rivers" checked /> Rivers (from zoom 5)</label>
+        <label><input type="checkbox" data-layer="graticule" checked /> Graticule</label>
+        <label><input type="checkbox" data-layer="circles" /> Circles</label>
+        <label><input type="checkbox" data-layer="bars" /> 3D bars (tilts the map)</label>
+        <label><input type="checkbox" data-layer="raster" /> WaPOR AETI 2023 (L1 overview)</label>
+      </fieldset>
+      <p id="status" class="note"></p>
+      <p id="pointer" class="mono"></p>
+      <p class="note">Drag to pan, wheel to zoom, right-drag (or Ctrl-drag) to tilt and turn. Click a country to select it.</p>
+    </aside>
+  </body>
+  <script type="module" src="/src/main.ts"></script>
+</html>
