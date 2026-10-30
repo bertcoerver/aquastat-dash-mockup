@@ -781,22 +781,23 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       const bounds: [number, number, number, number] = [west, south, east < west ? east + 360 : east, north];
       // Padding given here only applies to this move: the globe stays put when a panel
       // opens or closes later.
-      const { left, right } = coveredSides(container);
-      map.fitBounds(bounds, { padding: { top: 60, bottom: 60, left: 60 + left, right: 60 + right }, maxZoom: 7, duration: 1200 });
+      const { top, bottom, left, right } = coveredEdges(container);
+      const padding = { top: MARGIN + top, bottom: MARGIN + bottom, left: MARGIN + left, right: MARGIN + right };
+      map.fitBounds(bounds, { padding, maxZoom: 7, duration: 1200 });
     },
     showPoint(center, zoom, how = "fly") {
       // Centre the point in the part of the map left uncovered (an offset, unlike
       // padding, only applies to this move). While the whole globe fits across the
       // map, keep it on screen.
-      const { left, right } = coveredSides(container);
-      let dx = (left - right) / 2;
+      const { top, bottom, left, right } = coveredEdges(container);
       const radius = (512 * 2 ** zoom) / (2 * Math.PI);
-      const width = container.clientWidth;
-      if (2 * radius < width) {
-        const room = Math.max(0, width / 2 - radius - 12);
-        dx = Math.max(-room, Math.min(room, dx));
-      }
-      const options = { center, zoom, offset: [dx, 0] as [number, number] };
+      const keep = (shift: number, size: number) => {
+        if (2 * radius >= size) return shift;
+        const room = Math.max(0, size / 2 - radius - 12);
+        return Math.max(-room, Math.min(room, shift));
+      };
+      const offset: [number, number] = [keep((left - right) / 2, container.clientWidth), keep((top - bottom) / 2, container.clientHeight)];
+      const options = { center, zoom, offset };
       if (how === "fly") map.flyTo({ ...options, duration: 1200 });
       else map.easeTo(options);
     },
@@ -897,25 +898,61 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
 // Every layer hides the far side of the globe (tile layers pass it on to their tiles).
 const HORIZON = new HorizonExtension();
 
-/** The side panels: when one is open (not folded, foldable.ts), the camera frames what it shows beside it. */
-const SIDE_PANELS = ".wb-panel:not([hidden]):not(.folding)";
-/** Leave a panel out where it would leave less than this much of the map, in pixels. */
-const MIN_UNCOVERED = 320;
+/**
+ * What floats over the map's edges, and so should be left out of the camera's frame:
+ * the open side panels (not folded, foldable.ts), the legends, the date range (unless
+ * faded out, toolbar.ts), the map's controls and the corner warnings. Not what comes
+ * and goes under the pointer (tooltips, menus, the tuning pane).
+ */
+const OVERLAYS =
+  ".wb-panel:not([hidden]):not(.folding), .legend:not([hidden]), .range-pane:not(.timeless), .corner-warnings, " +
+  ".maplibregl-ctrl-top-left, .maplibregl-ctrl-top-right, .maplibregl-ctrl-bottom-left, .maplibregl-ctrl-bottom-right";
+/** An overlay is along an edge when it comes within this much of it, in pixels. */
+const AT_EDGE = 24;
+/** Leave the overlays out where they would leave less than this much of the map, in pixels. */
+const MIN_UNCOVERED = { width: 320, height: 240 };
+/** The space kept between the frame and the map's edge or an overlay, in pixels. */
+const MARGIN = 60;
+
+interface Edges {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
 
 /**
- * How far in from the map's left and right edges the open side panels reach, in
- * pixels. Small floating boxes (legends, the layers menu) don't count.
+ * How far in from each of the map's edges the overlays reach, in pixels. A side panel
+ * or legend counts against its side, whatever its height. Any other overlay in a corner
+ * counts against the edge it takes the smaller share of the map from: the controls
+ * against the right, the date range against the bottom.
  */
-function coveredSides(container: HTMLElement) {
+function coveredEdges(container: HTMLElement): Edges {
   const box = container.getBoundingClientRect();
-  const sides = { left: 0, right: 0 };
-  for (const panel of document.querySelectorAll<HTMLElement>(SIDE_PANELS)) {
-    const r = panel.getBoundingClientRect();
-    if (r.width === 0 || r.height < box.height / 2) continue;
-    if (r.left - box.left > box.right - r.right) sides.right = Math.max(sides.right, box.right - r.left);
-    else sides.left = Math.max(sides.left, r.right - box.left);
+  const edges: Edges = { top: 0, bottom: 0, left: 0, right: 0 };
+  for (const el of document.querySelectorAll<HTMLElement>(OVERLAYS)) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    const depths: [keyof Edges, number, number][] = [
+      ["top", r.bottom - box.top, box.height],
+      ["bottom", box.bottom - r.top, box.height],
+      ["left", r.right - box.left, box.width],
+      ["right", box.right - r.left, box.width],
+    ];
+    const column = el.matches(".wb-panel, .legend");
+    let best: (typeof depths)[number] | null = null;
+    for (const d of depths) {
+      const vertical = d[0] === "top" || d[0] === "bottom";
+      if (column && vertical) continue;
+      // Along the edge: its own extent reaches to within AT_EDGE of it.
+      if (d[1] - (vertical ? r.height : r.width) > AT_EDGE) continue;
+      if (best === null || d[1] / d[2] < best[1] / best[2]) best = d;
+    }
+    if (best !== null) edges[best[0]] = Math.max(edges[best[0]], best[1]);
   }
-  return box.width - sides.left - sides.right < MIN_UNCOVERED ? { left: 0, right: 0 } : sides;
+  if (box.width - edges.left - edges.right < MIN_UNCOVERED.width) edges.left = edges.right = 0;
+  if (box.height - edges.top - edges.bottom < MIN_UNCOVERED.height) edges.top = edges.bottom = 0;
+  return edges;
 }
 
 /** Cosine of the angle between two points on the globe (1: same point, < 0: opposite sides). */
