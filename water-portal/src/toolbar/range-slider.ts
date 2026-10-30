@@ -31,7 +31,7 @@ import {
   type DayRange,
   type View,
 } from "./range-rules";
-import { byId as $ } from "../lib/dom";
+import { byId as $, coarsePointer } from "../lib/dom";
 import { clamp } from "../lib/math";
 
 /** What the slider shows: the view (whose rules apply) and the range, in days. */
@@ -44,7 +44,8 @@ interface SliderState {
 export type Grip = "start" | "end" | "band";
 
 const BOUNDARIES = MAX_DAY + 1;
-const HIT_PX = 12; // how close to a handle a press outside the band must be to grab it
+/** How close to a handle a press outside the band must be to grab it (a finger: further). */
+const HIT_PX = coarsePointer.matches ? 20 : 12;
 const LABEL_GAP_PX = 8; // least space between year labels
 const MONTH_TICK_PX = 8; // least space between month ticks for them to show
 const CORE_PX = 5; // same inside the band, at most (a narrow band leaves its middle draggable)

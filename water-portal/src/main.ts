@@ -13,6 +13,7 @@ import { damsData, type Dams } from "./local/vector-maps";
 import { makeResizable } from "./panels/floating";
 import { makeFoldable } from "./panels/foldable";
 import { initLayersMenu } from "./panels/layers-menu";
+import { initLegendFold } from "./panels/legend-fold";
 import { clearMapTip, initMapTips } from "./panels/map-tip";
 import { initSlowServerCheck } from "./panels/slow-server";
 import { initLoadBar } from "./panels/load-bar";
@@ -34,7 +35,8 @@ import "./styles/panels.css";
 import "./styles/legend.css";
 import "./styles/basin.css";
 import "./styles/country.css";
-import { byId as $ } from "./lib/dom";
+import "./styles/compact.css"; // (last: phones' rules win)
+import { byId as $, narrowLayout } from "./lib/dom";
 import { dataUrl } from "./lib/data-url";
 
 // First, so it counts every request from here on.
@@ -350,6 +352,9 @@ for (const id of ["cp-panel", "wb-panel", "lp-panel"]) {
   makeResizable($(id), "side-panel");
   makeFoldable($(id));
 }
+// On a phone the legend lies across the top of the map: it folds to its title while the
+// graph pane (a sheet there) is open, and a button folds it or opens it.
+initLegendFold(["cp-legend", "bs-legend", "lp-legend"].map($), ["cp-panel", "wb-panel", "lp-panel"].map($));
 
 // The Layers button goes with the map's controls, above zoom (MapLibre stacks later
 // bottom controls on top).
@@ -364,6 +369,9 @@ waterMap.map.addControl({ onAdd: () => layersBox, onRemove: () => layersBox.remo
 // Nor the unfolded pane, which would push it aside on every hover.) Where the range is
 // under the pane, the unfolded pane stops above it (--pane-bottom). Its width can be
 // changed too, from either side at once, as far as under the pane.
+// On a phone (styles/compact.css) the range lies along the bottom and the pane is a sheet
+// over it; the map's controls and the corner warnings stand above the sheet's heading
+// (--controls-bottom, from the folded sheet: open, it covers them).
 const controls = document.querySelector<HTMLElement>(".maplibregl-ctrl-bottom-right .maplibregl-ctrl-group")!;
 const graphPanes = ["cp-panel", "wb-panel", "lp-panel"].map($);
 const rangePane = $("pane-range");
@@ -372,26 +380,41 @@ initMapTips(rangePane);
 makeResizable(rangePane, "range", { centered: true });
 function fitRange() {
   const root = document.documentElement.style;
-  if (graphPanes.every((pane) => pane.classList.contains("resting"))) {
-    let left = 0;
-    for (const pane of graphPanes) {
-      const r = pane.getBoundingClientRect();
-      if (r.width > 0 && r.bottom > window.innerHeight - 120) left = Math.max(left, r.right);
+  const resting = graphPanes.every((pane) => pane.classList.contains("resting"));
+  const shown = rangePane.getBoundingClientRect().height > 0 && !rangePane.classList.contains("timeless");
+  if (narrowLayout.matches) {
+    if (resting) {
+      let top = window.innerHeight;
+      for (const el of shown ? [...graphPanes, rangePane] : graphPanes) {
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) top = Math.min(top, r.top);
+      }
+      root.setProperty("--controls-bottom", `${Math.round(window.innerHeight - top)}px`);
     }
-    const right = window.innerWidth - controls.getBoundingClientRect().left;
-    root.setProperty("--range-left", `${Math.round(left)}px`);
-    root.setProperty("--range-right", `${Math.round(right)}px`);
+  } else {
+    root.removeProperty("--controls-bottom");
+    if (resting) {
+      let left = 0;
+      for (const pane of graphPanes) {
+        const r = pane.getBoundingClientRect();
+        if (r.width > 0 && r.bottom > window.innerHeight - 120) left = Math.max(left, r.right);
+      }
+      const right = window.innerWidth - controls.getBoundingClientRect().left;
+      root.setProperty("--range-left", `${Math.round(left)}px`);
+      root.setProperty("--range-right", `${Math.round(right)}px`);
+    }
   }
   const range = rangePane.getBoundingClientRect();
   const paneRight = Math.max(...graphPanes.map((pane) => pane.getBoundingClientRect().right));
-  const shown = range.height > 0 && !rangePane.classList.contains("timeless");
   if (shown && paneRight > range.left) root.setProperty("--pane-bottom", `${Math.round(window.innerHeight - range.top + 12)}px`);
   else root.removeProperty("--pane-bottom");
 }
 const rangeObserver = new ResizeObserver(fitRange);
 for (const el of [...graphPanes, rangePane]) rangeObserver.observe(el);
-// (Hidden a while after it's dimmed: toolbar.ts setTimeless.)
-new MutationObserver(fitRange).observe(rangePane, { attributes: true, attributeFilter: ["class"] });
+// (Hidden a while after it's dimmed: toolbar.ts setTimeless. A pane settled folded, at
+// the size it already had: foldable.ts's .resting.)
+const classObserver = new MutationObserver(fitRange);
+for (const el of [...graphPanes, rangePane]) classObserver.observe(el, { attributes: true, attributeFilter: ["class"] });
 window.addEventListener("resize", fitRange);
 
 const layersMenu = initLayersMenu(setLayerVisible);

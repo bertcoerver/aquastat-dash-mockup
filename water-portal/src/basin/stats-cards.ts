@@ -26,6 +26,7 @@
  * and storage change (ΔS), precomputed (model.ts), in m³/s.
  */
 import { bars, bubbles, columns, heatmap, lines, type BarRow, type Bubble, type LineSeries } from "../country/charts";
+import { Hover, byPointer, hover } from "../lib/words";
 import type { SubBasin } from "../map/sub-basin-network";
 import { perDays, waporVariable, type WaporPer } from "../map/layers/wapor-variables";
 import { LOADING, unlessLoading } from "../panels/load-bar";
@@ -692,7 +693,7 @@ function rankCard(m: MeasureKey, order: "top" | "ends", title: string, note = ""
       const status = othersStatus(c, m);
       return `${note}Out of all major basins${c.sub ? `, with ${areaName(c, focus(c))} on top` : ""}. ` +
         (status === LOADING ? "" : status ? `${status} ` : `Against the average of the same days in ${others(c).length} other years (${othersLabel(c)}). `) +
-        "The map shows only the basins named; hover one to pick it out.";
+        `The map shows only the basins named; ${hover()} one to pick it out.`;
     },
     render(c) {
       const message = fluxMessage(c, m);
@@ -759,7 +760,7 @@ function subCard(m: MeasureKey, order: "top" | "ends", n = 14, { prefer, also }:
   return {
     id: `${m}-sub`,
     title: (c) => (c.major ? `${c.major.name}: sub-basins by ${def.label.toLowerCase()}` : `Sub-basins by ${def.label.toLowerCase()}`),
-    caption: (c) => (c.major ? `${c.period}. Hover a sub-basin to outline it on the map.` : "Pick a basin to compare its sub-basins."),
+    caption: (c) => (c.major ? `${c.period}. ${Hover()} a sub-basin to outline it on the map.` : "Pick a basin to compare its sub-basins."),
     render(c) {
       if (!c.major) return empty("Pick a major basin, on the map or above.");
       const message = fluxMessage(c, m, "sub");
@@ -784,7 +785,7 @@ const hydrograph: BasinCard = {
   caption: (c) =>
     `Precipitation over the basin (mm/day, from the top) and discharge ` +
     (c.sub ? "out of it" : c.major ? "at its outlets" : "summed over the outlets of all major basins") +
-    `, per dekad. ${others(c).length >= MIN_OTHERS ? `Grey: the average of the same dekads in ${others(c).length} other years. ` : ""}Hover a dekad to map it; click it to select it.`,
+    `, per dekad. ${others(c).length >= MIN_OTHERS ? `Grey: the average of the same dekads in ${others(c).length} other years. ` : ""}${byPointer("Hover a dekad to map it; click it to select it.", "Tap a dekad to select it.")}`,
   render(c) {
     const message = fluxMessage(c, "Q");
     if (message) return empty(message);
@@ -870,7 +871,7 @@ const monthlyCard: BasinCard = {
   title: (c) => `${areaName(c, focus(c))}: precipitation and evapotranspiration by month`,
   caption: (c) =>
     `${c.units.basin ? "Summed, in km³" : "Averaged over the area, in mm"} per month (months at the ends of the range only count the days in it). ` +
-    `Hover a series to map it, or a month to map that month${c.major ? " with its rain and vapour" : ""}; click a month to select it.`,
+    byPointer(`Hover a series to map it, or a month to map that month${c.major ? " with its rain and vapour" : ""}; click a month to select it.`, `Tap a series to map it${c.major ? ", with its rain and vapour" : ""}, or a month to select it.`),
   render(c) {
     const m = c.monthly;
     if (!m) return empty(LOADING);
@@ -941,7 +942,7 @@ const closureCard: BasinCard = {
   title: (c) => `Where the water left goes, ${c.period}`,
   caption: (c) =>
     "What's left of the rain (PCP − AETI) should leave as discharge or be stored (the model's ΔS); the rest is what the data and the model don't account for (water from other basins, irrigation from aquifers, errors). " +
-    `${c.sub ? `${areaName(c, focus(c))}, its major basin, ` : c.major ? `${c.major.name}, ` : ""}the largest major basins and the World. Hover a row to pick out its basins.`,
+    `${c.sub ? `${areaName(c, focus(c))}, its major basin, ` : c.major ? `${c.major.name}, ` : ""}the largest major basins and the World. ${Hover()} a row to pick out its basins.`,
   render(c) {
     const message = fluxMessage(c, "Q");
     if (message) return empty(message);
@@ -976,7 +977,7 @@ const droughtCard: BasinCard = {
   title: (c) => `Drier or wetter, more or less evaporation, ${c.period}`,
   caption: (c) =>
     `Each dot a major basin, as big as it is: its precipitation (across) and evapotranspiration (up) against the average of the same days in other years. ` +
-    (c.major ? `${c.major.name} is in colour. ` : "") + "Hover a dot to find it on the map.",
+    (c.major ? `${c.major.name} is in colour. ` : "") + `${Hover()} a dot to find it on the map.`,
   render(c) {
     const status = othersStatus(c, "pcp");
     if (status) return empty(status);
@@ -1044,7 +1045,7 @@ const profileCard: BasinCard = {
   title: (c) => (c.major ? `${c.major.name}: down the main river` : "Down the main river"),
   caption: (c) =>
     c.major
-      ? `Its sub-basins from the source to the mouth, along the river draining most. At each: the discharge out of it, and summed over it and all upstream of it, PCP − AETI and the storage change (m³/s). Where the discharge falls below PCP − AETI the river loses water (wetlands, irrigation). Hover a sub-basin to outline it on the map.`
+      ? `Its sub-basins from the source to the mouth, along the river draining most. At each: the discharge out of it, and summed over it and all upstream of it, PCP − AETI and the storage change (m³/s). Where the discharge falls below PCP − AETI the river loses water (wetlands, irrigation). ${Hover()} a sub-basin to outline it on the map.`
       : "Pick a major basin to follow its main river.",
   render(c) {
     if (!c.major) return empty("Pick a major basin, on the map or above.");
@@ -1175,7 +1176,7 @@ const regimeCard: BasinCard = {
   title: (c) => `${areaName(c, focus(c))}: water left, month by month`,
   caption: (c) =>
     `PCP − AETI every month of the record (${c.units.basin ? "km³" : "mm"} per month): teal, water left over; brown, more evaporates than falls. ` +
-    `Hover a month to map it${c.major ? " with its rain and vapour" : ""}; click it to select it.`,
+    byPointer(`Hover a month to map it${c.major ? " with its rain and vapour" : ""}; click it to select it.`, "Tap a month to select it."),
   render(c) {
     const m = c.regime;
     if (!m) return empty(LOADING);

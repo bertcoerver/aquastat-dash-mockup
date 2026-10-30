@@ -20,6 +20,7 @@ import { fmt } from "../basin/variables";
 import { DAMS, PURPOSES, type Dams, type VectorAttribute } from "./vector-maps";
 import { fmtNumber } from "../lib/format";
 import { esc } from "../lib/html";
+import { byPointer } from "../lib/words";
 
 export interface DamCards {
   setData(dams: Dams): void;
@@ -111,7 +112,7 @@ export function initDamCards(container: HTMLElement, tooltip: HTMLElement): DamC
     if (i === null) {
       return (
         `<p class="dc-intro">All ${count(d.count)} dams in AQUASTAT with coordinates. Click a dam on the map, or search for one ` +
-        "in the title, to see it among them. Hover a card to see its attribute on the map; click to pin it.</p>"
+        `in the title, to see it among them. ${byPointer("Hover a card to see its attribute on the map; click to pin it.", "Tap a card to see its attribute on the map; tap it again to let it go.")}</p>`
       );
     }
     const own = PURPOSES.filter((_, b) => d.purposes[i] & (1 << b));

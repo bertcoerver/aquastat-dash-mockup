@@ -15,7 +15,9 @@
  *   (data-x with its driver, so a chart can say what its steps are: years, months, dekads);
  * - the keyboard does the same: Tab to a driver previews it, Enter or Space pins it,
  *   the arrow keys step along its chart's marks (those with a tooltip: rows, steps,
- *   points), each shown as hovered, and Enter on a step selects it.
+ *   points), each shown as hovered, and Enter on a step selects it;
+ * - a finger can't hover: a tap pins (and a tap on a mark shows its tooltip, until the
+ *   next tap), a second tap on the pinned driver unpins it, with no preview left behind.
  *
  * Where the pins are kept (one per topic, say) is up to the owner.
  */
@@ -70,13 +72,13 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
     } else apply();
   }
 
-  function pin(driver: Driver) {
+  function pin(driver: Driver, touch = false) {
     // Clicking the pinned card again unpins it (a click on another row or series re-pins).
     const next = same(pinned(), driver) ? null : driver;
     setPinned(next);
-    // Unpinned, the driver under the pointer is previewed again.
+    // Unpinned, the driver under the pointer is previewed again (a finger has left already).
     clearTimeout(timer);
-    preview = next ? null : driver;
+    preview = next || touch ? null : driver;
     onChange();
   }
 
@@ -102,20 +104,30 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
     const tip = (e.target as Element).closest<HTMLElement>("[data-tip]")?.dataset.tip;
     showTip(tip ?? null, e);
   });
+  // (What pressed last: a click doesn't say in every browser.)
+  let lastPointer = "mouse";
+  root.addEventListener("pointerdown", (e) => (lastPointer = e.pointerType));
   root.addEventListener("click", (e) => {
     const target = e.target as Element;
+    const touch = lastPointer === "touch";
     const csv = target.closest<HTMLElement>("[data-csv]");
     if (csv && onCsv) return onCsv(csv.dataset.csv!);
     if (target.closest("[data-unpin]")) {
       setPinned(null);
       // The pointer is on the card: preview it, as after unpinning by clicking it.
-      preview = driverAt(target);
+      preview = touch ? null : driverAt(target);
       return onChange();
     }
     const x = target.closest<HTMLElement>("[data-x]")?.dataset.x;
     const d = driverAt(target);
     if (x !== undefined && onX) onX(Number(x), d);
-    if (d) pin(d);
+    if (d) pin(d, touch);
+    // A tap on a mark: its tooltip, where the finger was.
+    if (touch) showTip(target.closest<HTMLElement>("[data-tip]")?.dataset.tip ?? null, e);
+  });
+  // A tap elsewhere takes a tapped mark's tooltip away.
+  document.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch" && !tooltip.hidden && !(e.target as Element).closest?.("[data-tip]")) tooltip.hidden = true;
   });
   root.addEventListener("focusin", (e) => {
     const d = driverAt(e.target);
@@ -180,10 +192,12 @@ export function initDrivers(root: HTMLElement, { enabled, pinned, setPinned, onC
       tipWritten = { html, node: tooltip.firstChild };
     }
     tooltip.hidden = false;
-    // Left of the pointer: the panels are on the right edge of the screen.
+    // Left of the pointer: the panels are on the right edge of the screen. Below it, as
+    // far as the screen allows (on a phone the pane is at the bottom: above it there).
     const w = tooltip.offsetWidth;
-    tooltip.style.left = `${Math.max(8, e.clientX - w - 14)}px`;
-    tooltip.style.top = `${e.clientY + 14}px`;
+    const h = tooltip.offsetHeight;
+    tooltip.style.left = `${Math.max(8, Math.min(e.clientX - w - 14, window.innerWidth - w - 8))}px`;
+    tooltip.style.top = `${e.clientY + 14 + h > window.innerHeight - 8 ? Math.max(8, e.clientY - h - 14) : e.clientY + 14}px`;
   }
 
   return {

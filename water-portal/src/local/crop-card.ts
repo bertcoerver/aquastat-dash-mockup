@@ -18,6 +18,7 @@
 import { fmt } from "../basin/variables";
 import { GAEZ_CROPS, GAEZ_HARVEST_PIXEL, GAEZ_MAPS, gaezCrop, gaezCropIn, gaezHarvestUrl, type GaezMap, type GaezSupply } from "../map/layers/gaez";
 import { fmtArea, pixelArea } from "../map/layers/wapor-variables";
+import { byPointer } from "../lib/words";
 import type { LngLat } from "../map/places";
 import { setProgress } from "../panels/load-bar";
 import { cogPixel } from "./cog-pixel";
@@ -166,7 +167,7 @@ export function initCropCard(el: HTMLElement, onHover: (shown: CropMap | null) =
       `Each crop's ${supply}harvested area in 2020, as % of the ${fmtArea(area)} pixel (5′, about 10 km) at this point: ` +
       "FAOSTAT's 2019–2021 averages, spread over the cropland by GAEZ v5. Land harvested twice a year counts twice, so they can add up to more than the cropland. " +
       (own ? (gaezCrop(own).group ? `The ${gaezCrop(own).label.toLowerCase()} on the map are in full colour. ` : `The crop on the map is in full colour (${gaezCrop(own).label.toLowerCase()}). `) : "") +
-      "Hover a bar to read it, click it to show that crop on the map.";
+      byPointer("Hover a bar to read it, click it to show that crop on the map.", "Tap a bar to show that crop on the map.");
   }
 
   /** A crop's harvested area on the card's supply. */

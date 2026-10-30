@@ -1,0 +1,239 @@
+/* The compact layout, for phones (a screen or window up to 640 px wide; lib/dom.ts's
+   narrowLayout is the same query), and what a finger needs that a mouse doesn't.
+
+   On a phone the graph pane is a sheet along the bottom of the screen, over the date
+   range: folded, its heading (the view tabs, the title; and the pinned chart, if any);
+   a tap on the heading, or a swipe up, opens it to --sheet-h, where its body scrolls, and
+   a tap on the heading of the open sheet or a swipe down folds it (panels/foldable.ts).
+   The legend lies across the top of the map, no taller than a third of the screen,
+   scrolling past that; while the sheet is open, or folded with a pinned chart, it folds
+   to its title line, so that the map shows between them, and a button in its title folds
+   it or opens it anyway (panels/legend-fold.ts). The map's controls and the corner warnings stand just above
+   the sheet (main.ts sets --controls-bottom). The map's tooltip follows the pointer
+   rather than pin by the date range, which has no room beside it (panels/map-tip.ts).
+   Loaded last (main.ts): its rules win over the others' at the same specificity. */
+
+/* The legend's fold button (panels/legend-fold.ts): only on a phone. */
+.legend-fold {
+  display: none;
+}
+
+/* Short and wide (a phone on its side): narrower panes, so the pane and the legend don't meet. */
+@media (min-width: 641px) and (max-width: 960px) {
+  :root {
+    --side-w: 360px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    /* How much of the screen the open sheet takes. */
+    --sheet-h: 60dvh;
+    /* The sheet's bottom, over the date range (main.ts sets --pane-bottom), else the screen's. */
+    --sheet-bottom: var(--pane-bottom, calc(12px + env(safe-area-inset-bottom, 0px)));
+  }
+
+  /* --- The sheet ---------------------------------------------------------------------- */
+  .wb-panel,
+  .lp-panel {
+    top: auto;
+    left: 12px;
+    right: 12px;
+    bottom: var(--sheet-bottom);
+    width: auto !important; /* (not the width dragged on a desktop, floating.ts) */
+    min-width: 0;
+    max-width: none;
+    max-height: var(--sheet-h);
+  }
+  /* Folding: its height is set (foldable.ts); anchored at the bottom, it grows upwards. */
+  .wb-panel.folding {
+    top: auto;
+    bottom: var(--sheet-bottom);
+  }
+  /* The heading is the handle: a short bar across its top says so; a swipe on it opens or folds the sheet. */
+  .wb-head {
+    padding-top: 18px;
+    touch-action: none;
+  }
+  .wb-head::before {
+    content: "";
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+    translate: -50% 0;
+  }
+  .wb-body {
+    overscroll-behavior: contain;
+  }
+  /* No grip: the sheet is as wide as the screen. */
+  .pane-resize {
+    display: none;
+  }
+  /* The number tiles two to a row, so their labels keep whole words. */
+  .wb-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  #bs-stats {
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+  /* The topic tabs can go on two lines. */
+  .wb-vars {
+    flex-wrap: wrap;
+  }
+  .cp-topics button {
+    padding: 6px 4px;
+  }
+  /* The search's list fits in the sheet (it opens below the title, at the sheet's top). */
+  .combobox-tree {
+    min-width: 0;
+  }
+  .title-combobox .combobox-list {
+    min-width: 0;
+    width: calc(100vw - 52px);
+    max-width: none;
+    max-height: calc(var(--sheet-h) - 150px);
+  }
+  .title-field:focus-within {
+    min-width: min(260px, 60vw);
+  }
+  .point-popup {
+    width: min(320px, calc(100vw - 52px));
+  }
+  .point-popup .combobox-tree {
+    max-height: calc(var(--sheet-h) - 200px);
+  }
+
+  /* --- The legend --------------------------------------------------------------------- */
+  .legend {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-height: 34dvh;
+    overscroll-behavior: contain;
+  }
+  .legend-title .title-menu {
+    max-width: calc(100% - 22px); /* (room for the fold button) */
+  }
+  /* The button that folds it (panels/legend-fold.ts): at the right of its title. */
+  .legend-fold {
+    display: grid;
+    position: absolute;
+    top: -3px;
+    right: -6px;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .legend-fold .title-caret {
+    position: static;
+    width: 6px;
+    height: 6px;
+    transform: translateY(-2px) rotate(-135deg); /* ▴: folds it */
+  }
+  .legend-fold[aria-expanded="false"] .title-caret {
+    transform: translateY(-2px) rotate(45deg); /* ▾: opens it */
+  }
+  /* Folded (legend-fold.ts): its title line alone, the rest kept laid out (hidden, no
+     height) so what's drawn in it keeps its width. */
+  .legend.folded > :not(.legend-title) {
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden;
+    visibility: hidden;
+  }
+
+  /* --- The date range ----------------------------------------------------------------- */
+  .range-pane,
+  .range-pane.sized {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    min-width: 0;
+    transform: none;
+    padding: 8px 12px;
+  }
+  /* The length goes under the dates where they don't all fit on the line. */
+  .range-readout {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  /* --- Around the map ----------------------------------------------------------------- */
+  /* The map's controls and the warnings: above the sheet's heading, left and right. */
+  .maplibregl-ctrl-bottom-right {
+    bottom: var(--controls-bottom, 0px);
+  }
+  .corner-warnings {
+    bottom: calc(var(--controls-bottom, 0px) + 10px);
+    max-width: calc(100vw - 80px);
+  }
+  /* The map's tooltip follows the pointer (map-tip.ts): no box by the date range, and no key to pin it. */
+  .map-tip-dock,
+  .map-tip-zone,
+  .wb-tooltip .mt-key {
+    display: none;
+  }
+  .wb-tooltip {
+    max-width: calc(100vw - 24px);
+  }
+  .tuning-pane {
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
+}
+
+/* --- A finger ----------------------------------------------------------------------- */
+@media (pointer: coarse) {
+  /* The slider's handles are bigger (and reach further: range-slider.ts). */
+  .slider-handle {
+    top: -1px;
+    width: 14px;
+    height: 24px;
+    margin-left: -7px;
+    border-radius: 7px;
+  }
+  /* Text at 16 px in the fields: smaller, iOS zooms in on them when focused. */
+  .combobox input,
+  .coords input,
+  .lp-input,
+  .dp-nav select {
+    font-size: 16px;
+  }
+  /* A legend section's title scrolls the legend; the arrows move the section. */
+  .legend-layer-head {
+    touch-action: pan-y;
+  }
+}
+/* A phone: no zoom buttons (two fingers zoom), so the controls fit beside the map between the legend and the sheet. */
+@media (pointer: coarse) and (max-width: 640px) {
+  .maplibregl-ctrl-group button.maplibregl-ctrl-zoom-in,
+  .maplibregl-ctrl-group button.maplibregl-ctrl-zoom-out {
+    display: none;
+  }
+}
+
+/* --- No hover ----------------------------------------------------------------------- */
+/* The hint under the topics says what a tap does, not what hovering would. */
+.hint-touch {
+  display: none;
+}
+@media (hover: none) {
+  .hint-hover {
+    display: none;
+  }
+  .hint-touch {
+    display: inline;
+  }
+}

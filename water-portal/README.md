@@ -50,7 +50,7 @@ Other commands:
 | `npm run typecheck` | Only check the TypeScript for errors |
 | `npm run lint` | ESLint, for what the type checker doesn't catch (`eslint.config.js`) |
 | `npm test` | The unit tests (`test/*.test.ts`, [Vitest](https://vitest.dev)): the date rules, the basin statistics' sums, the WaPOR rasters a range adds up, the sub-basin network, the axis and CSV helpers |
-| `npm run smoke` | Drive the built site through its three views in a headless browser and fail on any error (`scripts/smoke.mjs`; needs Playwright's Chromium: `npx playwright install chromium`) |
+| `npm run smoke` | Drive the built site through its three views in a headless browser, then as a phone through the sheet's taps, and fail on any error (`scripts/smoke.mjs`; needs Playwright's Chromium: `npx playwright install chromium`) |
 | `npm run check` | Type-check, lint, test and build, as [the GitHub Actions workflow](../.github/workflows/ci.yml) does on every push |
 | `npm run lists` | Rebuild the country, basin and sub-basin lists for the top bar (`public/data/`) |
 | `npm run country-info` | Rebuild each country's region and map centre for the Country view (`public/data/country-info.json`; needs the polygons `npm run tiles` downloads) |
@@ -101,7 +101,8 @@ water-portal/
     │   ├── memo.ts         A memoised promise that forgets a failure; keeping the last few entries of a map
     │   ├── schedule.ts     perFrame: a draw once per animation frame
     │   ├── drag.ts         A pointer drag, its listeners taken off at the end
-    │   └── popover.ts      What closes a popup: Escape, a press elsewhere, the focus leaving, a resize
+    │   ├── popover.ts      What closes a popup: Escape, a press elsewhere, the focus leaving, a resize
+    │   └── words.ts        "Hover" or "Tap", "click" or "tap": a caption's verbs for a mouse or a finger
     ├── map/
     │   ├── map.ts          MapLibre globe + deck.gl overlay; layer order, view, clicks
     │   ├── theme.ts        Map colours (light and dark)
@@ -171,7 +172,8 @@ water-portal/
     │   ├── tuning-pane.ts  Hidden pane of sliders for the particles, rain and vapour (triple-click a legend)
     │   ├── shape-switch.ts A map's switch: the areas' colours, circles or 3D bars
     │   ├── shape-style.ts  How circles and bars look: a menu on their key (colours, full size)
-    │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
+    │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover; on a phone, by taps and swipes
+    │   ├── legend-fold.ts  On a phone, the legend folds to its title while the sheet is open; a button folds or opens it
     │   ├── load-bar.ts     Load bar under the graph pane's heading while anything loads
     │   ├── corner-warning.ts The bottom-left corner's warnings, one above the other; their ⚠ copies a report
     │   ├── crash-warning.ts Warning there for an error nothing else reports, and the map's graphics context lost
@@ -196,7 +198,8 @@ water-portal/
         ├── panels.css      Layers menu and resizable panes
         ├── basin.css       Water balance panel, its legend and tooltips
         ├── country.css     Country panel, chart cards, chart colours, its legend
-        └── legend.css      Map legends: the WaPOR legend, layers, the checklist
+        ├── legend.css      Map legends: the WaPOR legend, layers, the checklist
+        └── compact.css     Phones: the pane as a sheet at the bottom, the legend across the top, what a finger needs
 ```
 
 ## Notes
@@ -529,6 +532,22 @@ water-portal/
   (`role="img"`), and the panels' messages are announced (`role="status"`).
 - **Light / dark** follows the operating system setting, both for the top bar and the
   map.
+- **Phones** ([src/styles/compact.css](src/styles/compact.css): a screen or window up to
+  640 px wide): the graph pane is a sheet along the bottom of the screen, over the date
+  range. Folded, it shows its heading and the pinned chart (together no more than half
+  the screen); a tap on the heading or a swipe up opens it, to 60 % of the screen, with
+  its body scrolling; a tap on the open sheet's heading, a swipe down or a tap elsewhere
+  folds it. The legend lies across the top, no taller than a third of the screen, and
+  folds to its title line while the sheet is open or shows a pinned chart, so the map
+  shows between them; a button in its title folds or opens it anyway
+  ([src/panels/legend-fold.ts](src/panels/legend-fold.ts)). The map's controls and the
+  corner warnings stand above the sheet; on a touch screen the zoom buttons are left out
+  (two fingers zoom). Where nothing hovers, a tap on a tile or chart pins it (a tap on a
+  mark shows its tooltip too) and a second tap unpins it, and the hints and captions say so
+  ([src/lib/words.ts](src/lib/words.ts)); the map's tooltip follows the pointer rather than
+  pin by the date range; the slider's handles are bigger, and reach further, for a finger.
+  Between 640 and 960 px the side panes are narrower (360 px), so a phone on its side
+  has room for both.
 - **The URL keeps the state** (`src/url-state.ts`), so a view can be shared as a link: the
   map's place and zoom (`map=zoom/lat/lon`, MapLibre's), the view, what is selected (a
   country or region, a basin or sub-basin, the Local view's point and dam), the date

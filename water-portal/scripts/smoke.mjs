@@ -1,6 +1,7 @@
 // Smoke test of the built site (`npm run build` first): serves dist/ and drives it in a
 // headless browser through the three views, a hover, a drag of the slider and the date
-// picker, and fails on any page error, console error or failed request to the site.
+// picker, then as a phone (a narrow screen, touch) through the sheet's taps, and fails
+// on any page error, console error or failed request to the site.
 // Usage: node scripts/smoke.mjs [url]   (without a URL it starts `vite preview` itself)
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
@@ -161,6 +162,34 @@ try {
     await page.click('.tab[data-view="country"]');
     await page.waitForSelector("#cp-panel:not([hidden])", { timeout: 10000 });
     await page.waitForTimeout(800);
+  });
+  // A phone (styles/compact.css): the pane is a sheet along the bottom; a tap on its
+  // heading opens it (the legend folds meanwhile), a tap on a card pins the card, and a
+  // tap on the heading folds the sheet with the pinned chart kept.
+  await step("a phone: the sheet opens, pins and folds by taps", async () => {
+    const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+    const p = await phone.newPage();
+    p.on("pageerror", (e) => errors.push(`phone pageerror: ${e.message}`));
+    try {
+      await p.goto(base, { waitUntil: "load", timeout: 60000 });
+      await p.waitForSelector("#cp-panel.resting:not([hidden])", { timeout: 60000 });
+      await p.waitForFunction(() => document.querySelectorAll("#cp-cards [data-driver]").length > 0, null, { timeout: 30000 });
+      await p.waitForTimeout(500);
+      const sheet = await p.$eval("#cp-panel", (el) => el.getBoundingClientRect().toJSON());
+      if (Math.round(sheet.left) !== 12 || Math.round(sheet.width) !== 366 || sheet.bottom > 844 - 12 || sheet.top < 400) throw new Error(`the pane isn't a sheet along the bottom: ${JSON.stringify(sheet)}`);
+      // (The heading's top edge: its handle, not the tabs or the title.)
+      await p.tap("#cp-panel .wb-head", { position: { x: 180, y: 8 } });
+      await p.waitForSelector("#cp-panel:not(.folding)", { timeout: 5000 });
+      if (!(await p.$eval("#cp-legend", (el) => el.classList.contains("folded")))) throw new Error("the legend didn't fold while the sheet is open");
+      await p.tap("#cp-cards [data-driver]");
+      await p.waitForSelector("#cp-cards [data-driver].pinned", { timeout: 5000 });
+      await p.tap("#cp-panel .wb-head", { position: { x: 180, y: 8 } });
+      await p.waitForSelector("#cp-panel.resting.has-kept", { timeout: 5000 });
+      const folded = await p.$eval("#cp-panel", (el) => el.getBoundingClientRect().height);
+      if (folded > 844 / 2 + 1) throw new Error(`the folded sheet with its pinned chart is ${folded} px tall, over half the screen`);
+    } finally {
+      await phone.close();
+    }
   });
   await browser.close();
 } finally {

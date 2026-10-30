@@ -8,6 +8,7 @@ import { MapboxOverlay } from "@deck.gl/mapbox";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { View } from "../toolbar/range-rules";
+import { narrowLayout } from "../lib/dom";
 import { basinOutlinesLayer, majorBasinsLayers, subBasinOutlinesLayer, subBasinsLayers, type BasinFills } from "./layers/basins";
 import { bordersLayer } from "./layers/borders";
 import { graticuleLabels, graticuleLayer } from "./layers/graticule";
@@ -782,7 +783,8 @@ export function createMap(container: HTMLElement, { dark, onClick, onHover, onMa
       // Padding given here only applies to this move: the globe stays put when a panel
       // opens or closes later.
       const { top, bottom, left, right } = coveredEdges(container);
-      const padding = { top: MARGIN + top, bottom: MARGIN + bottom, left: MARGIN + left, right: MARGIN + right };
+      const margin = narrowLayout.matches ? MARGIN_NARROW : MARGIN;
+      const padding = { top: margin + top, bottom: margin + bottom, left: margin + left, right: margin + right };
       map.fitBounds(bounds, { padding, maxZoom: 7, duration: 1200 });
     },
     showPoint(center, zoom, how = "fly") {
@@ -911,8 +913,11 @@ const OVERLAYS =
 const AT_EDGE = 24;
 /** Leave the overlays out where they would leave less than this much of the map, in pixels. */
 const MIN_UNCOVERED = { width: 320, height: 240 };
-/** The space kept between the frame and the map's edge or an overlay, in pixels. */
+/** The space kept between the frame and the map's edge or an overlay, in pixels (less on a phone). */
 const MARGIN = 60;
+const MARGIN_NARROW = 24;
+/** On a phone, what's left of the map between the legend and the sheet is less: frame in less. */
+const MIN_UNCOVERED_NARROW = { width: 200, height: 160 };
 
 interface Edges {
   top: number;
@@ -923,13 +928,16 @@ interface Edges {
 
 /**
  * How far in from each of the map's edges the overlays reach, in pixels. A side panel
- * or legend counts against its side, whatever its height. Any other overlay in a corner
- * counts against the edge it takes the smaller share of the map from: the controls
- * against the right, the date range against the bottom.
+ * or legend counts against its side, whatever its height (on a phone, where they lie
+ * across the screen, against its top or bottom like the rest). Any other overlay in a
+ * corner counts against the edge it takes the smaller share of the map from: the
+ * controls against the right, the date range against the bottom.
  */
 function coveredEdges(container: HTMLElement): Edges {
   const box = container.getBoundingClientRect();
   const edges: Edges = { top: 0, bottom: 0, left: 0, right: 0 };
+  const narrow = narrowLayout.matches;
+  const minUncovered = narrow ? MIN_UNCOVERED_NARROW : MIN_UNCOVERED;
   for (const el of document.querySelectorAll<HTMLElement>(OVERLAYS)) {
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
@@ -939,7 +947,7 @@ function coveredEdges(container: HTMLElement): Edges {
       ["left", r.right - box.left, box.width],
       ["right", box.right - r.left, box.width],
     ];
-    const column = el.matches(".wb-panel, .legend");
+    const column = !narrow && el.matches(".wb-panel, .legend");
     let best: (typeof depths)[number] | null = null;
     for (const d of depths) {
       const vertical = d[0] === "top" || d[0] === "bottom";
@@ -950,8 +958,8 @@ function coveredEdges(container: HTMLElement): Edges {
     }
     if (best !== null) edges[best[0]] = Math.max(edges[best[0]], best[1]);
   }
-  if (box.width - edges.left - edges.right < MIN_UNCOVERED.width) edges.left = edges.right = 0;
-  if (box.height - edges.top - edges.bottom < MIN_UNCOVERED.height) edges.top = edges.bottom = 0;
+  if (box.width - edges.left - edges.right < minUncovered.width) edges.left = edges.right = 0;
+  if (box.height - edges.top - edges.bottom < minUncovered.height) edges.top = edges.bottom = 0;
   return edges;
 }
 

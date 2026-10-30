@@ -839,10 +839,3 @@
   margin: 0 0 2px;
   font: 600 14px/1.3 var(--sans);
 }
-
-/* On narrow screens the panel would cover the map: keep it to the lower half. */
-@media (max-width: 640px) {
-  .wb-panel {
-    top: 50vh;
-  }
-}

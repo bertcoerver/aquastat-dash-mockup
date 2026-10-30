@@ -15,11 +15,15 @@
  *
  * The pinned box glides to its new width, and its content fades in when it gets some;
  * not with less motion asked for (legend.css too).
+ *
+ * On a phone (lib/dom.ts's narrowLayout) there's no room by the date range: the tooltip
+ * follows the pointer, with no box, zone or key, whatever was chosen; the choice keeps
+ * for a wider screen.
  */
 
 import { PIN } from "../country/charts";
 import { esc } from "../lib/html";
-import { reduceMotion } from "../lib/dom";
+import { narrowLayout, reduceMotion } from "../lib/dom";
 
 export interface MapTipRow {
   /** Its colour there, as CSS (a colour or a gradient); null: drawn without one (no swatch). */
@@ -59,6 +63,8 @@ try {
 } catch {
   // (No storage: pinned, as at first.)
 }
+/** Pinned as chosen, and with room for it (not on a phone). */
+const isDocked = () => docked && !narrowLayout.matches;
 /** The pinned box, and the view's tooltip it shows (null: none). */
 let dock: { box: HTMLElement; body: HTMLElement; zone: HTMLElement; pane: HTMLElement } | null = null;
 let owner: HTMLElement | null = null;
@@ -85,10 +91,10 @@ const FOLLOW_KEY = `<span class="mt-key" title="Press P to pin the tooltip">${KE
  */
 export function showMapTip(el: HTMLElement, tip: MapTip | null) {
   const has = !!tip?.rows.length;
-  if (!dock || !docked) {
+  if (!dock || !isDocked()) {
     if (has) {
       el.classList.add("map-tip");
-      el.innerHTML = html(tip) + (dock ? FOLLOW_KEY : "");
+      el.innerHTML = html(tip) + (dock && !narrowLayout.matches ? FOLLOW_KEY : "");
     }
     el.hidden = !has;
     following = has ? { el, tip: tip } : following?.el === el ? null : following;
@@ -177,8 +183,8 @@ const QUIET_AFTER = 1000;
 const NEAR = 80;
 let quietTimer = 0;
 
-/** The dashed outline shown: the empty pinned box, or the zone (null: neither). */
-const outline = () => (!dock ? null : docked ? (dockFull ? null : dock.box) : dock.zone);
+/** The dashed outline shown: the empty pinned box, or the zone (null: neither; nor on a phone). */
+const outline = () => (!dock || narrowLayout.matches ? null : isDocked() ? (dockFull ? null : dock.box) : dock.zone);
 /** Where the outline is, measured once per placing (the pointer's distance to it is checked at every move). */
 let outlineRect: { el: HTMLElement; r: DOMRect } | null = null;
 
@@ -201,15 +207,16 @@ function setDocked(on: boolean, last = false) {
     // (Not kept, then.)
   }
   if (!dock) return;
-  dock.box.hidden = !on;
-  dock.zone.hidden = on;
+  const pinned = isDocked();
+  dock.box.hidden = !pinned;
+  dock.zone.hidden = pinned || narrowLayout.matches;
   if (owner) owner.hidden = true;
   clearMapTip();
   placeDock();
   // Pinned: what the tooltip showed, in the box (released, it shows again once the pointer moves).
   const shown = last ? lastFollowing : following && !following.el.hidden ? following : null;
   following = lastFollowing = null;
-  if (on && shown) showMapTip(shown.el, shown.tip);
+  if (pinned && shown) showMapTip(shown.el, shown.tip);
   wake();
 }
 
@@ -235,7 +242,7 @@ export function initMapTips(pane: HTMLElement) {
   box.addEventListener("pointerenter", () => (overDock = true));
   box.addEventListener("pointerleave", () => (overDock = false));
   document.addEventListener("pointermove", (e) => {
-    if (docked) armed = false;
+    if (isDocked()) armed = false;
     else if (!zone.contains(e.target as Node)) armed = true;
   });
   document.body.append(box, zone);
@@ -266,5 +273,7 @@ export function initMapTips(pane: HTMLElement) {
   new ResizeObserver(placeDock).observe(pane);
   // (Hidden or back: toolbar.ts setTimeless.)
   new MutationObserver(placeDock).observe(pane, { attributes: true, attributeFilter: ["class"] });
+  // (To or from a phone's width: the box and zone as that layout has them, the choice kept.)
+  narrowLayout.addEventListener("change", () => setDocked(docked));
   setDocked(docked);
 }
