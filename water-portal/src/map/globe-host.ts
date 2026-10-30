@@ -108,8 +108,9 @@ export function createGlobeHost({ container, theme, camera, onClick, onHover, on
     flyTo({ center, zoom, offset, duration }) {
       map.flyTo({ center, zoom, offset, duration });
     },
-    easeTo({ center, zoom, pitch, bearing, offset, duration }) {
-      map.easeTo({ center, zoom, pitch, bearing, offset, duration });
+    easeTo(options) {
+      // (Only what's given: MapLibre takes an `offset: undefined` for a point.)
+      map.easeTo(Object.fromEntries(Object.entries(options).filter(([, v]) => v !== undefined)));
     },
     holdStill(hold) {
       if (hold) map.dragPan.disable();

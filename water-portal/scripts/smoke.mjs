@@ -131,23 +131,28 @@ try {
     if (await page.locator("#bs-cards [data-driver]").count()) await hoverCard("#bs-cards [data-driver]");
   });
   await step("flat map: Robinson, a morph to Equal Earth, back to the globe", async () => {
+    // (The Layers menu's dropdown, set as a script sets it: the flat map's first frames
+    // take the software renderer long enough for a click to time out.)
     const pick = async (value) => {
-      await page.click("#layers-button");
-      await page.selectOption("#projection-select", value);
-      await page.keyboard.press("Escape");
+      await page.evaluate((v) => {
+        const select = document.getElementById("projection-select");
+        select.value = v;
+        select.dispatchEvent(new Event("change"));
+      }, value);
     };
     await pick("robinson");
-    await page.waitForFunction(() => !!document.querySelector(".map-flat canvas"), null, { timeout: 10000 });
-    await page.waitForTimeout(3000);
+    await page.waitForFunction(() => !!document.querySelector(".map-flat canvas"), null, { timeout: 60000 });
+    await page.waitForTimeout(5000);
     await pick("equalEarth");
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(3000);
     await page.mouse.move(640, 430);
     await page.mouse.wheel(0, -300);
-    await page.waitForTimeout(1500);
-    if (!/projection=equalEarth/.test(await page.evaluate(() => window.location.hash))) throw new Error("the projection isn't in the URL");
+    await page.waitForTimeout(3000);
+    const hash = await page.evaluate(() => window.location.hash);
+    if (!/projection=equalEarth/.test(hash) || !/map=/.test(hash)) throw new Error(`the projection or the place isn't in the URL (${hash})`);
     await pick("globe");
-    await page.waitForFunction(() => !!document.querySelector(".map-globe canvas") && !document.querySelector(".map-flat"), null, { timeout: 10000 });
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(() => !!document.querySelector(".map-globe canvas") && !document.querySelector(".map-flat"), null, { timeout: 60000 });
+    await page.waitForTimeout(3000);
   });
   await step("hover the globe", async () => {
     for (let i = 0; i < 8; i++) {

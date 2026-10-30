@@ -339,6 +339,8 @@ export function createMap(container: HTMLElement, { dark, projection = "globe", 
     animate();
     render();
     showFeatureLabel();
+    // (The URL has the place from the start, and across a switch.)
+    writeMapHash(next.camera());
   }
 
   /** Switch the host (the globe ↔ a flat map): the new one takes over once it has drawn. */
