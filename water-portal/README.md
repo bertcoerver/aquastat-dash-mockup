@@ -173,7 +173,7 @@ water-portal/
     │   ├── shape-style.ts  How circles and bars look: a menu on their key (colours, full size)
     │   ├── foldable.ts     Graph panes fold to their heading (and pinned chart) off hover
     │   ├── load-bar.ts     Load bar under the graph pane's heading while anything loads
-    │   ├── corner-warning.ts The bottom-left corner's warnings, one above the other
+    │   ├── corner-warning.ts The bottom-left corner's warnings, one above the other; their ⚠ copies a report
     │   ├── crash-warning.ts Warning there for an error nothing else reports, and the map's graphics context lost
     │   ├── slow-server.ts  Warning there when the connection to Google Cloud is slow
     │   └── cors-check.ts   Warning there when a server's data is blocked by the browser (no CORS headers)

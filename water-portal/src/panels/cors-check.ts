@@ -34,15 +34,15 @@ export function initCorsCheck() {
   const probing = new Set<string>();
 
   function show() {
-    warning.hidden = !blocked.size;
-    if (!blocked.size) return;
+    if (!blocked.size) return warning.hide();
     const names = [...blocked.values()];
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
-    warning.textContent = `⚠ Can't read ${list}: blocked by its server (CORS)`;
-    warning.title =
+    warning.show(
+      `Can't read ${list}: blocked by its server (CORS)`,
       `The browser won't let this page read data from ${[...blocked.keys()].join(", ")}: the server doesn't ` +
-      `allow other websites to read it (it sends no CORS headers). The data is there, but the maps made from it ` +
-      `stay empty until the server allows it.`;
+        `allow other websites to read it (it sends no CORS headers). The data is there, but the maps made from it ` +
+        `stay empty until the server allows it.`,
+    );
   }
 
   async function probe(url: URL) {

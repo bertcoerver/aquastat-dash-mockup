@@ -42,7 +42,7 @@
 
 /* The warnings (corner-warning.ts: a slow connection, a server blocked by CORS, an error
    nothing else reports): bottom left, over the graph pane, one above the other; details
-   on hover. */
+   on hover; the ⚠ copies them. */
 .corner-warnings {
   position: fixed;
   left: 12px;
@@ -54,16 +54,20 @@
   gap: 6px;
 }
 .corner-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   padding: 4px 8px;
   border: 1px solid var(--snap);
   border-radius: 4px;
   background: var(--snap-soft);
   color: var(--snap);
   font: 500 12px/1.3 var(--sans);
+}
+.corner-warning span {
   cursor: help;
 }
 .corner-warning button {
-  margin-left: 4px;
   padding: 1px 6px;
   border: 1px solid currentColor;
   border-radius: 3px;
@@ -71,6 +75,15 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
+}
+.corner-warning .copy {
+  padding: 0 2px;
+  border: 0;
+  border-radius: 3px;
+}
+.corner-warning .copy:hover,
+.corner-warning .copy:focus-visible {
+  background: color-mix(in srgb, var(--snap) 18%, transparent);
 }
 
 /* Layers button and menu: among the map's controls (main.ts puts it there). */

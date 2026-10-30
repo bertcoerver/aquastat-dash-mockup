@@ -195,9 +195,7 @@ const [countries, basins, subBasins, countryInfo] = await Promise.all([
   loadData<CountryInfo>("country-info"),
 ]).catch((err: Error) => {
   // (Without them there's no top bar or panel: say so, rather than leave a bare globe.)
-  const warning = cornerWarning();
-  warning.textContent = `⚠ The page's data couldn't be loaded (${err.message}). Reload to try again.`;
-  warning.hidden = false;
+  cornerWarning().show(`The page's data couldn't be loaded (${err.message}). Reload to try again.`, err.stack ?? "");
   throw err;
 });
 boxes = {

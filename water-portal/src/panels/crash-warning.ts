@@ -13,30 +13,32 @@ export function initCrashWarning(map: maplibregl.Map) {
   function warn(text: string, details: string, reload = false) {
     if (shown.has(text)) return;
     shown.add(text);
-    const warning = cornerWarning();
-    warning.textContent = `⚠ ${text}`;
-    warning.title = details;
+    let button: HTMLButtonElement | undefined;
     if (reload) {
-      const button = document.createElement("button");
+      button = document.createElement("button");
       button.type = "button";
       button.textContent = "Reload";
       button.addEventListener("click", () => window.location.reload());
-      warning.append(" ", button);
     }
-    warning.hidden = false;
+    cornerWarning().show(text, details, button);
   }
   const text = (reason: unknown) => (reason instanceof Error ? reason.message : String(reason));
-  const stack = (reason: unknown) => (reason instanceof Error ? (reason.stack ?? "") : "");
+  /** All an error tells: its name and message, where it was thrown, its stack (which starts with the name and message in some browsers). */
+  function about(reason: unknown, where = "") {
+    const head = reason instanceof Error ? `${reason.name}: ${reason.message}` : `Reason: ${String(reason)}`;
+    const stack = reason instanceof Error ? (reason.stack ?? "") : "";
+    return [stack.startsWith(head) ? "" : head, where, stack].filter(Boolean).join("\n");
+  }
 
   window.addEventListener("error", (e) => {
     // (Chrome reports a layout that settled late as an error; nothing is wrong.)
     if (e.message.startsWith("ResizeObserver loop")) return;
-    warn(`Something went wrong: ${e.message}`, stack(e.error));
+    warn(`Something went wrong: ${e.message}`, about(e.error ?? e.message, e.filename ? `at ${e.filename}:${e.lineno}:${e.colno}` : ""));
   });
   window.addEventListener("unhandledrejection", (e) => {
     // (A request cut short on purpose, as the view moved on.)
     if (e.reason instanceof Error && e.reason.name === "AbortError") return;
-    warn(`Something went wrong: ${text(e.reason)}`, stack(e.reason));
+    warn(`Something went wrong: ${text(e.reason)}`, about(e.reason));
   });
-  map.on("webglcontextlost", () => warn("The map stopped drawing: its graphics context was lost.", "", true));
+  map.on("webglcontextlost", () => warn("The map stopped drawing: its graphics context was lost.", "The browser took the map's WebGL context away (too many contexts, a driver fault, or memory). Reloading the page gets a new one.", true));
 }

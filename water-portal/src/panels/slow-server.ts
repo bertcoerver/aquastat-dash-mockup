@@ -48,17 +48,17 @@ export function initSlowServerCheck() {
     checking = false;
     if (ms === null) return; // offline, or the probe went away: say nothing
     const slow = ms > SLOW_MS;
-    warning.hidden = !slow;
     clearTimeout(recheck);
-    if (!slow) return;
+    if (!slow) return warning.hide();
     recheck = window.setTimeout(() => void check(), WHILE_SHOWN_MS);
     const s = (ms / 1000).toFixed(1);
-    warning.textContent = `⚠ Slow connection to Google Cloud (${s} s)`;
-    warning.title =
+    warning.show(
+      `Slow connection to Google Cloud (${s} s)`,
       `The WaPOR maps and time series come from Google Cloud Storage. From here, each request to it takes ${s} s ` +
-      `(usually ~0.1 s), so they load slowly. The data and its servers are fine: most likely your DNS sends you ` +
-      `to Google's servers on another continent (a DNS filter or VPN can do this). Reloading may help for a while; ` +
-      `other DNS settings fix it.`;
+        `(usually ~0.1 s), so they load slowly. The data and its servers are fine: most likely your DNS sends you ` +
+        `to Google's servers on another continent (a DNS filter or VPN can do this). Reloading may help for a while; ` +
+        `other DNS settings fix it.\nProbe: ${READS} reads of 1 KiB from ${PROBE_URL}, median ${Math.round(ms)} ms.`,
+    );
   }
 
   void check();
