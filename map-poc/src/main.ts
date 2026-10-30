@@ -5,10 +5,10 @@
 import { Deck, type Color, type Layer, type MapViewState, type PickingInfo } from "@deck.gl/core";
 import * as L from "./layers";
 import { ProjectedView } from "./projected-view";
-import { viewportClass, type Blend } from "./projected-viewport";
+import { globeWeight, isProjectedViewport, viewportClass, type Blend } from "./projected-viewport";
 import { PROJECTIONS, projectionById, type ProjectionId } from "./projections";
 import { loadRaster } from "./raster";
-import { ReprojectExtension, setReprojection } from "./reproject-extension";
+import { ReprojectExtension, setReprojection, setReprojectionCenter } from "./reproject-extension";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -28,6 +28,7 @@ const state = {
   colors: new Map<number, Color>(),
 };
 setReprojection(start);
+setReprojectionCenter(state.viewState.longitude, state.viewState.latitude);
 
 const extension = new ReprojectExtension();
 
@@ -42,7 +43,9 @@ const view = () =>
 /** Bottom to top; every layer drawn in the projection. */
 function layers(): Layer[] {
   const on = state.layers;
+  const globe = globeWeight(state.blend);
   const list: (Layer | null | false)[] = [
+    globe > 0 && L.globeDiscLayer([state.viewState.longitude, state.viewState.latitude], globe),
     L.oceanLayer(),
     L.polarCapLayer(),
     L.countriesLayer({ colors: on.choropleth ? state.colors : null, selected: state.selected, hovered: state.hovered }),
@@ -59,7 +62,11 @@ function layers(): Layer[] {
 }
 
 const pointer = $("pointer");
-const onMap = ([lon, lat]: number[]) => Math.abs(lon) <= 180 && Math.abs(lat) <= 90;
+/** Whether the pointer is on the map (its viewport knows: beyond a flat map's edges, off the globe). */
+const onMap = (info: PickingInfo) => {
+  const viewport = deck.getViewports()[0];
+  return isProjectedViewport(viewport) ? viewport.unprojectOnMap([info.x, info.y]) !== null : true;
+};
 
 function describe(info: PickingInfo): string {
   const object = info.object as { properties?: Record<string, unknown>; m49?: number; value?: number } | undefined;
@@ -83,6 +90,9 @@ const deck = new Deck({
   onViewStateChange: ({ viewState }) => {
     const v = viewState as MapViewState;
     state.viewState = { ...state.viewState, ...v };
+    setReprojectionCenter(v.longitude, v.latitude);
+    // (The globe's disc sits on the centre.)
+    if (globeWeight(state.blend) > 0) render();
     // The centre may leave the map a little, not run away.
     const longitude = Math.max(-200, Math.min(200, v.longitude));
     const latitude = Math.max(-100, Math.min(100, v.latitude));
@@ -98,7 +108,7 @@ const deck = new Deck({
     }
     const c = info.coordinate;
     pointer.textContent = c
-      ? `${onMap(c) ? "" : "off the map: "}${c[1].toFixed(2)}°, ${c[0].toFixed(2)}°\n${describe(info)}`
+      ? `${onMap(info) ? "" : "off the map: "}${c[1].toFixed(2)}°, ${c[0].toFixed(2)}°\n${describe(info)}`
       : "";
   },
   onClick: (info) => {
@@ -207,5 +217,13 @@ fetch("/data/country-info.json")
   })
   .catch(() => (status.textContent = "No country-info.json (run the portal's npm run country-info)."));
 
+/** A blend held still (for a look at the morph half way, from the console or a test). */
+function hold(from: ProjectionId, to: ProjectionId, t: number) {
+  morph++;
+  state.blend = { from: projectionById(from), to: projectionById(to), t };
+  setReprojection(state.blend.to, state.blend.from, t);
+  deck.setProps({ views: [view()], layers: layers() });
+}
+
 // (For poking at it from the console.)
-Object.assign(window, { poc: { deck, state, moveTo } });
+Object.assign(window, { poc: { deck, state, moveTo, switchTo, hold } });

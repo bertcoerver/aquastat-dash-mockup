@@ -9,7 +9,7 @@
  * world is about 512 units wide at zoom 0, like deck.gl's Web Mercator world; zoom
  * levels then mean roughly the same as on the globe.
  */
-import { geoEqualEarthRaw, geoEquirectangularRaw, geoMercatorRaw, geoNaturalEarth1Raw, type GeoRawProjection } from "d3-geo";
+import { geoEqualEarthRaw, geoEquirectangularRaw, geoMercatorRaw, geoNaturalEarth1Raw, geoOrthographicRaw, type GeoRawProjection } from "d3-geo";
 import { geoMollweideRaw, geoRobinsonRaw, geoWinkel3Raw } from "d3-geo-projection";
 
 export const SCALE = 512 / (2 * Math.PI);
@@ -17,7 +17,7 @@ export const SCALE = 512 / (2 * Math.PI);
 /** Web Mercator cuts off at this latitude. */
 export const MAX_MERCATOR_LAT = 85.051129;
 
-export type ProjectionId = "robinson" | "equalEarth" | "naturalEarth" | "winkelTripel" | "mollweide" | "equirectangular" | "mercator";
+export type ProjectionId = "robinson" | "equalEarth" | "naturalEarth" | "winkelTripel" | "mollweide" | "equirectangular" | "mercator" | "orthographic";
 
 /** What the map is drawn as: MapLibre's globe, or flat in one of the projections. */
 export type MapProjection = "globe" | ProjectionId;
@@ -27,7 +27,13 @@ export interface Projection {
   name: string;
   /** What the shader's switch picks it by (0 is Web Mercator: deck.gl's own). */
   glslId: number;
+  /** For a centre at 0°, 0°: a `centred` projection is turned to the view's centre first (see centredRaw). */
   raw: GeoRawProjection;
+  /**
+   * The globe seen from above the view's centre (orthographic): the projection moves
+   * with the centre, and the far side is hidden (reproject-extension.ts fades it).
+   */
+  centred?: boolean;
   /** One line about it, for the picker. */
   description: string;
 }
@@ -48,7 +54,51 @@ export const PROJECTIONS: Projection[] = [
   { id: "mollweide", name: "Mollweide", glslId: 5, raw: geoMollweideRaw, description: "Equal-area; the poles are points, the map an ellipse." },
   { id: "equirectangular", name: "Equirectangular", glslId: 6, raw: geoEquirectangularRaw, description: "Plate carrée: the WaPOR and GAEZ rasters' own grid." },
   { id: "mercator", name: "Web Mercator", glslId: 0, raw: clampedMercator, description: "Web maps' usual projection, cut at ±85°; the poles are far away." },
+  { id: "orthographic", name: "Globe (orthographic)", glslId: 7, raw: geoOrthographicRaw, centred: true, description: "The globe seen from above the map's centre, sized as MapLibre's globe at the same zoom." },
 ];
+
+/**
+ * MapLibre's globe is sized so that the scale at the middle of the view matches Web
+ * Mercator's at that latitude: its radius is the Mercator world's over 2π, over the
+ * cosine of the centre's latitude. The orthographic view does the same, so a switch to
+ * MapLibre's globe at the same zoom is seamless.
+ */
+export const globeScale = (lat0: number) => 1 / Math.max(0.1, Math.cos((Math.max(-85, Math.min(85, lat0)) * Math.PI) / 180));
+
+/**
+ * A centred raw projection turned to a centre (λ0, φ0 in radians): the point is taken to
+ * its place on the sphere as seen with the centre in front, projected there, and back.
+ * `front` says which side of the sphere a point is on (the cosine of its angle from the
+ * centre: < 0 is the far side).
+ */
+export function centredRaw(raw: GeoRawProjection, lambda0: number, phi0: number, scale = 1): GeoRawProjection & { front(lambda: number, phi: number): number } {
+  const [cosPhi0, sinPhi0] = [Math.cos(phi0), Math.sin(phi0)];
+  /** The point's unit vector with the centre at (1, 0, 0): x towards the viewer, y east, z north. */
+  const turned = (lambda: number, phi: number): [number, number, number] => {
+    const cosPhi = Math.cos(phi);
+    const x = cosPhi * Math.cos(lambda - lambda0);
+    const y = cosPhi * Math.sin(lambda - lambda0);
+    const z = Math.sin(phi);
+    return [x * cosPhi0 + z * sinPhi0, y, -x * sinPhi0 + z * cosPhi0];
+  };
+  const forward = (lambda: number, phi: number): [number, number] => {
+    const [x, y, z] = turned(lambda, phi);
+    const p = raw(Math.atan2(y, x), Math.asin(Math.max(-1, Math.min(1, z))));
+    return [p[0] * scale, p[1] * scale];
+  };
+  // (Off the globe: not a number, as d3's inverses answer.)
+  const invert = (x: number, y: number): [number, number] => {
+    const p = raw.invert?.(x / scale, y / scale);
+    if (!p || !Number.isFinite(p[0]) || !Number.isFinite(p[1])) return [NaN, NaN];
+    const [lambda, phi] = p;
+    const cosPhi = Math.cos(phi);
+    const [tx, ty, tz] = [cosPhi * Math.cos(lambda), cosPhi * Math.sin(lambda), Math.sin(phi)];
+    const ux = tx * cosPhi0 - tz * sinPhi0;
+    const uz = tx * sinPhi0 + tz * cosPhi0;
+    return [lambda0 + Math.atan2(ty, ux), Math.asin(Math.max(-1, Math.min(1, uz)))];
+  };
+  return Object.assign(forward, { invert, front: (lambda: number, phi: number) => turned(lambda, phi)[0] });
+}
 
 export const isProjectionId = (id: string): id is ProjectionId => PROJECTIONS.some((p) => p.id === id);
 export const projectionById = (id: ProjectionId) => PROJECTIONS.find((p) => p.id === id)!;
@@ -131,6 +181,22 @@ vec2 rp_mollweide(float lambda, float phi) {
   return vec2(cx * lambda * cos(t), cy * sin(t));
 }
 
+// The globe from above the centre (reproject.center, radians; reproject.globeScale: MapLibre's
+// sizing): the point turned so the centre faces the viewer, then x east, y north. Its
+// x towards the viewer (rp_front) says which side it's on.
+vec3 rp_turned(vec2 lp, vec2 center) {
+  float cosPhi = cos(lp.y);
+  float x = cosPhi * cos(lp.x - center.x);
+  float y = cosPhi * sin(lp.x - center.x);
+  float z = sin(lp.y);
+  float cosPhi0 = cos(center.y);
+  float sinPhi0 = sin(center.y);
+  return vec3(x * cosPhi0 + z * sinPhi0, y, -x * sinPhi0 + z * cosPhi0);
+}
+vec2 rp_orthographic(vec2 lp, vec2 center, float scale) {
+  return rp_turned(lp, center).yz * scale;
+}
+
 vec2 rp_raw(int id, vec2 lp) {
   if (id == 1) return rp_robinson(lp.x, lp.y);
   if (id == 2) return rp_equalEarth(lp.x, lp.y);
@@ -138,6 +204,7 @@ vec2 rp_raw(int id, vec2 lp) {
   if (id == 4) return rp_winkelTripel(lp.x, lp.y);
   if (id == 5) return rp_mollweide(lp.x, lp.y);
   if (id == 6) return lp;
+  if (id == 7) return rp_orthographic(lp, reproject.center, reproject.globeScale);
   return rp_mercator(lp.x, lp.y);
 }
 `;

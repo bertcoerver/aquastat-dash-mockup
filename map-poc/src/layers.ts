@@ -7,6 +7,7 @@ import type { Color, Layer } from "@deck.gl/core";
 import { PathStyleExtension } from "@deck.gl/extensions";
 import { MVTLayer } from "@deck.gl/geo-layers";
 import { BitmapLayer, ColumnLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import { globeScale, SCALE } from "./projections";
 import type { Feature } from "geojson";
 import { BoxTileset } from "./box-tileset";
 
@@ -54,6 +55,27 @@ export function oceanLayer() {
     getFillColor: THEME.ocean,
     stroked: false,
     pickable: false,
+    parameters: FLAT,
+  });
+}
+
+/**
+ * The globe's disc, in the ocean colour, round the view's centre (the orthographic view's
+ * origin), as large as the globe: the world ring above covers only the near side, and
+ * its edge would show the subdivision. Faded in with the globe as the map morphs to it.
+ */
+export function globeDiscLayer(center: [number, number], opacity: number) {
+  return new ScatterplotLayer<[number, number]>({
+    id: "globe-disc",
+    data: [center],
+    getPosition: (d) => d,
+    getRadius: globeScale(center[1]) * SCALE,
+    radiusUnits: "common",
+    getFillColor: THEME.ocean,
+    opacity,
+    stroked: false,
+    pickable: false,
+    updateTriggers: { getRadius: center[1] },
     parameters: FLAT,
   });
 }
