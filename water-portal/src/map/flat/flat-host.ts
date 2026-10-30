@@ -4,14 +4,20 @@
  * two, the viewport blends the same two). deck.gl's MapController does the panning,
  * zooming, tilting and turning; the camera moves (fitBounds, flyTo, easeTo) are view
  * state transitions. Labels are HTML elements over the canvas, moved with the camera.
+ *
+ * One of the projections is the globe as MapLibre draws it ("orthographic", centred on
+ * the view): a switch to or from MapLibre's globe morphs to or from it, and cuts to the
+ * other host at the same camera (map.ts). While the globe shows, its disc is drawn under
+ * the layers (the far side fades out in the shader).
  */
 import { Deck, FlyToInterpolator, LinearInterpolator, type Layer, type MapViewState } from "@deck.gl/core";
 import type { LngLat } from "../places";
-import { easeOutQuad, type Camera, type HostMarker, type HostOptions, type MapHost, type MarkerOptions } from "../host";
+import { easeOutQuad, whenLoaded, type Camera, type HostMarker, type HostOptions, type MapHost, type MarkerOptions } from "../host";
 import { ProjectedView, holdStill } from "./projected-view";
-import { viewportClass, type Blend, type ProjectedViewportClass } from "./projected-viewport";
-import { projectionById, type ProjectionId } from "./projections";
-import { setReprojection } from "./reproject-extension";
+import { globeWeight, isProjectedViewport, viewportClass, type Blend, type ProjectedViewportClass } from "./projected-viewport";
+import { globeDistance, globeRaw, globeScale, projectionById, SCALE, type MapProjection, type ProjectionId } from "./projections";
+import { setReprojection, setReprojectionView } from "./reproject-extension";
+import { globeDiscLayer } from "./world-layers";
 
 /** How long the morph from one projection to another takes. */
 const MORPH_MS = 800;
@@ -25,16 +31,19 @@ const VIEW_ID = "map";
 const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 export interface FlatHostOptions extends HostOptions {
+  /** The projection to open in ("orthographic": the globe, to morph out of). */
   projection: ProjectionId;
 }
 
 export interface FlatHost extends MapHost {
   kind: "flat";
-  /** Morph to another projection. */
-  morphTo(projection: ProjectionId): void;
+  /** Morph to another projection (the globe's stand-in included); resolves when it's there. */
+  morphTo(projection: ProjectionId): Promise<void>;
+  /** The projection shown, or morphed to ("orthographic": the globe's stage, as the globe). */
+  shown(): MapProjection;
 }
 
-export function createFlatHost({ container, camera, projection, onClick, onHover, onPointerLeave, onMove, onMoveEnd, onContextLost, cursor }: FlatHostOptions): FlatHost {
+export function createFlatHost({ container, theme, camera, projection, onClick, onHover, onPointerLeave, onMove, onMoveEnd, onContextLost, cursor }: FlatHostOptions): FlatHost {
   const element = document.createElement("div");
   element.className = "map-host map-flat";
   const canvas = document.createElement("canvas");
@@ -57,6 +66,10 @@ export function createFlatHost({ container, camera, projection, onClick, onHover
     maxZoom: MAX_ZOOM,
     maxPitch: 60,
   };
+  /** The view as the shaders need it (the globe's stage is seen from above the centre, in perspective). */
+  const tellView = () => setReprojectionView([viewState.longitude, viewState.latitude], viewState.zoom, canvas.clientHeight || 1);
+  tellView();
+  const theView = () => ({ center: [viewState.longitude, viewState.latitude] as [number, number], zoom: viewState.zoom, height: canvas.clientHeight || 1 });
 
   const view = () =>
     new ProjectedView({
@@ -67,7 +80,15 @@ export function createFlatHost({ container, camera, projection, onClick, onHover
     });
 
   let layers: (Layer | null)[] = [];
-  let firstFrame: (() => void) | null = null;
+  /** The layers with the globe's disc under them while the globe shows. */
+  function drawn(): (Layer | null)[] {
+    const globe = globeWeight(blend);
+    if (globe <= 0) return layers;
+    const { center, zoom, height } = theView();
+    const rim = globeRaw(0, 0, globeScale(center[1]), globeDistance(height, zoom, center[1])).rim * SCALE;
+    return [globeDiscLayer(center, rim, theme.oceanColor, globe), ...layers];
+  }
+  let afterRender: (() => void) | null = null;
   let moving = false;
   const deck = new Deck({
     canvas,
@@ -77,13 +98,16 @@ export function createFlatHost({ container, camera, projection, onClick, onHover
     // change, and the props set during the gesture reset it). A move is set as a new
     // `initialViewState` (see moveTo).
     initialViewState: { [VIEW_ID]: viewState },
-    layers,
+    layers: [],
     useDevicePixels: true,
     onViewStateChange: ({ viewState: next }) => {
       viewState = { ...viewState, ...(next as MapViewState) };
       const longitude = Math.max(-MAX_OFF_MAP.lon, Math.min(MAX_OFF_MAP.lon, viewState.longitude));
       const latitude = Math.max(-MAX_OFF_MAP.lat, Math.min(MAX_OFF_MAP.lat, viewState.latitude));
       if (longitude !== viewState.longitude || latitude !== viewState.latitude) moveTo({ longitude, latitude });
+      tellView();
+      // (The globe's disc sits on the centre.)
+      if (globeWeight(blend) > 0) deck.setProps({ layers: drawn() });
       moving = true;
       placeLabels();
       onMove();
@@ -98,12 +122,7 @@ export function createFlatHost({ container, camera, projection, onClick, onHover
     onHover,
     onClick,
     getCursor: ({ isDragging }) => cursor() ?? (isDragging ? "grabbing" : "grab"),
-    onAfterRender: () => {
-      if (!firstFrame) return;
-      const callback = firstFrame;
-      firstFrame = null;
-      callback();
-    },
+    onAfterRender: () => afterRender?.(),
   });
   canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("webglcontextlost", onContextLost);
@@ -136,35 +155,43 @@ export function createFlatHost({ container, camera, projection, onClick, onHover
 
   /** The centre that puts lon/lat `center` at `offset` pixels from the middle of the view, at `zoom`. */
   function centerFor(center: LngLat, zoom: number, offset: [number, number]): [number, number] {
-    const [x, y] = Viewport.forward(center[0], center[1]);
+    const view = theView();
+    const [x, y] = Viewport.forward(center[0], center[1], view);
     const scale = 2 ** zoom;
-    return Viewport.invert(x - offset[0] / scale, y + offset[1] / scale);
+    return Viewport.invert(x - offset[0] / scale, y + offset[1] / scale, view);
   }
 
   // --- The morph ------------------------------------------------------------------------
 
   let morph = 0;
-  function morphTo(id: ProjectionId) {
+  function morphTo(id: ProjectionId): Promise<void> {
     const to = projectionById(id);
     const from = blend.to;
-    if (from === to) return;
-    const started = performance.now();
-    const run = ++morph;
-    const frame = () => {
-      if (run !== morph) return;
-      const t = Math.min(1, (performance.now() - started) / MORPH_MS);
-      const e = easeInOut(t);
-      blend = { from, to, t: e };
-      Viewport = viewportClass(blend);
-      setReprojection(to, from, e);
-      // (A new view redraws the layers, whose shaders read the blend: the layers stay.)
-      deck.setProps({ views: [view()] });
-      placeLabels();
-      onMove();
-      if (t < 1) requestAnimationFrame(frame);
-      else onMoveEnd();
-    };
-    frame();
+    if (from === to) return Promise.resolve();
+    return new Promise((resolve) => {
+      const started = performance.now();
+      const run = ++morph;
+      const globe = from.centred || to.centred;
+      const frame = () => {
+        if (run !== morph) return;
+        const t = Math.min(1, (performance.now() - started) / MORPH_MS);
+        const e = easeInOut(t);
+        blend = { from, to, t: e };
+        Viewport = viewportClass(blend);
+        setReprojection(to, from, e);
+        // (A new view redraws the layers, whose shaders read the blend: the layers stay,
+        // unless the globe's disc fades in or out under them.)
+        deck.setProps({ views: [view()], ...(globe ? { layers: drawn() } : {}) });
+        placeLabels();
+        onMove();
+        if (t < 1) requestAnimationFrame(frame);
+        else {
+          onMoveEnd();
+          resolve();
+        }
+      };
+      frame();
+    });
   }
 
   // --- Labels: HTML elements over the canvas, placed again on every move. ---------------------
@@ -198,12 +225,12 @@ export function createFlatHost({ container, camera, projection, onClick, onHover
       return [x, y];
     },
     unproject(pixel) {
-      const [lon, lat] = viewport().unproject(pixel);
-      return Math.abs(lon) <= 180 && Math.abs(lat) <= 90 ? [lon, lat] : null;
+      const vp = viewport();
+      return isProjectedViewport(vp) ? vp.unprojectOnMap(pixel) : null;
     },
     setLayers(next) {
       layers = next;
-      deck.setProps({ layers });
+      deck.setProps({ layers: drawn() });
     },
     pickObject: (opts) => deck.pickObject(opts),
     animate(on) {
@@ -278,10 +305,18 @@ export function createFlatHost({ container, camera, projection, onClick, onHover
       };
     },
     controls: [],
-    onFirstFrame(callback) {
-      firstFrame = callback;
+    onReady(callback) {
+      whenLoaded(
+        () => deck,
+        (check) => (afterRender = check),
+        () => {
+          afterRender = null;
+          callback();
+        },
+      );
     },
     morphTo,
+    shown: () => (blend.to.centred ? "globe" : blend.to.id),
     destroy() {
       morph++;
       holdStill(false);

@@ -8,7 +8,7 @@ import { ProjectedView } from "./projected-view";
 import { globeWeight, isProjectedViewport, viewportClass, type Blend } from "./projected-viewport";
 import { PROJECTIONS, projectionById, type ProjectionId } from "./projections";
 import { loadRaster } from "./raster";
-import { ReprojectExtension, setReprojection, setReprojectionCenter } from "./reproject-extension";
+import { ReprojectExtension, setReprojection, setReprojectionView } from "./reproject-extension";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -28,7 +28,9 @@ const state = {
   colors: new Map<number, Color>(),
 };
 setReprojection(start);
-setReprojectionCenter(state.viewState.longitude, state.viewState.latitude);
+/** The view as the shaders need it (the globe is seen from above the centre, in perspective). */
+const tellView = () => setReprojectionView([state.viewState.longitude, state.viewState.latitude], state.viewState.zoom, $<HTMLCanvasElement>("map").clientHeight || 1);
+tellView();
 
 const extension = new ReprojectExtension();
 
@@ -45,7 +47,7 @@ function layers(): Layer[] {
   const on = state.layers;
   const globe = globeWeight(state.blend);
   const list: (Layer | null | false)[] = [
-    globe > 0 && L.globeDiscLayer([state.viewState.longitude, state.viewState.latitude], globe),
+    globe > 0 && L.globeDiscLayer([state.viewState.longitude, state.viewState.latitude], state.viewState.zoom, $<HTMLCanvasElement>("map").clientHeight || 1, globe),
     L.oceanLayer(),
     L.polarCapLayer(),
     L.countriesLayer({ colors: on.choropleth ? state.colors : null, selected: state.selected, hovered: state.hovered }),
@@ -90,7 +92,7 @@ const deck = new Deck({
   onViewStateChange: ({ viewState }) => {
     const v = viewState as MapViewState;
     state.viewState = { ...state.viewState, ...v };
-    setReprojectionCenter(v.longitude, v.latitude);
+    tellView();
     // (The globe's disc sits on the centre.)
     if (globeWeight(state.blend) > 0) render();
     // The centre may leave the map a little, not run away.

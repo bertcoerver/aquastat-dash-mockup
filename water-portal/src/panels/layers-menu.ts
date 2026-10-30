@@ -11,7 +11,7 @@
  * The outlines of countries, basins and sub-basins: the view's own (FIXED) stay on and
  * can't be switched; the others start as they were drawn before there were switches.
  */
-import { PROJECTIONS, type MapProjection } from "../map/flat/projections";
+import { FLAT_PROJECTIONS, type MapProjection } from "../map/flat/projections";
 import type { ToggleableLayer } from "../map/map";
 import type { View } from "../toolbar/range-rules";
 
@@ -49,7 +49,7 @@ export function initLayersMenu(onToggle: (layer: ToggleableLayer, visible: boole
     o.title = title;
     return o;
   };
-  projection.append(option("globe", "Globe", "The Earth as it is: no distortion, one side at a time."), ...PROJECTIONS.map((p) => option(p.id, p.name, p.description)));
+  projection.append(option("globe", "Globe", "The Earth as it is: no distortion, one side at a time."), ...FLAT_PROJECTIONS.map((p) => option(p.id, p.name, p.description)));
   projection.addEventListener("change", () => onProjection(projection.value as MapProjection));
 
   function setOpen(open: boolean) {

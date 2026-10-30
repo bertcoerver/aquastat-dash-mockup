@@ -4,10 +4,11 @@
  * MapLibre only paints the ocean, and all data are deck.gl layers. MapLibre's own
  * controls aren't used (map.ts's work for both hosts); its spin button is this host's.
  */
+import type { Deck } from "@deck.gl/core";
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { controlGroup, facing, type Camera, type HostMarker, type HostOptions, type MapHost, type MarkerOptions } from "./host";
+import { controlGroup, facing, whenLoaded, type Camera, type HostMarker, type HostOptions, type MapHost, type MarkerOptions } from "./host";
 import type { LngLat } from "./places";
 import { spinControl } from "./spin";
 
@@ -136,12 +137,20 @@ export function createGlobeHost({ container, theme, camera, onClick, onHover, on
       };
     },
     controls: [controlGroup(spin.element)],
-    onFirstFrame(callback) {
-      const once = () => {
-        map.off("render", once);
-        callback();
-      };
-      map.on("render", once);
+    onReady(callback) {
+      // (The overlay's deck: not in its typings.)
+      const deck = () => (overlay as unknown as { _deck?: Deck })._deck ?? null;
+      let check: (() => void) | null = null;
+      const onRender = () => check?.();
+      map.on("render", onRender);
+      whenLoaded(
+        deck,
+        (c) => (check = c),
+        () => {
+          map.off("render", onRender);
+          callback();
+        },
+      );
     },
     destroy() {
       animating = false;

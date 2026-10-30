@@ -7,7 +7,7 @@ import type { Color, Layer } from "@deck.gl/core";
 import { PathStyleExtension } from "@deck.gl/extensions";
 import { MVTLayer } from "@deck.gl/geo-layers";
 import { BitmapLayer, ColumnLayer, PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
-import { globeScale, SCALE } from "./projections";
+import { globeDistance, globeRaw, globeScale, SCALE } from "./projections";
 import type { Feature } from "geojson";
 import { BoxTileset } from "./box-tileset";
 
@@ -64,18 +64,19 @@ export function oceanLayer() {
  * origin), as large as the globe: the world ring above covers only the near side, and
  * its edge would show the subdivision. Faded in with the globe as the map morphs to it.
  */
-export function globeDiscLayer(center: [number, number], opacity: number) {
+export function globeDiscLayer(center: [number, number], zoom: number, height: number, opacity: number) {
+  const radius = globeRaw(0, 0, globeScale(center[1]), globeDistance(height, zoom, center[1])).rim * SCALE;
   return new ScatterplotLayer<[number, number]>({
     id: "globe-disc",
     data: [center],
     getPosition: (d) => d,
-    getRadius: globeScale(center[1]) * SCALE,
+    getRadius: radius,
     radiusUnits: "common",
     getFillColor: THEME.ocean,
     opacity,
     stroked: false,
     pickable: false,
-    updateTriggers: { getRadius: center[1] },
+    updateTriggers: { getRadius: radius },
     parameters: FLAT,
   });
 }

@@ -9,9 +9,9 @@
  * projection puts it. Both agree on common space, so the camera's centre (projectFlat,
  * below) and the drawn geometry line up.
  *
- * The orthographic view (the globe from above the centre) is `centred`: it moves with
- * the view's centre, so each viewport instance projects for its own centre, and
- * panning turns the globe rather than sliding the map.
+ * The globe (from above the centre, as MapLibre draws it) is `centred`: it moves with
+ * the view's centre, so each viewport instance projects for its own centre (and zoom and
+ * height: its perspective), and panning turns the globe rather than sliding the map.
  *
  * `resolution` is set, as GlobeViewport sets it: MVTLayer then decodes tiles to lon/lat
  * (not tile-local coordinates), and polygons, paths and bitmaps are subdivided every
@@ -19,7 +19,7 @@
  */
 import { Viewport } from "@deck.gl/core";
 import { altitudeToFovy, getProjectionParameters, getViewMatrix, pixelsToWorld } from "@math.gl/web-mercator";
-import { centredRaw, globeScale, SCALE, type Projection } from "./projections";
+import { globeDistance, globeRaw, globeScale, SCALE, type GlobeRaw, type Projection } from "./projections";
 
 /** Degrees between the vertices deck.gl adds along long edges (GlobeViewport's: the globe bends lines more than any flat projection). */
 export const RESOLUTION = 10;
@@ -72,9 +72,9 @@ interface Fns {
   pan(viewport: Viewport, center: number[], coords: number[], pixel: number[]): { longitude: number; latitude: number };
 }
 
-function makeFns({ from, to, t }: Blend, lon0: number, lat0: number): Fns {
+function makeFns({ from, to, t }: Blend, lon0: number, lat0: number, zoom: number, height: number): Fns {
   const [lambda0, phi0] = [lon0 * RAD, lat0 * RAD];
-  const side = (p: Projection) => (p.centred ? centredRaw(p.raw, lambda0, phi0, globeScale(lat0)) : p.raw);
+  const side = (p: Projection) => (p.centred ? globeRaw(lambda0, phi0, globeScale(lat0), globeDistance(height, zoom, lat0)) : p.raw);
   const [a, b] = [side(from), side(to)];
 
   /** d3's units, radians in. */
@@ -98,7 +98,8 @@ function makeFns({ from, to, t }: Blend, lon0: number, lat0: number): Fns {
   // --- The globe (orthographic): a disc round the centre. ------------------------------
 
   function globeFns(): Fns {
-    const radius = globeScale(lat0) * SCALE;
+    const globe = inverter as GlobeRaw;
+    const radius = globe.rim * SCALE;
     const forward = (lon: number, lat: number): [number, number] => {
       const [x, y] = rawForward(lon * RAD, Math.max(-90, Math.min(90, lat)) * RAD);
       return [x * SCALE, y * SCALE];
@@ -133,12 +134,16 @@ function makeFns({ from, to, t }: Blend, lon0: number, lat0: number): Fns {
           }
         }
         if (west > east) return [0, 0, 0, 0];
-        const front = (inverter as ReturnType<typeof centredRaw>).front;
-        if (front(0, Math.PI / 2) > 0 && viewport.project([lon0, 90]).every(Number.isFinite)) [west, east, north] = [lon0 - 180, lon0 + 180, 90];
-        if (front(0, -Math.PI / 2) > 0) [west, east, south] = [lon0 - 180, lon0 + 180, -90];
+        const inView = (lat: number) => {
+          if (globe.front(0, lat * RAD) <= 0) return false;
+          const [x, y] = viewport.project([lon0, lat]);
+          return x >= 0 && x <= width && y >= 0 && y <= height;
+        };
+        if (inView(90)) [west, east, north] = [lon0 - 180, lon0 + 180, 90];
+        if (inView(-90)) [west, east, south] = [lon0 - 180, lon0 + 180, -90];
         return [Math.max(-180, west), Math.max(-MAX_TILE_LAT, south), Math.min(180, east), Math.min(MAX_TILE_LAT, north)];
       },
-      pan(viewport, center, coords, pixel) {
+      pan(viewport, _center, coords, pixel) {
         // Turn the globe so the point comes under the pointer: by the difference in
         // lon/lat between the point and what's under the pointer now (deck.gl's
         // GlobeViewport does the same; exact at the centre, near enough elsewhere).
@@ -248,13 +253,14 @@ function makeFns({ from, to, t }: Blend, lon0: number, lat0: number): Fns {
 export function viewportClass(blend: Blend) {
   // (The base constructor asks for the centre's projection before the instance can hold its functions.)
   let making: Fns | null = null;
-  const forCentre = (center: [number, number] = [0, 0]) => makeFns(blend, center[0], center[1]);
+  const fallback = () => forCentre();
+  const forCentre = (center: [number, number] = [0, 0], zoom = 0, height = 1) => makeFns(blend, center[0], center[1], zoom, height);
 
   class ProjectedViewport extends Viewport {
     static displayName = "ProjectedViewport";
     /** Degrees → common space, and back (as projectFlat / unprojectFlat, without a viewport). */
-    static forward = (lon: number, lat: number, center?: [number, number]) => forCentre(center).forward(lon, lat);
-    static invert = (x: number, y: number, center?: [number, number]) => forCentre(center).invert(x, y);
+    static forward = (lon: number, lat: number, view?: { center: [number, number]; zoom: number; height: number }) => forCentre(view?.center, view?.zoom, view?.height).forward(lon, lat);
+    static invert = (x: number, y: number, view?: { center: [number, number]; zoom: number; height: number }) => forCentre(view?.center, view?.zoom, view?.height).invert(x, y);
 
     /** Marks it among deck.gl's viewports (see isProjectedViewport). */
     readonly projected = true;
@@ -267,10 +273,10 @@ export function viewportClass(blend: Blend) {
 
     constructor(opts: ProjectedViewportOptions = {}) {
       const { latitude = 0, longitude = 0, zoom = 0, pitch = 0, bearing = 0, altitude = 1.5 } = opts;
-      const fns = makeFns(blend, longitude, latitude);
-      making = fns;
       const width = opts.width || 1;
       const height = opts.height || 1;
+      const fns = makeFns(blend, longitude, latitude, zoom, height);
+      making = fns;
       const scale = 2 ** zoom;
       const fovy = altitudeToFovy(altitude);
       const projectionParameters = getProjectionParameters({ width, height, scale, pitch, fovy, nearZMultiplier: 0.1, farZMultiplier: 1.01 });
@@ -293,11 +299,11 @@ export function viewportClass(blend: Blend) {
     }
 
     projectFlat(xyz: number[]): [number, number] {
-      return (this.fns ?? making)!.forward(xyz[0], xyz[1]);
+      return (this.fns ?? making ?? fallback()).forward(xyz[0], xyz[1]);
     }
 
     unprojectFlat(xyz: number[]): [number, number] {
-      return (this.fns ?? making)!.invert(xyz[0], xyz[1]);
+      return (this.fns ?? making ?? fallback()).invert(xyz[0], xyz[1]);
     }
 
     /** The point under a pixel if it's on the map (null off it: beyond a flat map's edges, off the globe). */

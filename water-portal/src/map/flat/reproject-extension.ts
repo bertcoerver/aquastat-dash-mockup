@@ -23,9 +23,16 @@
  */
 import { LayerExtension, type Layer } from "@deck.gl/core";
 import type { ShaderModule } from "@luma.gl/shadertools";
-import { PROJECTIONS_GLSL, type Projection } from "./projections";
+import { globeDistance, globeScale, PROJECTIONS_GLSL, type Projection } from "./projections";
 
-const current: { from: Projection | null; to: Projection | null; t: number } = { from: null, to: null, t: 1 };
+const current: { from: Projection | null; to: Projection | null; t: number; center: [number, number]; zoom: number; height: number } = {
+  from: null,
+  to: null,
+  t: 1,
+  center: [0, 0],
+  zoom: 0,
+  height: 1,
+};
 
 /** The projection to draw in (null: the globe, nothing moved); `t` < 1: a morph from `from`, `t` of the way. */
 export function setReprojection(to: Projection | null, from = to, t = 1) {
@@ -34,15 +41,31 @@ export function setReprojection(to: Projection | null, from = to, t = 1) {
   current.t = t;
 }
 
-export type ReprojectProps = { from: number; to: number; t: number; enabled: number };
+/** The view: its centre in degrees, zoom and height in pixels (the globe is seen from above the centre, in perspective). */
+export function setReprojectionView(center: [number, number], zoom: number, height: number) {
+  current.center = center;
+  current.zoom = zoom;
+  current.height = height;
+}
+
+export type ReprojectProps = { from: number; to: number; t: number; enabled: number; center: [number, number]; globeScale: number; globeDistance: number; globe: number };
 
 /** The module's uniforms as set now (for the layers with shaders of their own). */
-export const reprojectUniforms = (): ReprojectProps => ({
-  from: current.from?.glslId ?? 0,
-  to: current.to?.glslId ?? 0,
-  t: current.t,
-  enabled: current.to ? 1 : 0,
-});
+export const reprojectUniforms = (): ReprojectProps => {
+  const { from, to, t, center, zoom, height } = current;
+  const rad = Math.PI / 180;
+  return {
+    from: from?.glslId ?? 0,
+    to: to?.glslId ?? 0,
+    t,
+    enabled: to ? 1 : 0,
+    center: [center[0] * rad, center[1] * rad],
+    globeScale: globeScale(center[1]),
+    globeDistance: globeDistance(height, zoom, center[1]),
+    // How much of the blend is the globe: the far side fades by as much.
+    globe: (to?.centred ? t : 0) + (from?.centred ? 1 - t : 0),
+  };
+};
 
 export const reprojectModule: ShaderModule<ReprojectProps> = {
   name: "reproject",
@@ -52,6 +75,10 @@ layout(std140) uniform reprojectUniforms {
   int to;
   float t;
   int enabled;
+  vec2 center;
+  float globeScale;
+  float globeDistance;
+  float globe;
 } reproject;
 ${PROJECTIONS_GLSL}
 // Degrees → common space (deck.gl's Mercator world is 512 units wide at zoom 0).
@@ -88,15 +115,37 @@ vec4 rp_reprojected(vec4 pos, vec2 lnglat) {
 vec4 rp_project_to_clipspace(vec3 position) {
   return project_common_position_to_clipspace(rp_reprojected(vec4(project_position(position), 1.0), position.xy));
 }
+// How much of a point at \`lnglat\` shows: all of it on a flat map; on the globe, nothing
+// of the far side, and while the map morphs to or from the globe, the far side fades
+// as the map folds (so the fold doesn't show through).
+float rp_visibility(vec2 lnglat) {
+  if (reproject.globe <= 0.0) return 1.0;
+  // (Behind the rim: past what the camera sees, 1/distance towards it from the middle.)
+  float behind = max(0.0, 1.0 / reproject.globeDistance - rp_turned(radians(lnglat), reproject.center).x);
+  // (A soft fade while folding, a crisp rim once it's the globe.)
+  return 1.0 - smoothstep(0.0, mix(0.08, 0.002, reproject.globe), reproject.globe * behind);
+}
 `,
-  uniformTypes: { from: "i32", to: "i32", t: "f32", enabled: "i32" },
+  uniformTypes: { from: "i32", to: "i32", t: "f32", enabled: "i32", center: "vec2<f32>", globeScale: "f32", globeDistance: "f32", globe: "f32" },
 };
 
 const inject = {
+  "vs:#decl": /* glsl */ `
+out float rp_alpha;
+`,
   "vs:DECKGL_FILTER_GL_POSITION": /* glsl */ `
+  rp_alpha = 1.0;
   if (reproject.enabled != 0) {
     position = project_common_position_to_clipspace(rp_reprojected(geometry.position, geometry.worldPosition.xy));
+    rp_alpha = rp_visibility(geometry.worldPosition.xy);
   }
+`,
+  "fs:#decl": /* glsl */ `
+in float rp_alpha;
+`,
+  "fs:DECKGL_FILTER_COLOR": /* glsl */ `
+  if (rp_alpha < 0.01) discard;
+  color.a *= rp_alpha;
 `,
 };
 

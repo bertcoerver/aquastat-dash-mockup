@@ -1,9 +1,10 @@
 /*
  * The flat map's own layers: the world's outline in the ocean colour (MapLibre paints
- * the globe's ocean; here it's a polygon), and the last degrees of Antarctica, which
- * Web Mercator tiles don't reach.
+ * the globe's ocean; here it's a polygon), the last degrees of Antarctica, which Web
+ * Mercator tiles don't reach, and the globe's disc while the map morphs to or from the
+ * globe (flat-host.ts).
  */
-import { PolygonLayer } from "@deck.gl/layers";
+import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import type { Color } from "../theme";
 
 const range = (from: number, to: number, step: number) => Array.from({ length: Math.round((to - from) / step) + 1 }, (_, i) => from + i * step);
@@ -50,6 +51,28 @@ export function polarCapLayer(color: Color, visible: boolean) {
     getFillColor: color,
     stroked: false,
     pickable: false,
+    parameters: { depthCompare: "always" },
+  });
+}
+
+/**
+ * The globe's disc, in the ocean colour, round the view's centre (where the globe stage
+ * projects to the origin), as large as the globe's rim (`radius`, in common units): the
+ * world ring only covers the near side, and its edge would show the subdivision. Faded in
+ * with the globe as the map morphs to it (`opacity`).
+ */
+export function globeDiscLayer(center: [number, number], radius: number, color: Color, opacity: number) {
+  return new ScatterplotLayer<[number, number]>({
+    id: "flat-globe-disc",
+    data: [center],
+    getPosition: (d) => d,
+    getRadius: radius,
+    radiusUnits: "common",
+    getFillColor: color,
+    opacity,
+    stroked: false,
+    pickable: false,
+    updateTriggers: { getRadius: radius },
     parameters: { depthCompare: "always" },
   });
 }

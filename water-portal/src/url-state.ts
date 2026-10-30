@@ -11,7 +11,7 @@
  * way back through every click), and read once on load (main.ts).
  */
 import type { Driver } from "./panels/map-drivers";
-import { isProjectionId, type MapProjection } from "./map/flat/projections";
+import { isFlatProjectionId, type MapProjection } from "./map/flat/projections";
 import type { Camera } from "./map/host";
 import type { LngLat } from "./map/places";
 import { dayOf, ymd } from "./toolbar/dekads";
@@ -64,7 +64,7 @@ export function readUrlState(): UrlState {
   const view = p.get("view");
   if (view && VIEWS.includes(view as View)) out.view = view as View;
   const projection = p.get("projection");
-  if (projection && isProjectionId(projection)) out.projection = projection;
+  if (projection && isFlatProjectionId(projection)) out.projection = projection;
   out.country = int("country");
   out.region = int("region");
   out.basin = int("basin");

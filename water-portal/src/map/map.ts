@@ -343,17 +343,53 @@ export function createMap(container: HTMLElement, { dark, projection = "globe", 
     writeMapHash(next.camera());
   }
 
-  /** Switch the host (the globe ↔ a flat map): the new one takes over once it has drawn. */
+  /**
+   * Switch the host (the globe ↔ a flat map) through the flat map's globe stage, so the
+   * map is seen folding into the globe or out of it: to the globe, the flat map morphs
+   * to its globe stage, then MapLibre's globe takes over at the same camera once it has
+   * drawn; from the globe, the flat map opens as the globe stage, takes over once it has
+   * drawn, then morphs to the projection. Another request meanwhile waits its turn.
+   */
+  let switching: Promise<void> | null = null;
+  let wanted: MapProjection | null = null;
   function switchHost(projection: MapProjection) {
+    wanted = projection;
+    if (switching) return;
+    const run = async () => {
+      while (wanted !== null && wanted !== hostProjection()) {
+        const target = wanted;
+        wanted = null;
+        if (target === "globe") await toGlobe();
+        else if (host.kind === "flat") await (host as FlatHost).morphTo(target);
+        else await fromGlobe(target);
+      }
+      switching = null;
+    };
+    switching = run();
+  }
+  /** What the host shows now (the flat map's globe stage counts as the globe). */
+  const hostProjection = (): MapProjection => (host.kind === "globe" ? "globe" : (host as FlatHost).shown());
+  /** The new host takes over once it has drawn (the one before stays in view meanwhile). */
+  function takeOver(next: MapHost) {
     const old = host;
-    const next = makeHost(projection, old.camera());
     next.element.classList.add("map-host-waiting");
     attach(next);
-    next.onFirstFrame(() => {
-      next.element.classList.remove("map-host-waiting");
-      for (const group of old.controls) group.remove();
-      old.destroy();
-    });
+    return new Promise<void>((resolve) =>
+      next.onReady(() => {
+        next.element.classList.remove("map-host-waiting");
+        for (const group of old.controls) group.remove();
+        old.destroy();
+        resolve();
+      }),
+    );
+  }
+  async function toGlobe() {
+    await (host as FlatHost).morphTo("orthographic");
+    await takeOver(makeHost("globe", host.camera()));
+  }
+  async function fromGlobe(target: MapProjection) {
+    await takeOver(makeHost("orthographic", host.camera()));
+    if (isProjectionId(target)) await (host as FlatHost).morphTo(target);
   }
 
   // The picked point's name (a dam's), beside its target: a label (deck.gl draws no text here).
@@ -817,10 +853,8 @@ export function createMap(container: HTMLElement, { dark, projection = "globe", 
     },
     setProjection(projection) {
       if (projection === state.projection) return;
-      const wasFlat = state.projection !== "globe";
       state.projection = projection;
-      if (wasFlat && isProjectionId(projection)) (host as FlatHost).morphTo(projection);
-      else switchHost(projection);
+      switchHost(projection);
       onProjection?.(projection);
     },
     getProjection: () => state.projection,

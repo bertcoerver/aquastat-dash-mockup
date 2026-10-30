@@ -80,8 +80,8 @@ export interface MapHost {
   marker(element: HTMLElement, options: MarkerOptions): HostMarker;
   /** Its own control groups for the map's controls (the globe's spin button). */
   readonly controls: HTMLElement[];
-  /** Runs once it has drawn its first frame. */
-  onFirstFrame(callback: () => void): void;
+  /** Runs once it has drawn, with the tiles in view loaded (or after a while: a slow one shouldn't hold a switch). */
+  onReady(callback: () => void): void;
   destroy(): void;
 }
 
@@ -106,4 +106,30 @@ export function controlGroup(...children: HTMLElement[]) {
   group.className = "maplibregl-ctrl maplibregl-ctrl-group";
   group.append(...children);
   return group;
+}
+
+/** How long at most a host's layers are waited for before it's shown (onReady). */
+export const READY_WAIT_MS = 3000;
+
+/**
+ * Calls back once `deck` has drawn and every layer reports its data loaded (the tiles
+ * in view), or after READY_WAIT_MS; `onFrame` is wired to the deck's after-render.
+ */
+export function whenLoaded(deck: () => object | null, onFrame: (check: () => void) => void, callback: () => void) {
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    callback();
+  };
+  const timer = window.setTimeout(finish, READY_WAIT_MS);
+  onFrame(() => {
+    if (done) return;
+    // (The layer manager is deck.gl's own; the layers' `isLoaded` says whether their data, the tiles, are in.)
+    const layers = (deck() as unknown as { layerManager: { getLayers(): Layer[] } | null } | null)?.layerManager?.getLayers() ?? null;
+    if (layers && layers.every((layer) => layer.isLoaded)) {
+      window.clearTimeout(timer);
+      finish();
+    }
+  });
 }

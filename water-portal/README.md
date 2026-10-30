@@ -225,8 +225,14 @@ water-portal/
   does, so deck.gl's layers draw unchanged (offsets in pixels, a circle's radius or a line's width, come
   along). The layers that project in shaders of their own (rain, vapour, haze, particles) include the
   same module. From one flat projection to another the map morphs (the shader mixes the two
-  formulas over 0.8 s); to or from the globe it switches hosts at the same place and zoom, the new
-  one taking over once it has drawn. The map's controls (zoom, compass, credits,
+  formulas over 0.8 s). To or from the globe it morphs too: one of the shader's projections is the
+  globe as MapLibre draws it (seen from above the view's centre, by a camera 1.5 times the view's
+  height above the surface, sized so the scale at the centre matches Web Mercator's: MapLibre's own
+  numbers), so the flat map folds into a globe, the far side fading out as it folds, and MapLibre's
+  globe then takes over at the same camera once it has drawn its tiles, a cut between two
+  near-identical frames (to within a pixel at the rim); from the globe, the flat map opens as that
+  globe stage, takes over once drawn, and unfolds into the chosen projection. While it's the globe
+  stage, dragging turns it and a disc in the ocean colour lies under the layers. The map's controls (zoom, compass, credits,
   [src/map/controls.ts](src/map/controls.ts)) are the portal's own, so they work on both; the spin
   button is the globe's. Labels (the graticule's longitudes, a dam's name) are HTML elements either
   host places. Zoomed in past zoom 12, deck.gl keeps positions relative to the view's centre and the
