@@ -17,8 +17,8 @@ import { Viewport } from "@deck.gl/core";
 import { altitudeToFovy, getProjectionParameters, getViewMatrix, pixelsToWorld } from "@math.gl/web-mercator";
 import { SCALE, type Projection } from "./projections";
 
-/** Degrees between the vertices deck.gl adds along long edges. */
-export const RESOLUTION = 4;
+/** Degrees between the vertices deck.gl adds along long edges (GlobeViewport's: the globe bends lines more than any flat projection). */
+export const RESOLUTION = 10;
 
 /** Web Mercator tiles stop at this latitude. */
 const MAX_TILE_LAT = 85.05;

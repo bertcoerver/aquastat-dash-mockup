@@ -140,9 +140,10 @@ try {
         select.dispatchEvent(new Event("change"));
       }, value);
     };
+    // (Its first frame, and the globe's again, take the software renderer tens of seconds.)
     await pick("robinson");
-    await page.waitForFunction(() => !!document.querySelector(".map-flat canvas"), null, { timeout: 60000 });
-    await page.waitForTimeout(5000);
+    await page.waitForFunction(() => !!document.querySelector(".map-flat:not(.map-host-waiting) canvas"), null, { timeout: 240000, polling: 500 });
+    await page.waitForTimeout(3000);
     await pick("equalEarth");
     await page.waitForTimeout(3000);
     await page.mouse.move(640, 430);
@@ -151,7 +152,7 @@ try {
     const hash = await page.evaluate(() => window.location.hash);
     if (!/projection=equalEarth/.test(hash) || !/map=/.test(hash)) throw new Error(`the projection or the place isn't in the URL (${hash})`);
     await pick("globe");
-    await page.waitForFunction(() => !!document.querySelector(".map-globe canvas") && !document.querySelector(".map-flat"), null, { timeout: 60000 });
+    await page.waitForFunction(() => !!document.querySelector(".map-globe canvas") && !document.querySelector(".map-flat"), null, { timeout: 240000, polling: 500 });
     await page.waitForTimeout(3000);
   });
   await step("hover the globe", async () => {
